@@ -1,6 +1,10 @@
 "use client";
+import dynamic from "next/dynamic";
 import { useBudgetContext } from "@/contexts/BudgetContext";
-import ExpenseTracker from "@/components/ExpenseTracker";
+
+const ExpenseTracker = dynamic(() => import("@/components/ExpenseTracker"), {
+  loading: () => <div className="animate-pulse h-64 rounded-2xl bg-white/5" />,
+});
 
 export default function ExpensesPage() {
   const { showToast, ...budget } = useBudgetContext();

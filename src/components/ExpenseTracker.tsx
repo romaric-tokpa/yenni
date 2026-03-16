@@ -1,9 +1,12 @@
 "use client";
-import { useState, useMemo, useCallback, useEffect } from "react";
-import { formatCFA, MONTHS_FULL } from "@/lib/constants";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { formatCFA, MONTHS_FULL, VIRTUAL_LIST_THRESHOLD } from "@/lib/constants";
 import { BudgetConfig, Expense, FixedChargePayment, Category, PlannedExpense } from "@/lib/types";
-import { Plus, Trash2, X, FileText, Check, Landmark, CalendarClock, Clock, CircleCheck, Pencil, CirclePlay, History, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Trash2, X, FileText, Check, Landmark, CalendarClock, Clock, CircleCheck, Pencil, CirclePlay, History, Calendar, ChevronLeft, ChevronRight, FileSpreadsheet } from "lucide-react";
+import { exportExpensesCSV } from "@/lib/exportUtils";
 import Icon from "./ui/Icon";
+import VirtualList from "./VirtualList";
 
 type HistoryItem =
   | { kind: "expense"; data: Expense }
@@ -19,6 +22,7 @@ interface BudgetData {
   setSelectedMonth: (m: number) => void;
   setSelectedYear: (y: number) => void;
   addExpense: (exp: Omit<Expense, "id" | "created_at">) => Promise<boolean>;
+  updateExpense: (id: number, updates: Partial<Omit<Expense, "id" | "created_at">>) => Promise<boolean>;
   removeExpense: (id: number) => Promise<void>;
   removeFixedPayment: (id: number) => Promise<void>;
   addPlannedExpense: (p: Omit<PlannedExpense, "id" | "created_at" | "expense_id">) => Promise<boolean>;
@@ -47,6 +51,7 @@ export default function ExpenseTracker({
     setSelectedMonth,
     setSelectedYear,
     addExpense,
+    updateExpense,
     removeExpense,
     removeFixedPayment,
     addPlannedExpense,
@@ -68,10 +73,31 @@ export default function ExpenseTracker({
   });
   const totalAllSpent = totalMonthSpent + totalFixed;
   const [showModal, setShowModal] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
 
   const pendingPlanned = useMemo(() => plannedExpenses.filter((p) => p.status === "pending"), [plannedExpenses]);
   const executedPlanned = useMemo(() => plannedExpenses.filter((p) => p.status === "executed"), [plannedExpenses]);
+
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const plannedSectionRef = useRef<HTMLDivElement>(null);
+  const [highlightedPlannedId, setHighlightedPlannedId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const plannedId = searchParams.get("planned");
+    if (plannedId && plannedExpenses.length > 0) {
+      const id = parseInt(plannedId, 10);
+      const p = plannedExpenses.find((x) => x.id === id);
+      if (p && p.status === "pending") {
+        setHighlightedPlannedId(id);
+        plannedSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        router.replace("/expenses", { scroll: false });
+        const t = setTimeout(() => setHighlightedPlannedId(null), 3000);
+        return () => clearTimeout(t);
+      }
+    }
+  }, [searchParams, plannedExpenses, router]);
 
   const planDefault = {
     due_date: "",
@@ -97,20 +123,53 @@ export default function ExpenseTracker({
       showToast("Remplis tous les champs", "error");
       return;
     }
-    const ok = await addExpense({ ...form, amount: Number(form.amount), time: form.time || "00:00" });
-    if (ok) {
-      showToast("Dépense enregistrée !");
-      const n = new Date();
-      setForm({
-        date: n.toISOString().split("T")[0],
-        time: n.toTimeString().slice(0, 5),
-        description: "",
-        category: config.categories[0]?.id || "food",
-        amount: "",
-        notes: "",
+    if (editingExpense) {
+      const ok = await updateExpense(editingExpense.id, {
+        date: form.date,
+        time: form.time || "00:00",
+        description: form.description,
+        category: form.category,
+        amount: Number(form.amount),
+        notes: form.notes,
       });
-      setShowModal(false);
+      if (ok) {
+        showToast("Dépense modifiée !");
+        closeExpenseModal();
+      }
+    } else {
+      const ok = await addExpense({ ...form, amount: Number(form.amount), time: form.time || "00:00" });
+      if (ok) {
+        showToast("Dépense enregistrée !");
+        closeExpenseModal();
+      }
     }
+  };
+
+  const closeExpenseModal = () => {
+    const n = new Date();
+    setForm({
+      date: n.toISOString().split("T")[0],
+      time: n.toTimeString().slice(0, 5),
+      description: "",
+      category: config.categories[0]?.id || "food",
+      amount: "",
+      notes: "",
+    });
+    setEditingExpense(null);
+    setShowModal(false);
+  };
+
+  const handleEditExpense = (exp: Expense) => {
+    setForm({
+      date: exp.date,
+      time: exp.time || "00:00",
+      description: exp.description,
+      category: exp.category,
+      amount: String(exp.amount),
+      notes: exp.notes || "",
+    });
+    setEditingExpense(exp);
+    setShowModal(true);
   };
 
   const handleDelete = async (id: number) => {
@@ -197,12 +256,12 @@ export default function ExpenseTracker({
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="btn-primary px-4 py-2.5 lg:px-5 rounded-xl text-xs lg:text-sm font-semibold flex items-center gap-1.5 shrink-0"
+            className="btn-primary min-h-[44px] px-4 py-2.5 lg:px-5 rounded-xl text-xs lg:text-sm font-semibold flex items-center gap-1.5 shrink-0 touch-manipulation"
           >
             <Plus size={16} /> <span className="hidden sm:inline">Nouvelle</span> Dépense
           </button>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
         <select
           className="input-field w-full sm:w-36"
           value={selectedMonth}
@@ -221,12 +280,20 @@ export default function ExpenseTracker({
             <option key={y} value={y}>{y}</option>
           ))}
         </select>
+        <button
+          onClick={() => exportExpensesCSV(expenses, fixedPayments, selectedMonth, selectedYear, config.categories)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+          title="Exporter les dépenses en CSV/Excel"
+        >
+          <FileSpreadsheet size={14} />
+          CSV
+        </button>
         </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 lg:gap-4 mb-5 lg:mb-6">
         {[
-          { label: "Dépenses var.", value: formatCFA(totalMonthSpent), color: "text-red-400" },
+          { label: "Dépenses var.", value: formatCFA(totalMonthSpent), color: "text-amber-400" },
           { label: "Charges fixes", value: formatCFA(totalFixed), color: "text-orange-400" },
           { label: "Total sorties", value: formatCFA(totalAllSpent), color: "text-red-300" },
           { label: "Reste budget", value: formatCFA(totalBudgetVar - totalMonthSpent), color: totalBudgetVar - totalMonthSpent >= 0 ? "text-emerald-400" : "text-red-400" },
@@ -240,9 +307,10 @@ export default function ExpenseTracker({
         ))}
       </div>
 
-      {/* Desktop table */}
-      <div className="hidden md:block glass-strong rounded-2xl overflow-hidden">
-        <div className="grid grid-cols-[100px_1fr_160px_120px_50px] px-5 py-3 bg-indigo-500/10 border-b border-white/5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+      {/* Desktop table — scroll horizontal sur tablette */}
+      <div className="hidden md:block glass-strong rounded-2xl overflow-x-auto">
+        <div className="min-w-[580px]">
+        <div className="grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3 bg-amber-500/10 border-b border-white/5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
           <div>Date</div>
           <div>Description</div>
           <div>Type</div>
@@ -256,82 +324,106 @@ export default function ExpenseTracker({
             </div>
             Aucune transaction pour {MONTHS_FULL[selectedMonth]}
           </div>
+        ) : allHistory.length > VIRTUAL_LIST_THRESHOLD ? (
+          <VirtualList
+            items={allHistory}
+            estimateSize={48}
+            maxHeight="50vh"
+            getItemKey={(item) => (item.kind === "expense" ? `e-${item.data.id}` : `f-${item.data.id}`)}
+            renderItem={(item) => {
+              if (item.kind === "expense") {
+                const exp = item.data;
+                const cat = config.categories.find((c: Category) => c.id === exp.category);
+                return (
+                  <div className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03]">
+                    <div className="font-mono text-xs text-slate-400">
+                      <div>{new Date(exp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
+                      {exp.time && exp.time !== "00:00" && <div className="text-[10px] text-slate-500">{exp.time}</div>}
+                    </div>
+                    <div className="text-[13px]">{exp.description}</div>
+                    <div>
+                      <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1"
+                        style={{ background: (cat?.color || "#6366f1") + "22", color: cat?.color || "#6366f1" }}>
+                        {cat && <Icon name={cat.icon} size={12} />}{cat?.label}
+                      </span>
+                    </div>
+                    <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{formatCFA(exp.amount)}</div>
+                    <div className="flex justify-end gap-0.5">
+                      <button onClick={() => handleEditExpense(exp)} className="text-slate-600 hover:text-emerald-400 transition-colors p-1" title="Modifier"><Pencil size={14} /></button>
+                      <button onClick={() => handleDelete(exp.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                );
+              }
+              const fp = item.data;
+              return (
+                <div className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03] bg-orange-500/[0.03]">
+                  <div className="font-mono text-xs text-slate-400">
+                    <div>{new Date(fp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
+                    {fp.time && fp.time !== "00:00" && <div className="text-[10px] text-slate-500">{fp.time}</div>}
+                  </div>
+                  <div className="text-[13px]">{fp.label}{fp.notes && <span className="text-[10px] text-slate-500 ml-2">— {fp.notes}</span>}</div>
+                  <div>
+                    <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 bg-orange-500/20 text-orange-400"><Landmark size={12} /> Charge fixe</span>
+                  </div>
+                  <div className="font-mono text-[13px] font-semibold text-orange-300 text-right">-{formatCFA(fp.amount)}</div>
+                  <div className="flex justify-end">
+                    <button onClick={async () => { await removeFixedPayment(fp.id); showToast("Paiement supprimé", "info"); }} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              );
+            }}
+          />
         ) : (
           allHistory.map((item) => {
             if (item.kind === "expense") {
               const exp = item.data;
               const cat = config.categories.find((c: Category) => c.id === exp.category);
               return (
-                <div
-                  key={`e-${exp.id}`}
-                  className="expense-row grid grid-cols-[100px_1fr_160px_120px_50px] px-5 py-3.5 items-center border-b border-white/[0.03]"
-                >
+                <div key={`e-${exp.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03]">
                   <div className="font-mono text-xs text-slate-400">
                     <div>{new Date(exp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
-                    {exp.time && exp.time !== "00:00" && (
-                      <div className="text-[10px] text-slate-500">{exp.time}</div>
-                    )}
+                    {exp.time && exp.time !== "00:00" && <div className="text-[10px] text-slate-500">{exp.time}</div>}
                   </div>
                   <div className="text-[13px]">{exp.description}</div>
                   <div>
-                    <span
-                      className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1"
-                      style={{ background: (cat?.color || "#6366f1") + "22", color: cat?.color || "#6366f1" }}
-                    >
-                      {cat && <Icon name={cat.icon} size={12} />}
-                      {cat?.label}
+                    <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1"
+                      style={{ background: (cat?.color || "#6366f1") + "22", color: cat?.color || "#6366f1" }}>
+                      {cat && <Icon name={cat.icon} size={12} />}{cat?.label}
                     </span>
                   </div>
-                  <div className="font-mono text-[13px] font-semibold text-red-300 text-right">
-                    -{formatCFA(exp.amount)}
-                  </div>
-                  <div className="flex justify-end">
-                    <button onClick={() => handleDelete(exp.id)}
-                      className="text-slate-600 hover:text-red-400 transition-colors p-1">
-                      <Trash2 size={14} />
-                    </button>
+                  <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{formatCFA(exp.amount)}</div>
+                  <div className="flex justify-end gap-0.5">
+                    <button onClick={() => handleEditExpense(exp)} className="text-slate-600 hover:text-emerald-400 transition-colors p-1" title="Modifier"><Pencil size={14} /></button>
+                    <button onClick={() => handleDelete(exp.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                   </div>
                 </div>
               );
             }
             const fp = item.data;
             return (
-              <div
-                key={`f-${fp.id}`}
-                className="expense-row grid grid-cols-[100px_1fr_160px_120px_50px] px-5 py-3.5 items-center border-b border-white/[0.03] bg-orange-500/[0.03]"
-              >
+              <div key={`f-${fp.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03] bg-orange-500/[0.03]">
                 <div className="font-mono text-xs text-slate-400">
                   <div>{new Date(fp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
-                  {fp.time && fp.time !== "00:00" && (
-                    <div className="text-[10px] text-slate-500">{fp.time}</div>
-                  )}
+                  {fp.time && fp.time !== "00:00" && <div className="text-[10px] text-slate-500">{fp.time}</div>}
                 </div>
-                <div className="text-[13px]">
-                  {fp.label}
-                  {fp.notes && <span className="text-[10px] text-slate-500 ml-2">— {fp.notes}</span>}
-                </div>
+                <div className="text-[13px]">{fp.label}{fp.notes && <span className="text-[10px] text-slate-500 ml-2">— {fp.notes}</span>}</div>
                 <div>
-                  <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 bg-orange-500/20 text-orange-400">
-                    <Landmark size={12} /> Charge fixe
-                  </span>
+                  <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 bg-orange-500/20 text-orange-400"><Landmark size={12} /> Charge fixe</span>
                 </div>
-                <div className="font-mono text-[13px] font-semibold text-orange-300 text-right">
-                  -{formatCFA(fp.amount)}
-                </div>
+                <div className="font-mono text-[13px] font-semibold text-orange-300 text-right">-{formatCFA(fp.amount)}</div>
                 <div className="flex justify-end">
-                  <button onClick={async () => { await removeFixedPayment(fp.id); showToast("Paiement supprimé", "info"); }}
-                    className="text-slate-600 hover:text-red-400 transition-colors p-1">
-                    <Trash2 size={14} />
-                  </button>
+                  <button onClick={async () => { await removeFixedPayment(fp.id); showToast("Paiement supprimé", "info"); }} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
                 </div>
               </div>
             );
           })
         )}
+        </div>
       </div>
 
       {/* Mobile card list */}
-      <div className="md:hidden space-y-2">
+      <div className="md:hidden">
         {allHistory.length === 0 ? (
           <div className="glass-strong rounded-2xl py-12 text-center text-slate-500">
             <div className="mb-3 flex justify-center">
@@ -339,8 +431,73 @@ export default function ExpenseTracker({
             </div>
             Aucune transaction pour {MONTHS_FULL[selectedMonth]}
           </div>
+        ) : allHistory.length > VIRTUAL_LIST_THRESHOLD ? (
+          <VirtualList
+            items={allHistory}
+            estimateSize={88}
+            maxHeight="55vh"
+            getItemKey={(item) => (item.kind === "expense" ? `e-${item.data.id}` : `f-${item.data.id}`)}
+            renderItem={(item) => {
+              if (item.kind === "fixed") {
+                const fp = item.data;
+                return (
+                  <div className="mb-2">
+                    <div className="glass rounded-xl p-3.5 border-l-2 border-orange-500/50">
+                      <div className="flex justify-between items-start mb-1.5">
+                        <div>
+                          <div className="text-[13px] font-medium flex items-center gap-1.5">
+                            <Icon name={fp.icon} size={14} className="text-orange-400" />
+                            {fp.label}
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            {new Date(fp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
+                            {fp.time && fp.time !== "00:00" && ` à ${fp.time}`}
+                            {fp.notes && ` — ${fp.notes}`}
+                          </div>
+                        </div>
+                        <div className="font-mono text-sm font-bold text-orange-300">-{formatCFA(fp.amount)}</div>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 inline-flex items-center gap-1"><Landmark size={10} /> Charge fixe</span>
+                        <button onClick={async () => { await removeFixedPayment(fp.id); showToast("Paiement supprimé", "info"); }} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              const exp = item.data;
+              const cat = config.categories.find((c: Category) => c.id === exp.category);
+              return (
+                <div className="mb-2">
+                  <div className="glass rounded-xl p-3.5">
+                    <div className="flex justify-between items-start mb-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{exp.description}</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+                            style={{ background: (cat?.color || "#6366f1") + "22", color: cat?.color || "#6366f1" }}>
+                            {cat && <Icon name={cat.icon} size={10} />}{cat?.label}
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-500">
+                            {new Date(exp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
+                            {exp.time && exp.time !== "00:00" && ` ${exp.time}`}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0 ml-2">
+                        <span className="font-mono text-sm font-bold text-amber-400">-{formatCFA(exp.amount)}</span>
+                        <button onClick={() => handleEditExpense(exp)} className="text-slate-500 active:text-emerald-400 p-1.5" title="Modifier"><Pencil size={14} /></button>
+                        <button onClick={() => handleDelete(exp.id)} className="text-slate-500 active:text-red-400 p-1.5"><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }}
+          />
         ) : (
-          allHistory.map((item) => {
+          <div className="space-y-2">
+          {allHistory.map((item) => {
             if (item.kind === "fixed") {
               const fp = item.data;
               return (
@@ -392,30 +549,30 @@ export default function ExpenseTracker({
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0 ml-2">
-                    <span className="font-mono text-sm font-bold text-red-300">
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <span className="font-mono text-sm font-bold text-amber-400">
                       -{formatCFA(exp.amount)}
                     </span>
-                    <button onClick={() => handleDelete(exp.id)} className="text-slate-500 active:text-red-400 p-1.5">
-                      <Trash2 size={14} />
-                    </button>
+                    <button onClick={() => handleEditExpense(exp)} className="text-slate-500 active:text-emerald-400 p-1.5" title="Modifier"><Pencil size={14} /></button>
+                    <button onClick={() => handleDelete(exp.id)} className="text-slate-500 active:text-red-400 p-1.5"><Trash2 size={14} /></button>
                   </div>
                 </div>
               </div>
             );
-          })
+          })}
+          </div>
         )}
       </div>
 
       {/* ── Section dépenses planifiées ── */}
       {(pendingPlanned.length > 0 || executedPlanned.length > 0) && (
-        <div className="mt-5 lg:mt-6">
+        <div ref={plannedSectionRef} className="mt-5 lg:mt-6">
           <div className="flex justify-between items-center mb-3">
             <h3 className="text-sm font-bold flex items-center gap-2">
-              <CalendarClock size={16} className="text-indigo-400" /> Dépenses planifiées
+              <CalendarClock size={16} className="text-emerald-400" /> Dépenses planifiées
             </h3>
             <button onClick={() => setShowPlanModal(true)}
-              className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+              className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
               <Plus size={14} /> Planifier
             </button>
           </div>
@@ -424,8 +581,14 @@ export default function ExpenseTracker({
               {pendingPlanned.map((p) => {
                 const cat = config.categories.find((c: Category) => c.id === p.category);
                 const due = getDueLabel(p.due_date);
+                const isHighlighted = highlightedPlannedId === p.id;
                 return (
-                  <div key={p.id} className="glass rounded-xl p-3.5 border-l-2 border-indigo-500/50">
+                  <div
+                    key={p.id}
+                    className={`glass rounded-xl p-3.5 border-l-2 transition-all ${
+                      isHighlighted ? "ring-2 ring-emerald-400 ring-offset-2 ring-offset-[var(--bg-primary)] border-emerald-400" : "border-emerald-500/50"
+                    }`}
+                  >
                     <div className="flex justify-between items-start">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium">{p.description}</div>
@@ -446,7 +609,7 @@ export default function ExpenseTracker({
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                        <span className="font-mono text-sm font-bold text-indigo-300 mr-1">
+                        <span className="font-mono text-sm font-bold text-emerald-300 mr-1">
                           {formatCFA(p.amount)}
                         </span>
                         <button onClick={() => handleExecutePlanned(p.id)}
@@ -456,7 +619,7 @@ export default function ExpenseTracker({
                         </button>
                         <button onClick={() => handleEditPlanned(p)}
                           title="Modifier"
-                          className="text-slate-500 hover:text-indigo-400 active:text-indigo-400 p-1 transition-colors">
+                          className="text-slate-500 hover:text-emerald-400 active:text-emerald-400 p-1 transition-colors">
                           <Pencil size={13} />
                         </button>
                         <button onClick={async () => { await removePlannedExpense(p.id); showToast("Planification annulée", "info"); }}
@@ -498,7 +661,7 @@ export default function ExpenseTracker({
         <div className="mt-5">
           <button onClick={() => setShowPlanModal(true)}
             className="w-full glass rounded-xl p-4 text-center hover:bg-white/[0.04] transition-colors group">
-            <CalendarClock size={24} className="mx-auto mb-2 text-slate-600 group-hover:text-indigo-400 transition-colors" />
+            <CalendarClock size={24} className="mx-auto mb-2 text-slate-600 group-hover:text-emerald-400 transition-colors" />
             <p className="text-xs text-slate-500 group-hover:text-slate-400">Planifier une dépense à venir</p>
           </button>
         </div>
@@ -511,14 +674,14 @@ export default function ExpenseTracker({
       {showPlanModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={closePlanModal}>
-          <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up max-h-[90vh] overflow-y-auto"
+          <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
                 {editingPlanned ? (
-                  <><Pencil size={18} className="text-indigo-400" /> Modifier la dépense</>
+                  <><Pencil size={18} className="text-emerald-400" /> Modifier la dépense</>
                 ) : (
-                  <><CalendarClock size={18} className="text-indigo-400" /> Planifier une dépense</>
+                  <><CalendarClock size={18} className="text-emerald-400" /> Planifier une dépense</>
                 )}
               </h2>
               <button onClick={closePlanModal} className="text-slate-400 p-1"><X size={20} /></button>
@@ -557,8 +720,8 @@ export default function ExpenseTracker({
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={closePlanModal} className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm">Annuler</button>
-              <button onClick={handleSavePlan} className="btn-primary flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5">
+              <button onClick={closePlanModal} className="flex-1 min-h-[44px] py-3 rounded-xl border border-white/10 text-slate-400 text-sm touch-manipulation">Annuler</button>
+              <button onClick={handleSavePlan} className="btn-primary flex-1 min-h-[44px] py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 touch-manipulation">
                 {editingPlanned ? <><Check size={16} /> Enregistrer</> : <><CalendarClock size={16} /> Planifier</>}
               </button>
             </div>
@@ -570,17 +733,21 @@ export default function ExpenseTracker({
       {showModal && (
         <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
-          onClick={() => setShowModal(false)}
+          onClick={closeExpenseModal}
         >
           <div
-            className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up max-h-[90vh] overflow-y-auto"
+            className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base lg:text-lg font-bold flex items-center gap-2">
-                <Plus size={18} className="text-indigo-400" /> Nouvelle Dépense
+                {editingExpense ? (
+                  <><Pencil size={18} className="text-emerald-400" /> Modifier la dépense</>
+                ) : (
+                  <><Plus size={18} className="text-emerald-400" /> Nouvelle Dépense</>
+                )}
               </h2>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-white p-1">
+              <button onClick={closeExpenseModal} className="text-slate-400 hover:text-white p-1">
                 <X size={20} />
               </button>
             </div>
@@ -619,11 +786,11 @@ export default function ExpenseTracker({
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm">
+              <button onClick={closeExpenseModal} className="flex-1 min-h-[44px] py-3 rounded-xl border border-white/10 text-slate-400 text-sm touch-manipulation">
                 Annuler
               </button>
-              <button onClick={handleSubmit} className="btn-primary flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5">
-                <Check size={16} /> Enregistrer
+              <button onClick={handleSubmit} className="btn-primary flex-1 min-h-[44px] py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 touch-manipulation">
+                <Check size={16} /> {editingExpense ? "Enregistrer" : "Enregistrer"}
               </button>
             </div>
           </div>
@@ -715,6 +882,7 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
   const groupedByDate = useMemo(() => {
     const map: Record<string, Expense[]> = {};
     historyData.forEach((e) => { (map[e.date] ||= []).push(e); });
+    Object.values(map).forEach((arr) => arr.sort((a, b) => (b.time || "00:00").localeCompare(a.time || "00:00")));
     return Object.entries(map).sort(([a], [b]) => b.localeCompare(a));
   }, [historyData]);
 
@@ -752,7 +920,7 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
         className="w-full glass-strong rounded-xl p-4 flex items-center justify-between hover:bg-white/[0.04] transition-colors"
       >
         <span className="text-sm font-bold flex items-center gap-2">
-          <History size={16} className="text-indigo-400" /> Historique des dépenses
+          <History size={16} className="text-emerald-400" /> Historique des dépenses
         </span>
         <ChevronRight size={16} className={`text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
       </button>
@@ -765,7 +933,7 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
                 key={p}
                 onClick={() => handlePeriodChange(p)}
                 className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
-                  period === p ? "bg-indigo-500/30 text-indigo-300 ring-1 ring-indigo-500/50" : "bg-white/5 text-slate-400 hover:bg-white/10"
+                  period === p ? "bg-emerald-500/30 text-emerald-300 ring-1 ring-emerald-500/50" : "bg-white/5 text-slate-400 hover:bg-white/10"
                 }`}
               >
                 {PERIOD_LABELS[p]}

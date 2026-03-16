@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getUserByEmail } from "@/lib/db";
-import { createSession, COOKIE_NAME, EXPIRES_IN } from "@/lib/auth";
+import { createSession, COOKIE_NAME, getCookieOptions, getAvatarUrl } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,16 +36,11 @@ export async function POST(req: NextRequest) {
         last_name: user.last_name,
         phone: user.phone,
         email: user.email,
+        avatar_path: getAvatarUrl(user.avatar_path) || null,
       },
     });
 
-    response.cookies.set(COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: EXPIRES_IN,
-      path: "/",
-    });
+    response.cookies.set(COOKIE_NAME, token, getCookieOptions());
 
     return response;
   } catch (e) {

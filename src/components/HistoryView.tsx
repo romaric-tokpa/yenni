@@ -1,13 +1,18 @@
 "use client";
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
+import useSWR, { useSWRConfig } from "swr";
 import { formatCFA, MONTHS_FULL, MONTHS_SHORT } from "@/lib/constants";
+
+const fetcher = (url: string) => fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : Promise.reject(new Error("Fetch failed"))));
 import { Expense, Income, FixedChargePayment, LoanPayment, Loan, Project, PlannedExpense } from "@/lib/types";
 import {
-  History, ChevronLeft, ChevronRight, Calendar,
+  History, ChevronLeft, ChevronRight, Calendar, RefreshCw,
   TrendingDown, TrendingUp, Landmark, HandCoins,
   Filter, ArrowDownCircle, ArrowUpCircle, Minus,
   PiggyBank, FolderOpen, CalendarClock, Banknote,
+  FileDown, FileSpreadsheet,
 } from "lucide-react";
+import { exportHistoryCSV, exportHistoryPDF } from "@/lib/exportUtils";
 
 type PeriodType = "day" | "month" | "quarter" | "semester" | "year";
 type TxType = "all" | "expense" | "income" | "fixed" | "loan" | "saving" | "project" | "planned";
@@ -67,23 +72,23 @@ function getDateRange(period: PeriodType, year: number, idx: number, dayDate: st
 
 function txIcon(type: TxType) {
   switch (type) {
-    case "expense": return <ArrowDownCircle size={14} className="text-red-400" />;
+    case "expense": return <ArrowDownCircle size={14} className="text-amber-400" />;
     case "income": return <ArrowUpCircle size={14} className="text-emerald-400" />;
     case "fixed": return <Landmark size={14} className="text-orange-400" />;
     case "loan": return <HandCoins size={14} className="text-blue-400" />;
     case "saving": return <PiggyBank size={14} className="text-amber-400" />;
-    case "project": return <FolderOpen size={14} className="text-violet-400" />;
-    case "planned": return <CalendarClock size={14} className="text-indigo-400" />;
+    case "project": return <FolderOpen size={14} className="text-emerald-400" />;
+    case "planned": return <CalendarClock size={14} className="text-emerald-400" />;
     default: return <Minus size={14} className="text-slate-400" />;
   }
 }
 
-function txColor(sign: "in" | "out" | "neutral") {
-  switch (sign) {
-    case "in": return "text-emerald-400";
-    case "out": return "text-red-400";
-    case "neutral": return "text-slate-400";
-  }
+function txColor(sign: "in" | "out" | "neutral", type?: TxType) {
+  if (sign === "in") return "text-emerald-400";
+  if (sign === "neutral") return "text-slate-400";
+  if (type === "expense") return "text-amber-400";
+  if (type === "fixed") return "text-orange-400";
+  return "text-red-400";
 }
 
 function txLabel(type: TxType) {
@@ -110,49 +115,45 @@ function monthsForPeriod(period: PeriodType, idx: number): number[] {
 }
 
 export default function HistoryView() {
+  const { mutate: globalMutate } = useSWRConfig();
   const [year, setYear] = useState(new Date().getFullYear());
   const [period, setPeriod] = useState<PeriodType>("month");
   const [periodIndex, setPeriodIndex] = useState(new Date().getMonth());
   const [dayDate, setDayDate] = useState(new Date().toISOString().split("T")[0]);
   const [txFilter, setTxFilter] = useState<TxType>("all");
-  const [loading, setLoading] = useState(false);
-
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [incomes, setIncomes] = useState<Income[]>([]);
-  const [fixedPayments, setFixedPayments] = useState<FixedChargePayment[]>([]);
-  const [loanPayments, setLoanPayments] = useState<LoanPayment[]>([]);
-  const [loans, setLoans] = useState<Loan[]>([]);
-  const [savings, setSavings] = useState<number[]>([]);
-  const [salaries, setSalaries] = useState<number[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [plannedExpenses, setPlannedExpenses] = useState<PlannedExpense[]>([]);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const range = useMemo(
     () => getDateRange(period, year, periodIndex, dayDate),
     [period, year, periodIndex, dayDate]
   );
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const r = await fetch(`/api/history?start=${range.start}&end=${range.end}&year=${year}`);
-      if (r.ok) {
-        const d = await r.json();
-        setExpenses(d.expenses || []);
-        setIncomes(d.incomes || []);
-        setFixedPayments(d.fixedPayments || []);
-        setLoanPayments(d.loanPayments || []);
-        setLoans(d.loans || []);
-        setSavings(d.savings || []);
-        setSalaries(d.salaries || []);
-        setProjects(d.projects || []);
-        setPlannedExpenses(d.plannedExpenses || []);
-      }
-    } catch { /* ignore */ }
-    setLoading(false);
-  }, [range.start, range.end, year]);
+  const historyKey = `/api/history?start=${range.start}&end=${range.end}&year=${year}`;
+  const { data, isLoading: loading } = useSWR(
+    historyKey,
+    fetcher,
+    { revalidateOnFocus: true }
+  );
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await globalMutate(historyKey);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [globalMutate, historyKey]);
+
+  const expenses: Expense[] = data?.expenses ?? [];
+  const incomes: Income[] = data?.incomes ?? [];
+  const fixedPayments: FixedChargePayment[] = data?.fixedPayments ?? [];
+  const loanPayments: LoanPayment[] = data?.loanPayments ?? [];
+  const loans: Loan[] = data?.loans ?? [];
+  const savings: number[] = data?.savings ?? [];
+  const salaries: number[] = data?.salaries ?? [];
+  const projects: Project[] = data?.projects ?? [];
+  const plannedExpenses: PlannedExpense[] = data?.plannedExpenses ?? [];
 
   const loansById = useMemo(() => {
     const map: Record<number, Loan> = {};
@@ -185,12 +186,13 @@ export default function HistoryView() {
 
     loanPayments.forEach((lp) => {
       const loan = loansById[lp.loan_id];
-      const isLent = loan?.type === "personal_lent";
+      if (!loan) return;
+      const isLent = loan.type === "personal_lent";
       items.push({
         id: `lp-${lp.id}`, date: lp.date, time: lp.time,
-        description: `${isLent ? "Remb. reçu" : "Remb."} — ${loan?.label || "Prêt"}`,
+        description: `${isLent ? "Remb. reçu" : "Remb."} — ${loan.label || "Prêt"}`,
         amount: lp.amount + lp.fees,
-        type: "loan", detail: loan?.lender_borrower,
+        type: "loan", detail: loan.lender_borrower,
         sign: isLent ? "in" : "out",
       });
     });
@@ -252,16 +254,18 @@ export default function HistoryView() {
       }
     });
 
-    plannedExpenses.forEach((pe) => {
-      if (pe.due_date >= range.start && pe.due_date <= range.end) {
-        items.push({
-          id: `plan-${pe.id}`, date: pe.due_date, time: "00:00",
-          description: `[${pe.status === "executed" ? "Exécutée" : pe.status === "cancelled" ? "Annulée" : "En attente"}] ${pe.description}`,
-          amount: pe.amount, type: "planned",
-          detail: pe.category, sign: pe.status === "executed" ? "out" : "neutral",
-        });
-      }
-    });
+    plannedExpenses
+      .filter((pe) => pe.status !== "cancelled")
+      .forEach((pe) => {
+        if (pe.due_date >= range.start && pe.due_date <= range.end) {
+          items.push({
+            id: `plan-${pe.id}`, date: pe.due_date, time: "00:00",
+            description: `[${pe.status === "executed" ? "Exécutée" : "En attente"}] ${pe.description}`,
+            amount: pe.amount, type: "planned",
+            detail: pe.category, sign: pe.status === "executed" ? "out" : "neutral",
+          });
+        }
+      });
 
     items.sort((a, b) => {
       const cmp = b.date.localeCompare(a.date);
@@ -278,6 +282,7 @@ export default function HistoryView() {
   const groupedByDate = useMemo(() => {
     const map: Record<string, UnifiedTx[]> = {};
     filteredTx.forEach((t) => { (map[t.date] ||= []).push(t); });
+    Object.values(map).forEach((arr) => arr.sort((a, b) => (b.time || "00:00").localeCompare(a.time || "00:00")));
     return Object.entries(map).sort(([a], [b]) => b.localeCompare(a));
   }, [filteredTx]);
 
@@ -291,6 +296,8 @@ export default function HistoryView() {
   }, [savings, period, relevantMonths]);
 
   const projectsTotal = useMemo(() => projects.reduce((s, p) => s + p.saved_amount, 0), [projects]);
+
+  const savingsRate = totalIn > 0 ? (savingsTotal / totalIn) * 100 : 0;
 
   const handlePeriodChange = (p: PeriodType) => {
     setPeriod(p);
@@ -323,15 +330,48 @@ export default function HistoryView() {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-5 lg:mb-6">
         <div>
           <h1 className="text-xl lg:text-2xl font-bold flex items-center gap-2">
-            <History size={22} className="text-indigo-400" /> Historique Complet
+            <History size={22} className="text-emerald-400" /> Suivi des KPIs
           </h1>
-          <p className="text-slate-500 text-xs lg:text-sm mt-0.5">{range.label}</p>
+          <p className="text-slate-500 text-xs lg:text-sm mt-0.5">{range.label} — Transactions et indicateurs</p>
         </div>
-        <select className="input-field w-24" value={year} onChange={(e) => setYear(Number(e.target.value))}>
-          {Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i).map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing || loading}
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors disabled:opacity-50"
+            title="Actualiser"
+          >
+            <RefreshCw size={16} className={refreshing || loading ? "animate-spin" : ""} />
+          </button>
+          <select className="input-field w-24" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            {Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i).map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => exportHistoryCSV(filteredTx, range.label, totalIn, totalOut, balance)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+            title="Exporter en CSV/Excel"
+          >
+            <FileSpreadsheet size={14} />
+            CSV
+          </button>
+          <button
+            onClick={async () => {
+              setExportingPdf(true);
+              try {
+                await exportHistoryPDF(filteredTx, range.label, totalIn, totalOut, balance);
+              } catch { /* ignore */ }
+              setExportingPdf(false);
+            }}
+            disabled={exportingPdf || filteredTx.length === 0}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors disabled:opacity-50"
+            title="Exporter en PDF"
+          >
+            <FileDown size={14} />
+            {exportingPdf ? "..." : "PDF"}
+          </button>
+        </div>
       </div>
 
       {/* Sélecteur de période */}
@@ -339,7 +379,7 @@ export default function HistoryView() {
         {(Object.keys(PERIOD_LABELS) as PeriodType[]).map((p) => (
           <button key={p} onClick={() => handlePeriodChange(p)}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
-              period === p ? "bg-indigo-500/30 text-indigo-300 ring-1 ring-indigo-500/50" : "bg-white/5 text-slate-400 hover:bg-white/10"
+              period === p ? "bg-emerald-500/30 text-emerald-300 ring-1 ring-emerald-500/50" : "bg-white/5 text-slate-400 hover:bg-white/10"
             }`}>{PERIOD_LABELS[p]}</button>
         ))}
       </div>
@@ -359,27 +399,36 @@ export default function HistoryView() {
           className="p-1.5 rounded-lg hover:bg-white/5 text-slate-400 disabled:opacity-30 transition-colors"><ChevronRight size={18} /></button>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 lg:gap-3 mb-5">
-        <div className="glass rounded-xl p-3 text-center">
-          <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><TrendingUp size={10} /> Entrées</div>
-          <div className="font-mono text-sm font-bold text-emerald-400 mt-0.5">{formatCFA(totalIn)}</div>
+      {/* KPIs — Indicateurs clés de la période */}
+      <div className="glass-strong rounded-2xl p-4 lg:p-5 mb-5 border border-emerald-500/20">
+        <div className="text-[11px] font-semibold text-emerald-400/90 mb-3 flex items-center gap-1.5">
+          <TrendingUp size={14} /> Indicateurs de la période
         </div>
-        <div className="glass rounded-xl p-3 text-center">
-          <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><TrendingDown size={10} /> Sorties</div>
-          <div className="font-mono text-sm font-bold text-red-400 mt-0.5">{formatCFA(totalOut)}</div>
-        </div>
-        <div className="glass rounded-xl p-3 text-center">
-          <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><Banknote size={10} /> Solde</div>
-          <div className={`font-mono text-sm font-bold mt-0.5 ${balance >= 0 ? "text-indigo-400" : "text-red-400"}`}>{balance >= 0 ? "+" : "-"}{formatCFA(Math.abs(balance))}</div>
-        </div>
-        <div className="glass rounded-xl p-3 text-center">
-          <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><PiggyBank size={10} /> Épargne</div>
-          <div className="font-mono text-sm font-bold text-amber-400 mt-0.5">{formatCFA(savingsTotal)}</div>
-        </div>
-        <div className="glass rounded-xl p-3 text-center col-span-2 sm:col-span-1">
-          <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><FolderOpen size={10} /> Projets</div>
-          <div className="font-mono text-sm font-bold text-violet-400 mt-0.5">{formatCFA(projectsTotal)}</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="glass rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><TrendingUp size={10} /> Entrées</div>
+            <div className="font-mono text-sm font-bold text-emerald-400 mt-0.5">{formatCFA(totalIn)}</div>
+          </div>
+          <div className="glass rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><TrendingDown size={10} /> Sorties</div>
+            <div className="font-mono text-sm font-bold text-red-400 mt-0.5">{formatCFA(totalOut)}</div>
+          </div>
+          <div className="glass rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><Banknote size={10} /> Solde</div>
+            <div className={`font-mono text-sm font-bold mt-0.5 ${balance >= 0 ? "text-emerald-400" : "text-red-400"}`}>{balance >= 0 ? "+" : "-"}{formatCFA(Math.abs(balance))}</div>
+          </div>
+          <div className="glass rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><PiggyBank size={10} /> Épargne</div>
+            <div className="font-mono text-sm font-bold text-amber-400 mt-0.5">{formatCFA(savingsTotal)}</div>
+          </div>
+          <div className="glass rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1">Taux épargne</div>
+            <div className={`font-mono text-sm font-bold mt-0.5 ${savingsRate >= 20 ? "text-emerald-400" : savingsRate >= 10 ? "text-amber-400" : "text-slate-400"}`}>{savingsRate.toFixed(1)}%</div>
+          </div>
+          <div className="glass rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><FolderOpen size={10} /> Projets</div>
+            <div className="font-mono text-sm font-bold text-emerald-400 mt-0.5">{formatCFA(projectsTotal)}</div>
+          </div>
         </div>
       </div>
 
@@ -432,7 +481,7 @@ export default function HistoryView() {
                         {tx.detail && <span className="text-[9px] text-slate-600 truncate max-w-[120px]">· {tx.detail}</span>}
                       </div>
                     </div>
-                    <span className={`font-mono text-xs font-semibold shrink-0 ${txColor(tx.sign)}`}>
+                    <span className={`font-mono text-xs font-semibold shrink-0 ${txColor(tx.sign, tx.type)}`}>
                       {tx.sign === "in" ? "+" : tx.sign === "out" ? "-" : ""}{formatCFA(tx.amount)}
                     </span>
                   </div>

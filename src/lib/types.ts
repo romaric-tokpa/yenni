@@ -62,12 +62,35 @@ export interface Project {
   created_at: string;
 }
 
+export interface ProjectPurchase {
+  id: number;
+  project_id: number;
+  description: string;
+  amount: number;
+  date: string;
+  expense_id: number | null;
+  created_at: string;
+}
+
+export interface ProjectFund {
+  id: number;
+  project_id: number;
+  amount: number;
+  date: string;
+  notes: string;
+  created_at: string;
+  /** ID du revenu créé (fonds = revenu + épargne projet) */
+  income_id?: number | null;
+}
+
 export interface BudgetConfig {
   salary: number;
   otherIncome: number;
   fixedCharges: FixedCharge[];
   categories: Category[];
   savingsGoal: number;
+  /** Date cible pour le fonds d'urgence (YYYY-MM-DD). Si défini, permet le calcul de l'épargne mensuelle suggérée. */
+  savingsGoalDeadline?: string;
 }
 
 export interface MonthlySaving {
@@ -139,4 +162,20 @@ export interface CalendarEvent {
   category?: string;
   source?: string;
   icon?: string;
+}
+
+export type NotificationSourceType = "loan_due" | "planned_expense" | "reminder";
+
+export interface NotificationTodo {
+  id: string;
+  type: "todo";
+  source_type: NotificationSourceType;
+  source_id: number;
+  title: string;
+  message: string;
+  amount?: number;
+  due_date: string;
+  link: string;
+  is_overdue: boolean;
+  days_left: number;
 }

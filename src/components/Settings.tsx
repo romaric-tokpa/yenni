@@ -45,13 +45,13 @@ function SalarySection({
             key={i}
             className={`flex items-center gap-2 p-2 rounded-xl transition-all ${
               i === selectedMonth
-                ? "bg-indigo-500/15 ring-1 ring-indigo-500/40"
+                ? "bg-emerald-500/15 ring-1 ring-emerald-500/40"
                 : salaries[i] > 0
                 ? "bg-white/[0.03]"
                 : "bg-white/[0.02]"
             }`}
           >
-            <span className={`text-[10px] lg:text-xs font-medium w-8 ${i === selectedMonth ? "text-indigo-300" : "text-slate-500"}`}>
+            <span className={`text-[10px] lg:text-xs font-medium w-8 ${i === selectedMonth ? "text-emerald-300" : "text-slate-500"}`}>
               {m}
             </span>
             <input
@@ -212,6 +212,12 @@ export default function Settings({
               <input type="number" className="input-field font-mono" placeholder="Ex: 2 000 000"
                 defaultValue={config.savingsGoal || ""} onChange={(e) => updateField("savingsGoal", Number(e.target.value))} />
             </div>
+            <div>
+              <label className="text-[10px] lg:text-xs text-slate-400 mb-1 block">Date cible fonds d&apos;urgence (optionnel)</label>
+              <input type="date" className="input-field"
+                defaultValue={config.savingsGoalDeadline || ""}
+                onChange={(e) => save({ ...config, savingsGoalDeadline: e.target.value || undefined })} />
+            </div>
           </div>
         </div>
 
@@ -222,7 +228,7 @@ export default function Settings({
               <ClipboardList size={16} className="text-red-400" /> Charges Fixes
             </h3>
             <button onClick={() => setShowAddCharge(true)}
-              className="text-indigo-400 text-[10px] lg:text-xs font-medium flex items-center gap-1 hover:text-indigo-300 transition-colors">
+              className="text-emerald-400 text-[10px] lg:text-xs font-medium flex items-center gap-1 hover:text-emerald-300 transition-colors">
               <Plus size={14} /> Ajouter un type
             </button>
           </div>
@@ -232,6 +238,10 @@ export default function Settings({
               Aucune charge fixe définie. Ajoute ton loyer, tes abonnements, etc.
             </div>
           ) : (
+            <>
+            <p className="text-[10px] text-slate-500 mb-2">
+              Créées automatiquement au 1er de chaque mois.
+            </p>
             <div className="grid gap-2 lg:gap-2.5">
               {config.fixedCharges.map((ch: FixedCharge, idx: number) => {
                 const paid = fixedPayments.filter((p) => p.charge_id === ch.id);
@@ -288,6 +298,7 @@ export default function Settings({
                 );
               })}
             </div>
+            </>
           )}
 
           {totalFixed > 0 && (
@@ -303,10 +314,10 @@ export default function Settings({
       <div className="glass-strong rounded-2xl p-4 lg:p-6">
         <div className="flex justify-between items-center mb-3 lg:mb-4">
           <h3 className="text-xs lg:text-sm font-semibold flex items-center gap-2">
-            <FolderOpen size={16} className="text-indigo-400" /> Budgets par Catégorie
+            <FolderOpen size={16} className="text-emerald-400" /> Budgets par Catégorie
           </h3>
           <button onClick={() => setShowAddCategory(true)}
-            className="text-indigo-400 text-[10px] lg:text-xs font-medium flex items-center gap-1 hover:text-indigo-300 transition-colors">
+            className="text-emerald-400 text-[10px] lg:text-xs font-medium flex items-center gap-1 hover:text-emerald-300 transition-colors">
             <Plus size={14} /> Ajouter
           </button>
         </div>
@@ -338,9 +349,9 @@ export default function Settings({
 
         {config.categories.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-3 mt-4 lg:mt-5">
-            <div className="flex justify-between px-3 lg:px-4 py-2.5 lg:py-3 rounded-xl bg-indigo-500/10">
+            <div className="flex justify-between px-3 lg:px-4 py-2.5 lg:py-3 rounded-xl bg-amber-500/10">
               <span className="text-[11px] lg:text-[13px] font-semibold">Total Variable</span>
-              <span className="font-mono font-bold text-indigo-400 text-xs lg:text-sm">{formatCFA(totalBudgetVar)} FCFA</span>
+              <span className="font-mono font-bold text-amber-400 text-xs lg:text-sm">{formatCFA(totalBudgetVar)} FCFA</span>
             </div>
             <div className="flex justify-between px-3 lg:px-4 py-2.5 lg:py-3 rounded-xl"
               style={{ background: resteAVivre - totalBudgetVar >= 0 ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)" }}>
@@ -357,7 +368,7 @@ export default function Settings({
       {showAddCharge && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={() => setShowAddCharge(false)}>
-          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up max-h-[90vh] overflow-y-auto"
+          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
@@ -382,8 +393,8 @@ export default function Settings({
                   {AVAILABLE_ICONS.slice(0, 18).map((iconName) => (
                     <button key={iconName} onClick={() => setNewCharge({ ...newCharge, icon: iconName })}
                       className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all
-                        ${newCharge.icon === iconName ? "bg-indigo-500/30 ring-2 ring-indigo-500" : "bg-white/5"}`}>
-                      <Icon name={iconName} size={16} className={newCharge.icon === iconName ? "text-indigo-300" : "text-slate-400"} />
+                        ${newCharge.icon === iconName ? "bg-emerald-500/30 ring-2 ring-emerald-500" : "bg-white/5"}`}>
+                      <Icon name={iconName} size={16} className={newCharge.icon === iconName ? "text-emerald-300" : "text-slate-400"} />
                     </button>
                   ))}
                 </div>
@@ -401,11 +412,11 @@ export default function Settings({
       {showAddCategory && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={() => setShowAddCategory(false)}>
-          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up max-h-[90vh] overflow-y-auto"
+          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
-                <Plus size={18} className="text-indigo-400" /> Nouvelle Catégorie
+                <Plus size={18} className="text-emerald-400" /> Nouvelle Catégorie
               </h2>
               <button onClick={() => setShowAddCategory(false)} className="text-slate-400 p-1"><X size={20} /></button>
             </div>
@@ -426,8 +437,8 @@ export default function Settings({
                   {AVAILABLE_ICONS.slice(0, 18).map((iconName) => (
                     <button key={iconName} onClick={() => setNewCategory({ ...newCategory, icon: iconName })}
                       className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all
-                        ${newCategory.icon === iconName ? "bg-indigo-500/30 ring-2 ring-indigo-500" : "bg-white/5"}`}>
-                      <Icon name={iconName} size={16} className={newCategory.icon === iconName ? "text-indigo-300" : "text-slate-400"} />
+                        ${newCategory.icon === iconName ? "bg-emerald-500/30 ring-2 ring-emerald-500" : "bg-white/5"}`}>
+                      <Icon name={iconName} size={16} className={newCategory.icon === iconName ? "text-emerald-300" : "text-slate-400"} />
                     </button>
                   ))}
                 </div>
@@ -455,7 +466,7 @@ export default function Settings({
       {showPayCharge && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={() => setShowPayCharge(null)}>
-          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up max-h-[90vh] overflow-y-auto"
+          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">

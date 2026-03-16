@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { formatCFA } from "@/lib/constants";
+import Avatar from "./ui/Avatar";
 import {
   LayoutDashboard,
   Receipt,
@@ -14,11 +15,8 @@ import {
   Settings,
   Gem,
   History,
-  Menu,
-  X,
   ChevronLeft,
   LogOut,
-  User,
 } from "lucide-react";
 
 const tabs = [
@@ -43,38 +41,19 @@ interface AuthUser {
 
 export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: number; user: AuthUser; onLogout: () => void }) {
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
-    if (mobileOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-    return () => { document.body.style.overflow = ""; };
-  }, [mobileOpen]);
-
-  const navContent = (isMobile: boolean) => (
+  const navContent = (
     <>
-      <div className={`flex items-center ${collapsed && !isMobile ? "justify-center" : "justify-between"} mb-4`}>
-        <Link href="/dashboard" className={`flex items-center gap-2 ${collapsed && !isMobile ? "" : ""}`} onClick={() => isMobile && setMobileOpen(false)}>
-          <Gem size={collapsed && !isMobile ? 28 : 24} className="text-violet-400 shrink-0" />
-          {(!collapsed || isMobile) && (
-            <span className="font-mono text-base font-bold bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
+      <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"} mb-4`}>
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <Gem size={collapsed ? 28 : 24} className="text-emerald-400 shrink-0" />
+          {!collapsed && (
+            <span className="font-mono text-base font-bold bg-gradient-to-r from-emerald-400 to-emerald-400 bg-clip-text text-transparent">
               Yenni
             </span>
           )}
         </Link>
-        {isMobile && (
-          <button onClick={() => setMobileOpen(false)} className="p-1.5 rounded-lg hover:bg-white/5 text-slate-400">
-            <X size={20} />
-          </button>
-        )}
       </div>
 
       <nav className="flex flex-col gap-0.5 flex-1">
@@ -84,27 +63,26 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
             <Link
               key={href}
               href={href}
-              onClick={() => isMobile && setMobileOpen(false)}
-              title={collapsed && !isMobile ? label : undefined}
-              className={`relative flex items-center ${collapsed && !isMobile ? "justify-center px-2" : "gap-3 px-3"} py-2.5 rounded-xl text-[13px] font-medium transition-all border border-transparent
+              title={collapsed ? label : undefined}
+              className={`relative flex items-center ${collapsed ? "justify-center px-2" : "gap-3 px-3"} py-2.5 rounded-xl text-[13px] font-medium transition-all border border-transparent
                 ${active
-                  ? "bg-gradient-to-r from-indigo-500/20 to-violet-500/15 border-indigo-500/40 text-indigo-300"
+                  ? "bg-gradient-to-r from-emerald-500/20 to-emerald-500/15 border-emerald-500/40 text-emerald-300"
                   : "text-slate-400 hover:bg-white/5 hover:text-slate-300"
                 }`}
             >
               {active && (
-                <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-gradient-to-b from-indigo-500 to-violet-500" />
+                <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-gradient-to-b from-emerald-500 to-emerald-500" />
               )}
               <Icon size={18} className="shrink-0" />
-              {(!collapsed || isMobile) && label}
+              {!collapsed && label}
             </Link>
           );
         })}
       </nav>
 
-      <div className={`mt-auto pt-3 ${collapsed && !isMobile ? "px-0" : "px-1"} space-y-2`}>
-        <div className={`glass rounded-xl ${collapsed && !isMobile ? "p-2" : "p-3"} text-center`}>
-          {collapsed && !isMobile ? (
+      <div className={`mt-auto pt-3 ${collapsed ? "px-0" : "px-1"} space-y-2`}>
+        <div className={`glass rounded-xl ${collapsed ? "p-2" : "p-3"} text-center`}>
+          {collapsed ? (
             <div className="font-mono text-sm font-bold text-emerald-400">{formatCFA(dailyBudget)}</div>
           ) : (
             <>
@@ -115,27 +93,21 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
           )}
         </div>
 
-        <div className={`flex items-center ${collapsed && !isMobile ? "justify-center" : "gap-2.5 px-1"} py-2`}>
-          {user.avatar_path ? (
-            <img src={user.avatar_path} alt="" className="w-8 h-8 rounded-full object-cover ring-1 ring-indigo-500/40 shrink-0" />
-          ) : (
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500/30 to-violet-500/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-indigo-300">
-              {user.first_name.charAt(0)}{user.last_name.charAt(0)}
-            </div>
-          )}
-          {(!collapsed || isMobile) && (
+        <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2.5 px-1"} py-2`}>
+          <Avatar avatarPath={user.avatar_path} firstName={user.first_name} lastName={user.last_name} size="sm" className="ring-1" />
+          {!collapsed && (
             <div className="flex-1 min-w-0">
               <div className="text-[11px] font-semibold text-slate-300 truncate">{user.first_name} {user.last_name}</div>
               <div className="text-[9px] text-slate-500 truncate">{user.email}</div>
             </div>
           )}
-          <button onClick={() => { if (isMobile) setMobileOpen(false); onLogout(); }}
+          <button onClick={onLogout}
             title="Déconnexion"
-            className={`${collapsed && !isMobile ? "hidden" : ""} p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0`}>
+            className={`${collapsed ? "hidden" : ""} p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0`}>
             <LogOut size={14} />
           </button>
         </div>
-        {collapsed && !isMobile && (
+        {collapsed && (
           <button onClick={onLogout} title="Déconnexion"
             className="w-full flex justify-center py-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors">
             <LogOut size={14} />
@@ -157,34 +129,9 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
         >
           <ChevronLeft size={14} className={`transition-transform duration-300 ${collapsed ? "rotate-180" : ""}`} />
         </button>
-        {navContent(false)}
+        {navContent}
       </aside>
 
-      {/* Mobile: bouton hamburger */}
-      <button
-        onClick={() => setMobileOpen(true)}
-        className="lg:hidden fixed top-3 left-3 z-50 w-10 h-10 rounded-xl glass border border-white/10 flex items-center justify-center text-slate-300 active:text-indigo-400 transition-colors"
-        aria-label="Menu"
-      >
-        <Menu size={20} />
-      </button>
-
-      {/* Mobile: overlay */}
-      {mobileOpen && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
-
-      {/* Mobile: sidebar coulissante */}
-      <aside
-        className={`lg:hidden fixed top-0 left-0 bottom-0 z-50 w-64 glass border-r border-white/10 flex flex-col p-4 transition-transform duration-300 ease-out safe-bottom ${
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        {navContent(true)}
-      </aside>
     </>
   );
 }

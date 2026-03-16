@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
     const y = year ? parseInt(year) : new Date().getFullYear();
 
-    const [expenses, incomes, fixedPayments, loanPayments, loans, savings, salaries, projects, plannedExpenses] = await Promise.all([
+    const [expenses, incomes, fixedPayments, loanPayments, loans, savings, salaries, projects, allPlanned] = await Promise.all([
       getExpensesByDateRange(start, end),
       getIncomesByDateRange(start, end),
       getFixedChargePaymentsByDateRange(start, end),
@@ -35,6 +35,8 @@ export async function GET(req: NextRequest) {
       getProjects(),
       getPlannedExpenses(),
     ]);
+
+    const plannedExpenses = allPlanned.filter((p) => p.status !== "cancelled");
 
     return NextResponse.json({
       expenses,

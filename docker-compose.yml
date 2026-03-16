@@ -1,0 +1,13 @@
+services:
+  monbudget:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - monbudget_data:/app/data
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+volumes:
+  monbudget_data:

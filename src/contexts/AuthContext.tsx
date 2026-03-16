@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const checkAuth = useCallback(async () => {
     try {
-      const r = await fetch("/api/auth/me");
+      const r = await fetch("/api/auth/me", { credentials: "include" });
       if (r.ok) {
         const data = await r.json();
         setUser(data.user || null);
@@ -77,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
+        credentials: "include",
       });
       const data = await r.json();
       if (!r.ok) return data.error || "Erreur de connexion";
@@ -94,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(regData),
+        credentials: "include",
       });
       const data = await r.json();
       if (!r.ok) return data.error || "Erreur lors de l'inscription";
@@ -106,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   const logout = useCallback(async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     setUser(null);
     router.replace("/login");
   }, [router]);

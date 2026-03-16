@@ -1,13 +1,19 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Camera, Lock, Eye, EyeOff, User, Trash2, Check, X } from "lucide-react";
+import { getAvatarSrc } from "@/lib/constants";
 
 export default function ProfileSection({ showToast }: { showToast: (m: string, t?: string) => void }) {
   const { user, changePassword, uploadAvatar, removeAvatar } = useAuth();
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [avatarLoadError, setAvatarLoadError] = useState(false);
+
+  useEffect(() => {
+    setAvatarLoadError(false);
+  }, [user?.avatar_path]);
 
   const [showPwd, setShowPwd] = useState(false);
   const [pwdForm, setPwdForm] = useState({ current: "", newPwd: "", confirm: "" });
@@ -62,27 +68,28 @@ export default function ProfileSection({ showToast }: { showToast: (m: string, t
   return (
     <div className="glass-strong rounded-2xl p-4 lg:p-6 mb-4 lg:mb-5">
       <h3 className="text-xs lg:text-sm font-semibold mb-4 flex items-center gap-2">
-        <User size={16} className="text-indigo-400" /> Mon Profil
+        <User size={16} className="text-emerald-400" /> Mon Profil
       </h3>
 
       {/* Avatar + Infos */}
       <div className="flex items-center gap-4 mb-4">
         <div className="relative group">
-          {user.avatar_path ? (
+          {user.avatar_path && !avatarLoadError ? (
             <img
-              src={user.avatar_path}
+              src={getAvatarSrc(user.avatar_path) || ""}
               alt="Avatar"
-              className="w-16 h-16 lg:w-20 lg:h-20 rounded-full object-cover ring-2 ring-indigo-500/40"
+              className="w-16 h-16 lg:w-20 lg:h-20 rounded-full object-cover ring-2 ring-emerald-500/40"
+              onError={() => setAvatarLoadError(true)}
             />
           ) : (
-            <div className="w-16 h-16 lg:w-20 lg:h-20 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg lg:text-xl ring-2 ring-indigo-500/40">
+            <div className="w-16 h-16 lg:w-20 lg:h-20 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-bold text-lg lg:text-xl ring-2 ring-emerald-500/40">
               {initials}
             </div>
           )}
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-indigo-500 hover:bg-indigo-400 flex items-center justify-center transition-colors shadow-lg"
+            className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-emerald-500 hover:bg-emerald-400 flex items-center justify-center transition-colors shadow-lg"
           >
             <Camera size={13} className="text-white" />
           </button>
@@ -109,7 +116,7 @@ export default function ProfileSection({ showToast }: { showToast: (m: string, t
         <button
           onClick={() => fileRef.current?.click()}
           disabled={uploading}
-          className="flex-1 py-2 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+          className="flex-1 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
         >
           <Camera size={13} />
           {uploading ? "Envoi..." : user.avatar_path ? "Changer la photo" : "Ajouter une photo"}
@@ -194,7 +201,7 @@ export default function ProfileSection({ showToast }: { showToast: (m: string, t
             <button
               onClick={handlePasswordSubmit}
               disabled={pwdLoading}
-              className="flex-1 py-2.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-semibold flex items-center justify-center gap-1 transition-colors"
+              className="flex-1 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1 transition-colors"
             >
               <Check size={13} /> {pwdLoading ? "En cours..." : "Confirmer"}
             </button>

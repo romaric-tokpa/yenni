@@ -38,3 +38,23 @@ export async function getSessionFromCookies(): Promise<SessionPayload | null> {
 }
 
 export { COOKIE_NAME, EXPIRES_IN };
+
+/** Convertit le chemin avatar stocké en URL API (évite les 404 sur fichiers statiques) */
+export function getAvatarUrl(avatarPath: string | null): string | null {
+  if (!avatarPath) return null;
+  const match = avatarPath.match(/(?:^\/?)?uploads\/avatars\/(.+)$/);
+  if (match) return `/api/avatars/${match[1]}`;
+  if (/^[^/]+\.(jpg|jpeg|png|webp|gif)$/i.test(avatarPath.trim())) return `/api/avatars/${avatarPath.trim()}`;
+  return avatarPath.startsWith("/api/avatars/") ? avatarPath : null;
+}
+
+/** Options pour les cookies de session. Secure=true uniquement sur Vercel (HTTPS). */
+export function getCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.VERCEL === "1",
+    sameSite: "lax" as const,
+    maxAge: EXPIRES_IN,
+    path: "/",
+  };
+}

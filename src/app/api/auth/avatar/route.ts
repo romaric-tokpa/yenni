@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionFromCookies } from "@/lib/auth";
+import { getSessionFromCookies, getAvatarUrl } from "@/lib/auth";
 import { updateUserAvatar, getUserById } from "@/lib/db";
-import { writeFile, mkdir, unlink } from "fs/promises";
+import { writeFile, mkdir, unlink, open } from "fs/promises";
 import path from "path";
-
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "avatars");
+import { AVATARS_DIR, getAvatarFilePath } from "@/lib/paths";
 const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 
 export async function POST(req: NextRequest) {
@@ -26,22 +25,25 @@ export async function POST(req: NextRequest) {
     const ext = file.name.split(".").pop() || "jpg";
     const filename = `${session.userId}-${Date.now()}.${ext}`;
 
-    await mkdir(UPLOAD_DIR, { recursive: true });
+    await mkdir(AVATARS_DIR, { recursive: true });
 
     const oldUser = getUserById(session.userId);
     if (oldUser?.avatar_path) {
-      const oldFile = path.join(process.cwd(), "public", oldUser.avatar_path);
+      const oldFile = getAvatarFilePath(path.basename(oldUser.avatar_path));
       try { await unlink(oldFile); } catch { /* file may not exist */ }
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const filePath = path.join(UPLOAD_DIR, filename);
+    const filePath = path.join(AVATARS_DIR, filename);
     await writeFile(filePath, buffer);
+    const fd = await open(filePath, "r");
+    await fd.datasync();
+    await fd.close();
 
     const avatarPath = `/uploads/avatars/${filename}`;
     updateUserAvatar(session.userId, avatarPath);
 
-    return NextResponse.json({ avatar_path: avatarPath });
+    return NextResponse.json({ avatar_path: getAvatarUrl(avatarPath) });
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
@@ -54,7 +56,7 @@ export async function DELETE() {
 
     const user = getUserById(session.userId);
     if (user?.avatar_path) {
-      const oldFile = path.join(process.cwd(), "public", user.avatar_path);
+      const oldFile = getAvatarFilePath(path.basename(user.avatar_path));
       try { await unlink(oldFile); } catch { /* file may not exist */ }
     }
 

@@ -2,6 +2,7 @@
 import { formatCFA } from "@/lib/constants";
 import { BudgetConfig, Category } from "@/lib/types";
 import Icon from "./ui/Icon";
+import AnimatedProgressBar from "./ui/AnimatedProgressBar";
 import { Coins, CircleCheck, CircleAlert, CircleMinus, TrendingUp, TrendingDown, Scale } from "lucide-react";
 
 interface BudgetData {
@@ -69,7 +70,7 @@ export default function BudgetView({ budget }: { budget: BudgetData }) {
             Fixes ({formatCFA(totalFixed)})
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-sm bg-indigo-500" />
+            <span className="w-2 h-2 rounded-sm bg-amber-500" />
             Variables ({formatCFA(totalBudgetVar)})
           </span>
           <span className="flex items-center gap-1.5">
@@ -104,10 +105,10 @@ export default function BudgetView({ budget }: { budget: BudgetData }) {
         </div>
         <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
           <div className="flex items-center gap-1.5 mb-1">
-            <Scale size={14} className={soldeNet >= 0 ? "text-indigo-400" : "text-red-400"} />
+            <Scale size={14} className={soldeNet >= 0 ? "text-emerald-400" : "text-red-400"} />
             <span className="text-[9px] lg:text-[11px] text-slate-500">Solde net</span>
           </div>
-          <div className={`font-mono text-sm lg:text-xl font-bold ${soldeNet >= 0 ? "text-indigo-400" : "text-red-400"}`}>
+          <div className={`font-mono text-sm lg:text-xl font-bold ${soldeNet >= 0 ? "text-emerald-400" : "text-red-400"}`}>
             {soldeNet >= 0 ? "+" : "-"}{formatCFA(Math.abs(soldeNet))}
           </div>
         </div>
@@ -144,12 +145,13 @@ export default function BudgetView({ budget }: { budget: BudgetData }) {
               <div className="text-[10px] lg:text-[11px] text-slate-500 mt-0.5">
                 Dépensé: {formatCFA(spent)} ({pct.toFixed(0)}%)
               </div>
-              <div className="h-1.5 bg-white/5 rounded-full overflow-hidden mt-2 lg:mt-3">
-                <div
-                  className="progress-bar h-full rounded-full"
-                  style={{ width: `${Math.min(pct, 100)}%`, background: cat.color }}
-                />
-              </div>
+              <AnimatedProgressBar
+                value={spent}
+                max={cat.budget}
+                duration={0.6}
+                className="h-1.5 mt-2 lg:mt-3"
+                gradient={`linear-gradient(90deg, ${cat.color}, ${cat.color}dd)`}
+              />
             </div>
           );
         })}

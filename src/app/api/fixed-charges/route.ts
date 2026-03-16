@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getFixedChargePayments, getFixedChargePaymentsByDateRange, addFixedChargePayment, deleteFixedChargePayment } from "@/lib/db";
+import { getFixedChargePayments, getFixedChargePaymentsByDateRange, addFixedChargePayment, deleteFixedChargePayment, ensureRecurringPayments } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,7 +12,10 @@ export async function GET(req: NextRequest) {
     const month = sp.get("month");
     const year = sp.get("year");
     if (month !== null && year !== null) {
-      return NextResponse.json(getFixedChargePayments(parseInt(month), parseInt(year)));
+      const m = parseInt(month);
+      const y = parseInt(year);
+      ensureRecurringPayments(m, y);
+      return NextResponse.json(getFixedChargePayments(m, y));
     }
     return NextResponse.json(getFixedChargePayments());
   } catch {

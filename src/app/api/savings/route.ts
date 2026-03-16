@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSavings, setSaving } from "@/lib/db";
+import { getSavings, setSaving, getTotalSavingsCumulative } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url);
+    if (searchParams.get("cumulative") === "true") {
+      return NextResponse.json(getTotalSavingsCumulative());
+    }
     const year = parseInt(
-      new URL(req.url).searchParams.get("year") ||
-        String(new Date().getFullYear())
+      searchParams.get("year") || String(new Date().getFullYear())
     );
     return NextResponse.json(getSavings(year));
   } catch {

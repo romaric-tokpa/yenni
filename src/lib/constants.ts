@@ -26,6 +26,15 @@ export function formatCFA(n: number): string {
   return new Intl.NumberFormat("fr-FR").format(Math.round(n || 0));
 }
 
+/** URL d'avatar : /uploads/avatars/x ou uploads/avatars/x ou x → /api/avatars/x (évite 404) */
+export function getAvatarSrc(path: string | null): string | null {
+  if (!path) return null;
+  const match = path.match(/(?:^\/?)?uploads\/avatars\/(.+)$/);
+  if (match) return `/api/avatars/${match[1]}`;
+  if (/^[^/]+\.(jpg|jpeg|png|webp|gif)$/i.test(path.trim())) return `/api/avatars/${path.trim()}`;
+  return path;
+}
+
 export const AVAILABLE_ICONS = [
   "landmark", "shield", "house", "piggy-bank", "globe", "flame", "bus", "bot",
   "monitor", "paperclip", "utensils", "car", "shirt", "party-popper", "users",
@@ -38,3 +47,6 @@ export const CATEGORY_COLORS = [
   "#EC4899", "#06B6D4", "#6366F1", "#78716C", "#F97316",
   "#14B8A6", "#A855F7",
 ];
+
+/** Seuil à partir duquel on utilise la virtualisation des listes (évite le lag avec 1000+ items) */
+export const VIRTUAL_LIST_THRESHOLD = 50;

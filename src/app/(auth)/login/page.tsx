@@ -30,7 +30,7 @@ export default function LoginPage() {
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader2 size={32} className="text-violet-400 animate-spin" />
+        <Loader2 size={32} className="text-emerald-400 animate-spin" />
       </div>
     );
   }
@@ -40,11 +40,11 @@ export default function LoginPage() {
       <div className="glass-strong rounded-2xl p-6 sm:p-8 max-w-md w-full animate-slide-up">
         <div className="text-center mb-6">
           <div className="mb-3 flex justify-center">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-violet-500/20 flex items-center justify-center">
-              <Gem size={28} className="text-violet-400" />
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/20 flex items-center justify-center">
+              <Gem size={28} className="text-emerald-400" />
             </div>
           </div>
-          <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
+          <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-emerald-400 bg-clip-text text-transparent">
             Connexion
           </h1>
           <p className="text-slate-500 text-xs mt-1">Accède à ton espace Yenni</p>
@@ -85,7 +85,7 @@ export default function LoginPage() {
 
         <p className="text-center text-xs text-slate-500 mt-5">
           Pas encore de compte ?{" "}
-          <Link href="/register" className="text-indigo-400 hover:text-indigo-300 font-medium">
+          <Link href="/register" className="text-emerald-400 hover:text-emerald-300 font-medium">
             Créer un compte
           </Link>
         </p>

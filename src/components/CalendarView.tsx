@@ -16,6 +16,8 @@ const INCOME_SOURCES = [
   { id: "gift", label: "Don / Cadeau" },
   { id: "refund", label: "Remboursement" },
   { id: "investment", label: "Investissement" },
+  { id: "project", label: "Épargne projet" },
+  { id: "loan_recovery", label: "Remboursement prêt reçu" },
   { id: "other", label: "Autre" },
 ];
 
@@ -138,7 +140,7 @@ export default function CalendarView({
       });
     });
     Object.values(map).forEach((arr) =>
-      arr.sort((a, b) => a.time.localeCompare(b.time))
+      arr.sort((a, b) => b.time.localeCompare(a.time))
     );
     return map;
   }, [expenses, incomes, fixedPayments, loanPayments, loansById]);
@@ -275,28 +277,28 @@ export default function CalendarView({
         </div>
         <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
           <div className="flex items-center gap-1.5 mb-1">
-            <HandCoins size={14} className="text-purple-400" />
+            <HandCoins size={14} className="text-teal-400" />
             <span className="text-[9px] lg:text-[11px] text-slate-500">Prêts</span>
           </div>
-          <div className="font-mono text-sm lg:text-xl font-bold text-purple-400">
+          <div className="font-mono text-sm lg:text-xl font-bold text-teal-400">
             -{formatCFA(monthLoanPayments)}
           </div>
         </div>
         <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
           <div className="flex items-center gap-1.5 mb-1">
-            <ArrowDownCircle size={14} className="text-red-400" />
+            <ArrowDownCircle size={14} className="text-amber-400" />
             <span className="text-[9px] lg:text-[11px] text-slate-500">Dépenses</span>
           </div>
-          <div className="font-mono text-sm lg:text-xl font-bold text-red-400">
+          <div className="font-mono text-sm lg:text-xl font-bold text-amber-400">
             -{formatCFA(totalMonthSpent)}
           </div>
         </div>
         <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
           <div className="flex items-center gap-1.5 mb-1">
-            <Wallet size={14} className={soldeNet >= 0 ? "text-indigo-400" : "text-red-400"} />
+            <Wallet size={14} className={soldeNet >= 0 ? "text-emerald-400" : "text-red-400"} />
             <span className="text-[9px] lg:text-[11px] text-slate-500">Solde</span>
           </div>
-          <div className={`font-mono text-sm lg:text-xl font-bold ${soldeNet >= 0 ? "text-indigo-400" : "text-red-400"}`}>
+          <div className={`font-mono text-sm lg:text-xl font-bold ${soldeNet >= 0 ? "text-emerald-400" : "text-red-400"}`}>
             {soldeNet >= 0 ? "+" : "-"}{formatCFA(Math.abs(soldeNet))}
           </div>
         </div>
@@ -344,14 +346,14 @@ export default function CalendarView({
                 onClick={() => setSelectedDate(isSelected ? null : dateStr)}
                 className={`relative rounded-xl p-1 lg:p-1.5 min-h-[52px] lg:min-h-[68px] flex flex-col items-center transition-all border
                   ${isSelected
-                    ? "bg-indigo-500/20 border-indigo-500/50"
+                    ? "bg-emerald-500/20 border-emerald-500/50"
                     : isToday
-                      ? "bg-white/[0.04] border-indigo-500/30"
+                      ? "bg-white/[0.04] border-emerald-500/30"
                       : "border-transparent hover:bg-white/[0.03]"
                   }`}
               >
                 <span className={`text-[11px] lg:text-xs font-medium mb-0.5
-                  ${isToday ? "text-indigo-400 font-bold" : "text-slate-300"}`}>
+                  ${isToday ? "text-emerald-400 font-bold" : "text-slate-300"}`}>
                   {day}
                 </span>
                 {hasEvents && (
@@ -367,7 +369,7 @@ export default function CalendarView({
                       </div>
                     )}
                     {totals.loan > 0 && (
-                      <div className="text-[7px] lg:text-[8px] font-mono text-purple-400 leading-tight">
+                      <div className="text-[7px] lg:text-[8px] font-mono text-teal-400 leading-tight">
                         -{totals.loan >= 1000 ? `${Math.round(totals.loan / 1000)}k` : totals.loan}
                       </div>
                     )}
@@ -394,7 +396,7 @@ export default function CalendarView({
       {selectedDate && (
         <div className="glass-strong rounded-2xl p-4 lg:p-6 animate-slide-up">
           <h3 className="text-sm lg:text-base font-semibold mb-3 lg:mb-4 flex items-center gap-2">
-            <Clock size={16} className="text-indigo-400" />
+            <Clock size={16} className="text-emerald-400" />
             {new Date(selectedDate + "T00:00:00").toLocaleDateString("fr-FR", {
               weekday: "long", day: "numeric", month: "long",
             })}
@@ -429,7 +431,7 @@ export default function CalendarView({
                       ) : ev.type === "fixed" ? (
                         <Icon name={ev.icon || "house"} size={14} className="text-orange-400" />
                       ) : ev.type === "loan" ? (
-                        <HandCoins size={14} className="text-purple-400" />
+                        <HandCoins size={14} className="text-teal-400" />
                       ) : (
                         <TrendingUp size={14} className="text-emerald-400" />
                       )}
@@ -452,7 +454,7 @@ export default function CalendarView({
                           </span>
                         )}
                         {ev.type === "loan" && (
-                          <span className="text-[9px] lg:text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400">
+                          <span className="text-[9px] lg:text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-teal-500/20 text-teal-400">
                             Remb. prêt
                           </span>
                         )}
@@ -463,7 +465,7 @@ export default function CalendarView({
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={`font-mono text-sm font-bold ${
-                        ev.type === "income" ? "text-emerald-400" : ev.type === "fixed" ? "text-orange-300" : ev.type === "loan" ? "text-purple-300" : "text-red-300"
+                        ev.type === "income" ? "text-emerald-400" : ev.type === "fixed" ? "text-orange-300" : ev.type === "loan" ? "text-teal-300" : "text-amber-400"
                       }`}>
                         {ev.type === "income" ? "+" : "-"}{formatCFA(ev.amount)}
                       </span>
@@ -484,7 +486,7 @@ export default function CalendarView({
       {showIncomeModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={() => setShowIncomeModal(false)}>
-          <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up max-h-[90vh] overflow-y-auto"
+          <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base lg:text-lg font-bold flex items-center gap-2">
@@ -550,7 +552,7 @@ export default function CalendarView({
       {showExpenseModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={() => setShowExpenseModal(false)}>
-          <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up max-h-[90vh] overflow-y-auto"
+          <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base lg:text-lg font-bold flex items-center gap-2">

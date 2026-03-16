@@ -1,10 +1,12 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { formatCFA } from "@/lib/constants";
 import { Loan, LoanPayment } from "@/lib/types";
 import Icon from "./ui/Icon";
+import AnimatedProgressBar from "./ui/AnimatedProgressBar";
 import {
-  Plus, X, Check, Trash2, Clock, Banknote, ArrowDownLeft, ArrowUpRight,
+  Plus, X, Check, Trash2, Pencil, Clock, Banknote, ArrowDownLeft, ArrowUpRight,
   Building2, Users, HandCoins, ChevronDown, ChevronUp, AlertTriangle,
   CircleCheck, CircleAlert,
 } from "lucide-react";
@@ -52,6 +54,7 @@ interface BudgetData {
   updateLoan: (id: number, u: Partial<Loan>) => Promise<void>;
   removeLoan: (id: number) => Promise<void>;
   addLoanPayment: (p: Omit<LoanPayment, "id" | "created_at">) => Promise<boolean>;
+  updateLoanPayment: (id: number, u: Partial<Pick<LoanPayment, "amount" | "fees" | "date" | "time" | "notes">>) => Promise<boolean>;
   removeLoanPayment: (id: number) => Promise<void>;
   monthLoanPayments: number;
   totalDebt: number;
@@ -66,12 +69,29 @@ export default function LoansView({
 }) {
   const {
     loans, loanPayments, addLoan, removeLoan,
-    addLoanPayment, removeLoanPayment, monthLoanPayments, totalDebt,
+    addLoanPayment, updateLoanPayment, removeLoanPayment, monthLoanPayments, totalDebt,
   } = budget;
 
   const [showNewLoan, setShowNewLoan] = useState(false);
   const [showPayModal, setShowPayModal] = useState<Loan | null>(null);
+  const [editingPayment, setEditingPayment] = useState<{ payment: LoanPayment; loan: Loan } | null>(null);
   const [expandedLoan, setExpandedLoan] = useState<number | null>(null);
+
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  useEffect(() => {
+    const payId = searchParams.get("pay");
+    if (payId && loans.length > 0) {
+      const id = parseInt(payId, 10);
+      const loan = loans.find((l) => l.id === id);
+      if (loan) {
+        setShowPayModal(loan);
+        setExpandedLoan(id);
+        router.replace("/loans", { scroll: false });
+      }
+    }
+  }, [searchParams, loans, router]);
 
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -95,6 +115,14 @@ export default function LoansView({
   const [loanForm, setLoanForm] = useState(defaultForm);
 
   const [payForm, setPayForm] = useState({
+    amount: "",
+    fees: "",
+    date: todayStr,
+    time: nowTime,
+    notes: "",
+  });
+
+  const [editPayForm, setEditPayForm] = useState({
     amount: "",
     fees: "",
     date: todayStr,
@@ -163,6 +191,26 @@ export default function LoansView({
     }
   };
 
+  const handleEditPayment = async () => {
+    if (!editingPayment) return;
+    const amt = Number(editPayForm.amount);
+    if (!amt || amt <= 0) {
+      showToast("Montant invalide", "error");
+      return;
+    }
+    const ok = await updateLoanPayment(editingPayment.payment.id, {
+      amount: amt,
+      fees: Number(editPayForm.fees) || 0,
+      date: editPayForm.date,
+      time: editPayForm.time,
+      notes: editPayForm.notes,
+    });
+    if (ok) {
+      showToast("Paiement modifié");
+      setEditingPayment(null);
+    }
+  };
+
   const handlePay = async () => {
     if (!showPayModal || !payForm.amount || Number(payForm.amount) <= 0) {
       showToast("Montant requis", "error");
@@ -226,7 +274,7 @@ export default function LoansView({
         </div>
         <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
           <div className="text-[9px] lg:text-[11px] text-slate-500">Flux ce mois</div>
-          <div className="font-mono text-sm lg:text-xl font-bold text-indigo-400 mt-0.5">{formatCFA(monthLoanPayments)}</div>
+          <div className="font-mono text-sm lg:text-xl font-bold text-emerald-400 mt-0.5">{formatCFA(monthLoanPayments)}</div>
         </div>
       </div>
 
@@ -284,10 +332,13 @@ export default function LoansView({
                   </div>
 
                   <div className="mt-3">
-                    <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${ti.color}, ${ti.color}aa)` }} />
-                    </div>
+                    <AnimatedProgressBar
+                      value={loan.total_amount - loan.remaining_amount}
+                      max={loan.total_amount}
+                      duration={0.6}
+                      className="h-1.5"
+                      gradient={`linear-gradient(90deg, ${ti.color}, ${ti.color}aa)`}
+                    />
                     <div className="flex justify-between mt-1 text-[9px] lg:text-[10px] text-slate-500">
                       <span>{pct.toFixed(0)}% {loan.type === "personal_lent" ? "récupéré" : "remboursé"}</span>
                       {loan.next_due_date && (
@@ -349,10 +400,31 @@ export default function LoansView({
                             </span>
                             {p.fees > 0 && <span className="text-red-400/70">+{formatCFA(p.fees)} frais</span>}
                             {p.notes && <span className="text-slate-600 truncate">— {p.notes}</span>}
-                            <button onClick={async () => { await removeLoanPayment(p.id); showToast("Paiement supprimé", "info"); }}
-                              className="ml-auto text-slate-700 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
-                              <Trash2 size={10} />
-                            </button>
+                            <div className="ml-auto flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => {
+                                  setEditPayForm({
+                                    amount: String(p.amount),
+                                    fees: String(p.fees || ""),
+                                    date: p.date,
+                                    time: p.time || "00:00",
+                                    notes: p.notes || "",
+                                  });
+                                  setEditingPayment({ payment: p, loan });
+                                }}
+                                className="text-slate-700 hover:text-emerald-400 transition-colors p-0.5"
+                                title="Modifier"
+                              >
+                                <Pencil size={10} />
+                              </button>
+                              <button
+                                onClick={async () => { await removeLoanPayment(p.id); showToast("Paiement supprimé", "info"); }}
+                                className="text-slate-700 hover:text-red-400 transition-colors p-0.5"
+                                title="Supprimer"
+                              >
+                                <Trash2 size={10} />
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -402,13 +474,13 @@ export default function LoansView({
 
       {/* ── Modal — Nouveau prêt ── */}
       {showNewLoan && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={() => setShowNewLoan(false)}>
-          <div className="glass-strong w-[90%] max-w-[500px] rounded-2xl p-5 animate-slide-up"
+          <div className="glass-strong w-full sm:w-[90%] sm:max-w-[500px] rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-3">
               <h2 className="text-sm font-bold flex items-center gap-2">
-                <Plus size={16} className="text-indigo-400" /> Nouveau Prêt
+                <Plus size={16} className="text-emerald-400" /> Nouveau Prêt
               </h2>
               <button onClick={() => setShowNewLoan(false)} className="text-slate-400 p-1"><X size={18} /></button>
             </div>
@@ -574,7 +646,7 @@ export default function LoansView({
         return (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
             onClick={() => setShowPayModal(null)}>
-            <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up max-h-[90vh] overflow-y-auto"
+            <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-5">
                 <h2 className="text-base font-bold flex items-center gap-2">
@@ -586,7 +658,7 @@ export default function LoansView({
               <div className="grid gap-4">
                 <div className="glass rounded-xl p-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
                   <span>Reste: <span className={`font-mono font-medium ${isPayingBack ? "text-red-400" : "text-emerald-400"}`}>{formatCFA(showPayModal.remaining_amount)} FCFA</span></span>
-                  {showPayModal.monthly_payment > 0 && <span>Mensualité: <span className="font-mono font-medium text-indigo-400">{formatCFA(showPayModal.monthly_payment)}</span></span>}
+                  {showPayModal.monthly_payment > 0 && <span>Mensualité: <span className="font-mono font-medium text-emerald-400">{formatCFA(showPayModal.monthly_payment)}</span></span>}
                   {showPayModal.lender_borrower && <span>{isPayingBack ? "À:" : "De:"} <span className="text-slate-300">{showPayModal.lender_borrower}</span></span>}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -646,6 +718,66 @@ export default function LoansView({
                 <button onClick={() => setShowPayModal(null)} className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm">Annuler</button>
                 <button onClick={handlePay} className="btn-primary flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5">
                   <Check size={16} /> {ti.payLabel}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Modal — Modifier paiement ── */}
+      {editingPayment && (() => {
+        const { payment, loan } = editingPayment;
+        const ti = typeInfo(loan.type);
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
+            onClick={() => setEditingPayment(null)}>
+            <div className="glass-strong w-full sm:w-[420px] rounded-t-2xl sm:rounded-2xl p-6 animate-slide-up"
+              onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-base font-bold flex items-center gap-2">
+                  <Pencil size={18} style={{ color: ti.color }} />
+                  Modifier le remboursement — {loan.label}
+                </h2>
+                <button onClick={() => setEditingPayment(null)} className="text-slate-400 p-1"><X size={20} /></button>
+              </div>
+              <div className="grid gap-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Date</label>
+                    <input type="date" className="input-field" value={editPayForm.date}
+                      onChange={(e) => setEditPayForm({ ...editPayForm, date: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Heure</label>
+                    <input type="time" className="input-field" value={editPayForm.time}
+                      onChange={(e) => setEditPayForm({ ...editPayForm, time: e.target.value })} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Montant (FCFA)</label>
+                    <input type="number" className="input-field font-mono" placeholder="0"
+                      value={editPayForm.amount} onChange={(e) => setEditPayForm({ ...editPayForm, amount: e.target.value })} />
+                  </div>
+                  {loan.type === "bank" ? (
+                    <div>
+                      <label className="text-xs text-slate-400 mb-1 block">Frais (FCFA)</label>
+                      <input type="number" className="input-field font-mono" placeholder="0"
+                        value={editPayForm.fees} onChange={(e) => setEditPayForm({ ...editPayForm, fees: e.target.value })} />
+                    </div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Notes (optionnel)</label>
+                  <input className="input-field" placeholder="Virement, prélèvement..."
+                    value={editPayForm.notes} onChange={(e) => setEditPayForm({ ...editPayForm, notes: e.target.value })} />
+                </div>
+              </div>
+              <div className="flex gap-3 mt-5">
+                <button onClick={() => setEditingPayment(null)} className="flex-1 py-2.5 rounded-xl border border-white/10 text-slate-400 text-sm">Annuler</button>
+                <button onClick={handleEditPayment} className="btn-primary flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5">
+                  <Check size={14} /> Enregistrer
                 </button>
               </div>
             </div>

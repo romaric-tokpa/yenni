@@ -1,6 +1,10 @@
 "use client";
+import dynamic from "next/dynamic";
 import { useBudgetContext } from "@/contexts/BudgetContext";
-import ProjectsView from "@/components/ProjectsView";
+
+const ProjectsView = dynamic(() => import("@/components/ProjectsView"), {
+  loading: () => <div className="animate-pulse h-64 rounded-2xl bg-white/5" />,
+});
 
 export default function ProjectsPage() {
   const { showToast, ...budget } = useBudgetContext();
