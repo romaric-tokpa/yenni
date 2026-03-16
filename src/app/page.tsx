@@ -3,25 +3,27 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Gem, ArrowRight, Wallet, Settings, PiggyBank } from "lucide-react";
-import { BudgetConfig } from "@/lib/types";
-import { DEFAULT_CONFIG } from "@/lib/constants";
 
 export default function Home() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    fetch("/api/config")
-      .then((r) => r.json())
-      .then((config: BudgetConfig) => {
-        const isConfigured = config.salary > 0 || config.fixedCharges.length > 0;
-        if (isConfigured) {
+    fetch("/api/auth/me")
+      .then((r) => {
+        if (r.ok) return r.json();
+        throw new Error("not auth");
+      })
+      .then((data) => {
+        if (data.user) {
           router.replace("/dashboard");
         } else {
-          setChecking(false);
+          router.replace("/login");
         }
       })
-      .catch(() => setChecking(false));
+      .catch(() => {
+        setChecking(false);
+      });
   }, [router]);
 
   if (checking) {
@@ -31,7 +33,7 @@ export default function Home() {
           <div className="mb-4 animate-pulse flex justify-center">
             <Gem size={48} className="text-violet-400" />
           </div>
-          <div className="font-mono text-lg text-violet-400">MonBudget</div>
+          <div className="font-mono text-lg text-violet-400">Yenni</div>
           <div className="text-sm text-slate-500 mt-2">Chargement...</div>
         </div>
       </div>
@@ -47,7 +49,7 @@ export default function Home() {
           </div>
         </div>
         <h1 className="text-xl sm:text-2xl font-bold mb-2 bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
-          Bienvenue sur MonBudget
+          Bienvenue sur Yenni
         </h1>
         <p className="text-slate-400 text-sm mb-8">
           Configure ton budget pour commencer à suivre tes finances.
@@ -84,10 +86,16 @@ export default function Home() {
         </div>
 
         <Link
-          href="/settings"
-          className="btn-primary w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
+          href="/register"
+          className="btn-primary w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 mb-3"
         >
-          Configurer mon budget <ArrowRight size={16} />
+          Créer un compte <ArrowRight size={16} />
+        </Link>
+        <Link
+          href="/login"
+          className="w-full py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border border-white/10 text-slate-400 hover:bg-white/5 transition-colors"
+        >
+          Se connecter
         </Link>
       </div>
     </div>

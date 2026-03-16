@@ -132,6 +132,19 @@ export function getDb(): Database.Database {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      phone TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
+
     CREATE INDEX IF NOT EXISTS idx_planned_expenses_due ON planned_expenses(due_date);
     CREATE INDEX IF NOT EXISTS idx_planned_expenses_status ON planned_expenses(status);
     CREATE INDEX IF NOT EXISTS idx_loan_payments_loan ON loan_payments(loan_id);
@@ -147,6 +160,12 @@ export function getDb(): Database.Database {
   const expCols = db.prepare("PRAGMA table_info(expenses)").all() as { name: string }[];
   if (!expCols.find((c) => c.name === "time")) {
     db.exec("ALTER TABLE expenses ADD COLUMN time TEXT NOT NULL DEFAULT '00:00'");
+  }
+
+  // Migration: add avatar_path column to users if missing
+  const userCols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+  if (!userCols.find((c) => c.name === "avatar_path")) {
+    db.exec("ALTER TABLE users ADD COLUMN avatar_path TEXT DEFAULT NULL");
   }
 
   return db;
@@ -607,4 +626,45 @@ export function executeDuePlannedExpenses(): { executed: number; ids: number[] }
   });
   tx();
   return { executed: executedIds.length, ids: executedIds };
+}
+
+// ── Users ──
+
+export interface UserRow {
+  id: number;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  password_hash: string;
+  avatar_path: string | null;
+  created_at: string;
+}
+
+export function getUserByEmail(email: string): UserRow | null {
+  return (getDb().prepare("SELECT * FROM users WHERE email = ?").get(email) as UserRow) || null;
+}
+
+export function getUserByPhone(phone: string): UserRow | null {
+  return (getDb().prepare("SELECT * FROM users WHERE phone = ?").get(phone) as UserRow) || null;
+}
+
+export function getUserById(id: number): UserRow | null {
+  return (getDb().prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow) || null;
+}
+
+export function createUser(u: { first_name: string; last_name: string; phone: string; email: string; password_hash: string }): UserRow {
+  const d = getDb();
+  const result = d.prepare(
+    "INSERT INTO users (first_name, last_name, phone, email, password_hash) VALUES (?, ?, ?, ?, ?)"
+  ).run(u.first_name, u.last_name, u.phone, u.email, u.password_hash);
+  return d.prepare("SELECT * FROM users WHERE id = ?").get(result.lastInsertRowid) as UserRow;
+}
+
+export function updateUserPassword(id: number, newHash: string): boolean {
+  return getDb().prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newHash, id).changes > 0;
+}
+
+export function updateUserAvatar(id: number, avatarPath: string | null): boolean {
+  return getDb().prepare("UPDATE users SET avatar_path = ? WHERE id = ?").run(avatarPath, id).changes > 0;
 }

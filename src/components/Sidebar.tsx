@@ -17,6 +17,8 @@ import {
   Menu,
   X,
   ChevronLeft,
+  LogOut,
+  User,
 } from "lucide-react";
 
 const tabs = [
@@ -31,7 +33,15 @@ const tabs = [
   { href: "/settings", label: "Réglages", Icon: Settings },
 ];
 
-export default function Sidebar({ dailyBudget }: { dailyBudget: number }) {
+interface AuthUser {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  avatar_path: string | null;
+}
+
+export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: number; user: AuthUser; onLogout: () => void }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -56,7 +66,7 @@ export default function Sidebar({ dailyBudget }: { dailyBudget: number }) {
           <Gem size={collapsed && !isMobile ? 28 : 24} className="text-violet-400 shrink-0" />
           {(!collapsed || isMobile) && (
             <span className="font-mono text-base font-bold bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
-              MonBudget
+              Yenni
             </span>
           )}
         </Link>
@@ -92,7 +102,7 @@ export default function Sidebar({ dailyBudget }: { dailyBudget: number }) {
         })}
       </nav>
 
-      <div className={`mt-auto pt-3 ${collapsed && !isMobile ? "px-0" : "px-1"}`}>
+      <div className={`mt-auto pt-3 ${collapsed && !isMobile ? "px-0" : "px-1"} space-y-2`}>
         <div className={`glass rounded-xl ${collapsed && !isMobile ? "p-2" : "p-3"} text-center`}>
           {collapsed && !isMobile ? (
             <div className="font-mono text-sm font-bold text-emerald-400">{formatCFA(dailyBudget)}</div>
@@ -104,6 +114,33 @@ export default function Sidebar({ dailyBudget }: { dailyBudget: number }) {
             </>
           )}
         </div>
+
+        <div className={`flex items-center ${collapsed && !isMobile ? "justify-center" : "gap-2.5 px-1"} py-2`}>
+          {user.avatar_path ? (
+            <img src={user.avatar_path} alt="" className="w-8 h-8 rounded-full object-cover ring-1 ring-indigo-500/40 shrink-0" />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500/30 to-violet-500/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-indigo-300">
+              {user.first_name.charAt(0)}{user.last_name.charAt(0)}
+            </div>
+          )}
+          {(!collapsed || isMobile) && (
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] font-semibold text-slate-300 truncate">{user.first_name} {user.last_name}</div>
+              <div className="text-[9px] text-slate-500 truncate">{user.email}</div>
+            </div>
+          )}
+          <button onClick={() => { if (isMobile) setMobileOpen(false); onLogout(); }}
+            title="Déconnexion"
+            className={`${collapsed && !isMobile ? "hidden" : ""} p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0`}>
+            <LogOut size={14} />
+          </button>
+        </div>
+        {collapsed && !isMobile && (
+          <button onClick={onLogout} title="Déconnexion"
+            className="w-full flex justify-center py-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+            <LogOut size={14} />
+          </button>
+        )}
       </div>
     </>
   );

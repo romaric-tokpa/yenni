@@ -10,6 +10,12 @@ import {
   CircleCheck, CircleAlert, CircleMinus,
 } from "lucide-react";
 
+interface AuthUser {
+  first_name: string;
+  last_name: string;
+  avatar_path: string | null;
+}
+
 interface BudgetData {
   config: BudgetConfig;
   totalIncome: number;
@@ -42,7 +48,7 @@ function StatusDot({ level }: { level: "good" | "warn" | "bad" }) {
   return <CircleMinus size={16} className="text-red-400" />;
 }
 
-export default function Dashboard({ budget }: { budget: BudgetData }) {
+export default function Dashboard({ budget, user }: { budget: BudgetData; user?: AuthUser | null }) {
   const {
     config,
     totalIncome,
@@ -144,13 +150,36 @@ export default function Dashboard({ budget }: { budget: BudgetData }) {
 
   return (
     <div className="animate-slide-up">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-5 lg:mb-7">
-        <div>
-          <h1 className="text-xl lg:text-2xl font-bold text-slate-100">Tableau de bord</h1>
-          <p className="text-slate-500 text-xs sm:text-sm mt-0.5">
-            {MONTHS_FULL[selectedMonth]} {selectedYear} — Vue d&apos;ensemble
-          </p>
+      <div className="flex flex-col gap-3 mb-5 lg:mb-7">
+        {/* Ligne supérieure : titre + profil utilisateur */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl lg:text-2xl font-bold text-slate-100">Tableau de bord</h1>
+            <p className="text-slate-500 text-xs sm:text-sm mt-0.5">
+              {MONTHS_FULL[selectedMonth]} {selectedYear} — Vue d&apos;ensemble
+            </p>
+          </div>
+          {user && (
+            <div className="flex items-center gap-2.5">
+              <div className="text-right hidden sm:block">
+                <p className="text-sm font-semibold text-slate-200 leading-tight">{user.first_name} {user.last_name}</p>
+                <p className="text-[10px] text-slate-500">Bienvenue !</p>
+              </div>
+              {user.avatar_path ? (
+                <img
+                  src={user.avatar_path}
+                  alt=""
+                  className="w-10 h-10 lg:w-11 lg:h-11 rounded-full object-cover ring-2 ring-indigo-500/40 shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 lg:w-11 lg:h-11 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm ring-2 ring-indigo-500/40 shrink-0">
+                  {user.first_name.charAt(0)}{user.last_name.charAt(0)}
+                </div>
+              )}
+            </div>
+          )}
         </div>
+        {/* Sélecteurs mois / année */}
         <div className="flex gap-2">
           <select
             className="input-field w-full sm:w-36"

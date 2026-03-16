@@ -1,22 +1,32 @@
 "use client";
 import { BudgetProvider, useBudgetContext } from "@/contexts/BudgetContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Sidebar from "@/components/Sidebar";
 import Toast from "@/components/ui/Toast";
-import { Gem } from "lucide-react";
+import { Gem, Loader2 } from "lucide-react";
 
 function AppShell({ children }: { children: React.ReactNode }) {
   const { dailyBudget, loading, toast } = useBudgetContext();
+  const { user, loading: authLoading, logout } = useAuth();
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="mb-4 animate-pulse flex justify-center">
             <Gem size={48} className="text-violet-400" />
           </div>
-          <div className="font-mono text-lg text-violet-400">MonBudget</div>
+          <div className="font-mono text-lg text-violet-400">Yenni</div>
           <div className="text-sm text-slate-500 mt-2">Chargement...</div>
         </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 size={32} className="text-violet-400 animate-spin" />
       </div>
     );
   }
@@ -24,7 +34,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col lg:flex-row min-h-screen">
       {toast && <Toast message={toast.msg} type={toast.type} />}
-      <Sidebar dailyBudget={dailyBudget} />
+      <Sidebar dailyBudget={dailyBudget} user={user} onLogout={logout} />
       <main className="flex-1 px-4 pt-14 pb-6 lg:pt-8 lg:p-8 overflow-y-auto lg:max-h-screen">
         {children}
       </main>
@@ -34,8 +44,10 @@ function AppShell({ children }: { children: React.ReactNode }) {
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <BudgetProvider>
-      <AppShell>{children}</AppShell>
-    </BudgetProvider>
+    <AuthProvider>
+      <BudgetProvider>
+        <AppShell>{children}</AppShell>
+      </BudgetProvider>
+    </AuthProvider>
   );
 }
