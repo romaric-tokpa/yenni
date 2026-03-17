@@ -39,9 +39,10 @@ export async function getSessionFromCookies(): Promise<SessionPayload | null> {
 
 export { COOKIE_NAME, EXPIRES_IN };
 
-/** Convertit le chemin avatar stocké en URL API (évite les 404 sur fichiers statiques) */
+/** Retourne l'URL ou data URI pour l'avatar (base64 en DB utilisé directement, chemin legacy → /api/avatars/x) */
 export function getAvatarUrl(avatarPath: string | null): string | null {
   if (!avatarPath) return null;
+  if (avatarPath.startsWith("data:")) return avatarPath;
   const match = avatarPath.match(/(?:^\/?)?uploads\/avatars\/(.+)$/);
   if (match) return `/api/avatars/${match[1]}`;
   if (/^[^/]+\.(jpg|jpeg|png|webp|gif)$/i.test(avatarPath.trim())) return `/api/avatars/${avatarPath.trim()}`;

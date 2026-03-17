@@ -26,9 +26,10 @@ export function formatCFA(n: number): string {
   return new Intl.NumberFormat("fr-FR").format(Math.round(n || 0));
 }
 
-/** URL d'avatar : /uploads/avatars/x ou uploads/avatars/x ou x → /api/avatars/x (évite 404) */
+/** URL d'avatar : data URI (base64) ou chemin legacy → /api/avatars/x */
 export function getAvatarSrc(path: string | null): string | null {
   if (!path) return null;
+  if (path.startsWith("data:")) return path;
   const match = path.match(/(?:^\/?)?uploads\/avatars\/(.+)$/);
   if (match) return `/api/avatars/${match[1]}`;
   if (/^[^/]+\.(jpg|jpeg|png|webp|gif)$/i.test(path.trim())) return `/api/avatars/${path.trim()}`;
