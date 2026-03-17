@@ -35,7 +35,7 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     if (!body.id)
       return NextResponse.json({ error: "ID requis" }, { status: 400 });
-    const project = updateProject(body.id, body);
+    const project = await updateProject(body.id, body);
     return project
       ? NextResponse.json(project)
       : NextResponse.json({ error: "Non trouvé" }, { status: 404 });

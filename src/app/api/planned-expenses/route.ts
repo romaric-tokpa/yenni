@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
       if (!expense) return NextResponse.json({ error: "Non trouvé ou déjà exécuté" }, { status: 404 });
       return NextResponse.json(expense);
     }
-    return NextResponse.json(getPlannedExpenses(status));
+    return NextResponse.json(await getPlannedExpenses(status));
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }

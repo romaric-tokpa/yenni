@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
     const loanId = sp.get("loan_id");
     const month = sp.get("month");
     const year = sp.get("year");
-    if (loanId) return NextResponse.json(getLoanPayments(parseInt(loanId)));
+    if (loanId) return NextResponse.json(await getLoanPayments(parseInt(loanId)));
     if (month !== null && year !== null) return NextResponse.json(await getLoanPayments(undefined, parseInt(month), parseInt(year)));
     return NextResponse.json(await getLoanPayments());
   } catch {

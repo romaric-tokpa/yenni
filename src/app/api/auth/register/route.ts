@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Cet email est déjà utilisé" }, { status: 409 });
     }
 
-    if (getUserByPhone(phone)) {
+    if (await getUserByPhone(phone)) {
       return NextResponse.json({ error: "Ce numéro de téléphone est déjà utilisé" }, { status: 409 });
     }
 

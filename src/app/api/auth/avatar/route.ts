@@ -54,7 +54,7 @@ export async function DELETE() {
     const session = await getSessionFromCookies();
     if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
-    const user = getUserById(session.userId);
+    const user = await getUserById(session.userId);
     if (user?.avatar_path) {
       const oldFile = getAvatarFilePath(path.basename(user.avatar_path));
       try { await unlink(oldFile); } catch { /* file may not exist */ }

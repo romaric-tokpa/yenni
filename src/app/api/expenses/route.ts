@@ -17,8 +17,8 @@ export async function GET(req: NextRequest) {
     const offset = offsetParam ? parseInt(offsetParam, 10) : undefined;
     const expenses =
       month !== null && year !== null
-        ? getExpenses(parseInt(month), parseInt(year), limit, offset)
-        : getExpenses(undefined, undefined, limit, offset);
+        ? await getExpenses(parseInt(month), parseInt(year), limit, offset)
+        : await getExpenses(undefined, undefined, limit, offset);
     return NextResponse.json(expenses);
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });

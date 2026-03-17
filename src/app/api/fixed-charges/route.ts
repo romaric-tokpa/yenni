@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     if (!charge_id || !label || !amount || amount <= 0 || !date || month === undefined || !year) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
-    const payment = addFixedChargePayment({
+    const payment = await addFixedChargePayment({
       charge_id,
       label,
       icon: icon || "house",
