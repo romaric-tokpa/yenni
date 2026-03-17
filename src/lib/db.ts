@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import type { InStatement } from "@libsql/client";
 import { getDbClient, isTurso } from "./db/client";
 import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, MonthlySaving, FixedChargePayment, Loan, LoanPayment, PlannedExpense } from "./types";
 import { DEFAULT_CONFIG } from "./constants";
@@ -1060,7 +1061,7 @@ export async function importBackup(backup: BackupData): Promise<{ success: boole
   const db = getDbClient();
   const tx = await db.transaction("write");
   try {
-    const batch: Array<{ sql: string; args?: unknown[] }> = [
+    const batch: InStatement[] = [
       { sql: "DELETE FROM loan_payments" },
       { sql: "DELETE FROM loans" },
       { sql: "DELETE FROM fixed_charge_payments" },
