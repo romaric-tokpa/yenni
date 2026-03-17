@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSessionFromCookies } from "@/lib/auth";
 import { getPlannedExpenses, addPlannedExpense, updatePlannedExpense, deletePlannedExpense, executeDuePlannedExpenses, executePlannedExpenseById } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await getSessionFromCookies();
+    if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
     const sp = new URL(req.url).searchParams;
     const status = sp.get("status") || undefined;
     const execute = sp.get("execute");
     const executeId = sp.get("execute_id");
     if (execute === "true") {
-      const result = await executeDuePlannedExpenses();
+      const result = await executeDuePlannedExpenses(session.userId);
       return NextResponse.json(result);
     }
     if (executeId) {
-      const expense = await executePlannedExpenseById(parseInt(executeId));
+      const expense = await executePlannedExpenseById(parseInt(executeId), session.userId);
       if (!expense) return NextResponse.json({ error: "Non trouvé ou déjà exécuté" }, { status: 404 });
       return NextResponse.json(expense);
     }

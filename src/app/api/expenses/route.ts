@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSessionFromCookies } from "@/lib/auth";
 import { getExpenses, getExpensesByDateRange, addExpense, updateExpense, deleteExpense } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
@@ -28,6 +29,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSessionFromCookies();
+    if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
     const body = await req.json();
     if (
       !body.date ||
@@ -38,7 +42,7 @@ export async function POST(req: NextRequest) {
     ) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
-    const expense = await addExpense(body);
+    const expense = await addExpense(body, session.userId);
     return NextResponse.json(expense, { status: 201 });
   } catch (err) {
     console.error("[API ERROR]", err);

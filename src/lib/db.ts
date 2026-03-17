@@ -23,7 +23,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -186,12 +186,12 @@ export async function getExpenses(month?: number, year?: number, limit?: number,
   return rowsToObjs<Expense>(rs.rows as Row[], rs.columns);
 }
 
-export async function addExpense(exp: Omit<Expense, "id" | "created_at">): Promise<Expense> {
+export async function addExpense(exp: Omit<Expense, "id" | "created_at">, userId: number): Promise<Expense> {
   await ensureMigrations();
   const db = getDbClient();
   const rs = await db.execute({
-    sql: "INSERT INTO expenses (date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [exp.date, exp.time || "00:00", exp.description, exp.category, exp.amount, exp.notes || ""],
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [userId, exp.date, exp.time || "00:00", exp.description, exp.category, exp.amount, exp.notes || ""],
   });
   return rowToObj<Expense>(rs.rows[0] as Row, rs.columns);
 }
@@ -928,7 +928,7 @@ export async function updatePlannedExpense(id: number, updates: Partial<PlannedE
   return rowToObj<PlannedExpense>(rs.rows[0] as Row, rs.columns);
 }
 
-export async function executePlannedExpenseById(id: number): Promise<Expense | null> {
+export async function executePlannedExpenseById(id: number, userId: number): Promise<Expense | null> {
   await ensureMigrations();
   const db = getDbClient();
   const pRs = await db.execute({
@@ -941,8 +941,8 @@ export async function executePlannedExpenseById(id: number): Promise<Expense | n
   const now = new Date();
   const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   const ins = await db.execute({
-    sql: "INSERT INTO expenses (date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [today, time, p.description, p.category, p.amount, p.notes ? `[Planifié] ${p.notes}` : "[Planifié]"],
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [userId, today, time, p.description, p.category, p.amount, p.notes ? `[Planifié] ${p.notes}` : "[Planifié]"],
   });
   const expense = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
   await db.execute({
@@ -965,7 +965,7 @@ export async function deletePlannedExpense(id: number): Promise<boolean> {
   return (rs.rowsAffected ?? 0) > 0;
 }
 
-export async function executeDuePlannedExpenses(): Promise<{ executed: number; ids: number[] }> {
+export async function executeDuePlannedExpenses(userId: number): Promise<{ executed: number; ids: number[] }> {
   await ensureMigrations();
   const db = getDbClient();
   const today = new Date().toISOString().split("T")[0];
@@ -979,8 +979,8 @@ export async function executeDuePlannedExpenses(): Promise<{ executed: number; i
   try {
     for (const p of due) {
       const ins = await tx.execute({
-        sql: "INSERT INTO expenses (date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
-        args: [p.due_date, "00:00", p.description, p.category, p.amount, p.notes ? `[Planifié] ${p.notes}` : "[Planifié]"],
+        sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+        args: [userId, p.due_date, "00:00", p.description, p.category, p.amount, p.notes ? `[Planifié] ${p.notes}` : "[Planifié]"],
       });
       const exp = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
       await tx.execute({
@@ -1113,7 +1113,7 @@ export async function exportBackup(): Promise<BackupData> {
   };
 }
 
-export async function importBackup(backup: BackupData): Promise<{ success: boolean; error?: string }> {
+export async function importBackup(backup: BackupData, userId: number): Promise<{ success: boolean; error?: string }> {
   const data = backup?.data;
   if (!data || typeof data !== "object") {
     return { success: false, error: "Format de sauvegarde invalide" };
@@ -1142,8 +1142,8 @@ export async function importBackup(backup: BackupData): Promise<{ success: boole
     }
     for (const e of data.expenses || []) {
       batch.push({
-        sql: "INSERT INTO expenses (id, date, time, description, category, amount, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        args: [e.id, e.date, e.time || "00:00", e.description, e.category, e.amount, e.notes || "", e.created_at || new Date().toISOString()],
+        sql: "INSERT INTO expenses (id, user_id, date, time, description, category, amount, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        args: [e.id, userId, e.date, e.time || "00:00", e.description, e.category, e.amount, e.notes || "", e.created_at || new Date().toISOString()],
       });
     }
     for (const i of data.incomes || []) {
