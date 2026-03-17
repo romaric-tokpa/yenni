@@ -28,6 +28,7 @@ interface BudgetData {
   soldeNet: number;
   resteAVivre: number;
   dailyBudget: number;
+  daysLeftInMonth: number;
   totalSaved: number;
   totalProjectSaved: number;
   monthSalary: number;
@@ -61,6 +62,7 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     soldeNet,
     resteAVivre,
     dailyBudget,
+    daysLeftInMonth,
     totalSaved,
     totalProjectSaved,
     monthSalary,
@@ -132,7 +134,7 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     {
       label: "Solde Disponible",
       value: formatCFA(Math.abs(soldeNet)),
-      sub: soldeNet >= 0 ? `${formatCFA(dailyBudget)} / jour restant` : "Solde négatif",
+      sub: soldeNet >= 0 ? `${formatCFA(dailyBudget)} / jour · ${daysLeftInMonth} jour${daysLeftInMonth > 1 ? "s" : ""} restant${daysLeftInMonth > 1 ? "s" : ""}` : "Solde négatif",
       color: soldeNet >= 0 ? "text-emerald-400" : "text-red-400",
       shadow: soldeNet >= 0 ? "shadow-emerald-500/10" : "shadow-red-500/10",
       IconComp: soldeNet >= 0 ? Wallet : Scale,

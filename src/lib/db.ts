@@ -59,10 +59,17 @@ async function runMigrations(): Promise<void> {
       }
     }
 
-    await db.execute({
-      sql: "INSERT INTO schema_migrations (version) VALUES (?)",
-      args: [v],
-    });
+    try {
+      await db.execute({
+        sql: "INSERT INTO schema_migrations (version) VALUES (?)",
+        args: [v],
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const causeMsg = e instanceof Error && e.cause instanceof Error ? e.cause.message : "";
+      if (msg.includes("UNIQUE constraint") || causeMsg.includes("UNIQUE constraint")) continue;
+      throw e;
+    }
   }
 }
 

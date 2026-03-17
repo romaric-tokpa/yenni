@@ -13,10 +13,15 @@ function invalidateHistoryCache() {
   );
 }
 
-function daysLeftInMonth(): number {
+/** Jours restants dans le mois (exercice comptable mois par mois) */
+function getDaysLeftInMonth(month: number, year: number): number {
   const now = new Date();
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  return lastDay - now.getDate() + 1;
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  if (year < currentYear || (year === currentYear && month < currentMonth)) return 0;
+  if (year > currentYear || (year === currentYear && month > currentMonth)) return lastDay;
+  return Math.max(0, lastDay - now.getDate());
 }
 
 export function useBudget() {
@@ -601,7 +606,8 @@ export function useBudget() {
     () => config.categories.reduce((s, c) => s + c.budget, 0),
     [config]
   );
-  const dailyBudget = soldeNet > 0 ? Math.round(soldeNet / Math.max(1, daysLeftInMonth())) : 0;
+  const daysLeft = getDaysLeftInMonth(selectedMonth, selectedYear);
+  const dailyBudget = soldeNet > 0 ? Math.round(soldeNet / Math.max(1, daysLeft)) : 0;
 
   return {
     config,
@@ -665,6 +671,7 @@ export function useBudget() {
     monthLoanRepayments,
     monthLoanRecovered,
     totalDebt,
+    daysLeftInMonth: daysLeft,
     plannedExpenses,
     addPlannedExpense,
     updatePlannedExpense,
