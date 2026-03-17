@@ -20,8 +20,9 @@ export async function GET(req: NextRequest) {
         ? await getExpenses(parseInt(month), parseInt(year), limit, offset)
         : await getExpenses(undefined, undefined, limit, offset);
     return NextResponse.json(expenses);
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -39,8 +40,9 @@ export async function POST(req: NextRequest) {
     }
     const expense = await addExpense(body);
     return NextResponse.json(expense, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -72,8 +74,9 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Dépense introuvable" }, { status: 404 });
     }
     return NextResponse.json(expense);
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -87,7 +90,8 @@ export async function DELETE(req: NextRequest) {
     return ok
       ? NextResponse.json({ success: true })
       : NextResponse.json({ error: "Non trouvé" }, { status: 404 });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

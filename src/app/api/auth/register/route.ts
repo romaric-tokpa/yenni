@@ -63,8 +63,8 @@ export async function POST(req: NextRequest) {
     response.cookies.set(COOKIE_NAME, token, getCookieOptions());
 
     return response;
-  } catch (e) {
-    console.error("Register error:", e);
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

@@ -18,8 +18,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(await getFixedChargePayments(m, y));
     }
     return NextResponse.json(await getFixedChargePayments());
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -42,8 +43,9 @@ export async function POST(req: NextRequest) {
       notes: notes || "",
     });
     return NextResponse.json(payment, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -54,7 +56,8 @@ export async function DELETE(req: NextRequest) {
     const ok = await deleteFixedChargePayment(id);
     if (!ok) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

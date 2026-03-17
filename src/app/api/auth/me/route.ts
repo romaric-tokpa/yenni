@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromCookies, getAvatarUrl } from "@/lib/auth";
 import { getUserById } from "@/lib/db";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await getSessionFromCookies();
     if (!session) {
@@ -24,7 +24,8 @@ export async function GET() {
         avatar_path: getAvatarUrl(user.avatar_path) || null,
       },
     });
-  } catch {
-    return NextResponse.json({ user: null }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

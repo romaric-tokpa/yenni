@@ -17,8 +17,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(expense);
     }
     return NextResponse.json(await getPlannedExpenses(status));
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -30,8 +31,9 @@ export async function POST(req: NextRequest) {
     }
     const planned = await addPlannedExpense(body);
     return NextResponse.json(planned, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -43,8 +45,9 @@ export async function PUT(req: NextRequest) {
     const updated = await updatePlannedExpense(id, updates);
     if (!updated) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json(updated);
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -55,7 +58,8 @@ export async function DELETE(req: NextRequest) {
     const ok = await deletePlannedExpense(id);
     if (!ok) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { ensureDailyBackup, getAutoBackupList } from "@/lib/db";
 import path from "path";
 import fs from "fs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     await ensureDailyBackup();
     const list = await getAutoBackupList();
@@ -14,9 +14,9 @@ export async function GET() {
       })),
     });
   } catch (err) {
-    console.error("Auto backup error:", err);
+    console.error("[API ERROR]", req.method, req.url, err);
     return NextResponse.json(
-      { error: "Erreur lors de la sauvegarde automatique" },
+      { error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }

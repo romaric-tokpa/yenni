@@ -29,9 +29,9 @@ export async function GET(
       },
     });
   } catch (err) {
-    console.error("Backup download error:", err);
+    console.error("[API ERROR]", _req.method, _req.url, err);
     return NextResponse.json(
-      { error: "Erreur lors du téléchargement" },
+      { error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }

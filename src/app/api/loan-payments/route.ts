@@ -13,8 +13,9 @@ export async function GET(req: NextRequest) {
     if (loanId) return NextResponse.json(await getLoanPayments(parseInt(loanId)));
     if (month !== null && year !== null) return NextResponse.json(await getLoanPayments(undefined, parseInt(month), parseInt(year)));
     return NextResponse.json(await getLoanPayments());
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -30,8 +31,9 @@ export async function POST(req: NextRequest) {
     }
     const payment = await addLoanPayment(body);
     return NextResponse.json(payment, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -50,8 +52,9 @@ export async function PUT(req: NextRequest) {
     const payment = await updateLoanPayment(id, updates);
     if (!payment) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json(payment);
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -62,7 +65,8 @@ export async function DELETE(req: NextRequest) {
     const ok = await deleteLoanPayment(id);
     if (!ok) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

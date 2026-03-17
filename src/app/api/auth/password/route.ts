@@ -27,7 +27,8 @@ export async function PUT(req: NextRequest) {
     await updateUserPassword(user.id, hash);
 
     return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

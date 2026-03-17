@@ -11,8 +11,9 @@ export async function GET(req: NextRequest) {
       searchParams.get("year") || String(new Date().getFullYear())
     );
     return NextResponse.json(await getSavings(year));
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -24,7 +25,8 @@ export async function PUT(req: NextRequest) {
     }
     await setSaving(month, year, amount);
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

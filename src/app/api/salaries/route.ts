@@ -8,8 +8,9 @@ export async function GET(req: NextRequest) {
         String(new Date().getFullYear())
     );
     return NextResponse.json(await getSalaries(year));
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -21,7 +22,8 @@ export async function PUT(req: NextRequest) {
     }
     await setSalary(month, year, Math.max(0, amount));
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

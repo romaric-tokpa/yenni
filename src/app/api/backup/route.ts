@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exportBackup, importBackup } from "@/lib/db";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const backup = await exportBackup();
     const filename = `monbudget-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -12,9 +12,9 @@ export async function GET() {
       },
     });
   } catch (err) {
-    console.error("Backup export error:", err);
+    console.error("[API ERROR]", req.method, req.url, err);
     return NextResponse.json(
-      { error: "Erreur lors de l'export" },
+      { error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }
@@ -32,9 +32,9 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("Backup import error:", err);
+    console.error("[API ERROR]", req.method, req.url, err);
     return NextResponse.json(
-      { error: "Erreur lors de la restauration" },
+      { error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }

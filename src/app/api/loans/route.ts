@@ -5,8 +5,9 @@ export async function GET(req: NextRequest) {
   try {
     const status = new URL(req.url).searchParams.get("status") || undefined;
     return NextResponse.json(await getLoans(status));
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -19,8 +20,9 @@ export async function POST(req: NextRequest) {
     if (!body.remaining_amount) body.remaining_amount = body.total_amount;
     const loan = await addLoan(body);
     return NextResponse.json(loan, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -32,8 +34,9 @@ export async function PUT(req: NextRequest) {
     const loan = await updateLoan(id, updates);
     if (!loan) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json(loan);
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -44,7 +47,8 @@ export async function DELETE(req: NextRequest) {
     const ok = await deleteLoan(id);
     if (!ok) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  } catch (err) {
+    console.error("[API ERROR]", req.method, req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

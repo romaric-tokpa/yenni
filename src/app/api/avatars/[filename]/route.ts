@@ -43,6 +43,7 @@ export async function GET(
         headers: { "Cache-Control": "no-store" },
       });
     }
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+    console.error("[API ERROR]", _req.method, _req.url, err);
+    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
