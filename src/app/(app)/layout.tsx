@@ -7,7 +7,7 @@ import BottomNav from "@/components/BottomNav";
 import PageTransition from "@/components/PageTransition";
 import Toast from "@/components/ui/Toast";
 import NotificationBell from "@/components/NotificationBell";
-import { Gem, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 
 function AppShell({ children }: { children: React.ReactNode }) {
@@ -19,7 +19,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="mb-4 animate-pulse flex justify-center">
-            <Gem size={48} className="text-emerald-400" />
+            <img src="/api/logo" alt="Yenni" className="w-16 h-16" />
           </div>
           <div className="font-mono text-lg text-emerald-400">Yenni</div>
           <div className="text-sm text-slate-500 mt-2">Chargement...</div>

@@ -7,6 +7,10 @@ import PWARegister from "@/components/PWARegister";
 export const metadata: Metadata = {
   title: "Yenni — Gestion Financière",
   description: "Application de suivi budgétaire personnel. Fonctionne hors ligne.",
+  icons: {
+    icon: [{ url: "/favicon.ico", sizes: "any" }],
+    apple: "/logo.svg",
+  },
 };
 
 export const viewport: Viewport = {

@@ -13,6 +13,7 @@
     "docker:down": "docker compose down",
     "docker:rebuild": "docker compose down && docker compose build --no-cache && docker compose up -d",
     "pwa:icons": "node scripts/generate-pwa-icons.mjs",
+    "favicon": "npx svg-to-ico public/favicon.svg src/app/favicon.ico",
     "start": "next start",
     "lint": "eslint"
   },
@@ -47,6 +48,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "sharp": "^0.34.5",
+    "svg-to-ico": "^1.1.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

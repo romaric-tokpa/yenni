@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
-import { Gem, LogIn, Eye, EyeOff, Loader2 } from "lucide-react";
+import { LogIn, Eye, EyeOff, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const { login, loading: authLoading } = useAuth();
@@ -40,8 +40,8 @@ export default function LoginPage() {
       <div className="glass-strong rounded-2xl p-6 sm:p-8 max-w-md w-full animate-slide-up">
         <div className="text-center mb-6">
           <div className="mb-3 flex justify-center">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/20 flex items-center justify-center">
-              <Gem size={28} className="text-emerald-400" />
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/20 flex items-center justify-center p-2">
+              <img src="/api/logo" alt="Yenni" className="w-full h-full object-contain" />
             </div>
           </div>
           <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-emerald-400 bg-clip-text text-transparent">

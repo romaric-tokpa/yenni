@@ -23,7 +23,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3] as const;
+const MIGRATIONS = [1, 2, 3, 4] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -42,13 +42,16 @@ async function runMigrations(): Promise<void> {
 
     const sql = fs.readFileSync(path.join(process.cwd(), "src", "lib", "db", "migrations", file), "utf-8");
     const statements = sql
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n")
       .split(";")
       .map((s) => s.trim())
-      .filter((s) => s.length > 0 && !s.startsWith("--"));
+      .filter((s) => s.length > 0);
 
     for (const stmt of statements) {
       try {
-        await db.execute(stmt);
+        await db.execute({ sql: stmt });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes("duplicate column name")) continue;
@@ -64,20 +67,79 @@ async function runMigrations(): Promise<void> {
 }
 
 let migrationsRun = false;
+let migrationsPromise: Promise<void> | null = null;
 
 async function ensureMigrations(): Promise<void> {
   if (migrationsRun) return;
-  const db = getDbClient();
-  const initSql = fs.readFileSync(path.join(process.cwd(), "src", "lib", "db", "migrations", "001_initial.sql"), "utf-8");
-  const statements = initSql
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith("--"));
-  for (const stmt of statements) {
-    await db.execute(stmt);
+  if (migrationsPromise) {
+    await migrationsPromise;
+    return;
   }
-  await runMigrations();
-  migrationsRun = true;
+  migrationsPromise = (async () => {
+    const db = getDbClient();
+    const initSql = fs.readFileSync(path.join(process.cwd(), "src", "lib", "db", "migrations", "001_initial.sql"), "utf-8");
+    const statements = initSql
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      await db.execute({ sql: stmt });
+    }
+    await runMigrations();
+    await ensureLogoSvg();
+    migrationsRun = true;
+  })();
+  await migrationsPromise;
+}
+
+// ── App settings (logo lié à Turso) ──
+
+const DEFAULT_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><circle cx="50" cy="50" r="45" fill="none" stroke="#008080" stroke-width="6"/><ellipse cx="58" cy="62" rx="18" ry="8" fill="#FFA500"/><ellipse cx="50" cy="52" rx="18" ry="8" fill="#FFA500"/><ellipse cx="42" cy="42" rx="18" ry="8" fill="#FFA500"/></svg>`;
+
+export async function getLogoSvg(): Promise<string> {
+  await ensureMigrations();
+  const db = getDbClient();
+  try {
+    const rs = await db.execute({
+      sql: "SELECT value FROM app_settings WHERE key = ?",
+      args: ["logo_svg"],
+    });
+    if (rs.rows.length > 0 && rs.rows[0]) {
+      const val = (rs.rows[0] as Row).value;
+      if (typeof val === "string" && val.length > 0) return val;
+    }
+  } catch {
+    /* table may not exist yet */
+  }
+  return DEFAULT_LOGO_SVG;
+}
+
+export async function saveLogoSvg(svg: string): Promise<void> {
+  await ensureMigrations();
+  await getDbClient().execute({
+    sql: "INSERT INTO app_settings (key, value) VALUES ('logo_svg', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    args: [svg],
+  });
+}
+
+async function ensureLogoSvg(): Promise<void> {
+  const db = getDbClient();
+  try {
+    const rs = await db.execute({
+      sql: "SELECT 1 FROM app_settings WHERE key = 'logo_svg'",
+    });
+    if (rs.rows.length === 0) {
+      await db.execute({
+        sql: "INSERT INTO app_settings (key, value) VALUES ('logo_svg', ?)",
+        args: [DEFAULT_LOGO_SVG],
+      });
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── Project funds migration (données existantes) ──

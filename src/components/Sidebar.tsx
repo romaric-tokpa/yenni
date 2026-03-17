@@ -13,7 +13,6 @@ import {
   FolderKanban,
   HandCoins,
   Settings,
-  Gem,
   History,
   ChevronLeft,
   LogOut,
@@ -47,7 +46,7 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
     <>
       <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"} mb-4`}>
         <Link href="/dashboard" className="flex items-center gap-2">
-          <Gem size={collapsed ? 28 : 24} className="text-emerald-400 shrink-0" />
+          <img src="/api/logo" alt="Yenni" className={collapsed ? "w-9 h-9" : "w-8 h-8"} />
           {!collapsed && (
             <span className="font-mono text-base font-bold bg-gradient-to-r from-emerald-400 to-emerald-400 bg-clip-text text-transparent">
               Yenni

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Gem, ArrowRight, Wallet, Settings, PiggyBank } from "lucide-react";
+import { ArrowRight, Wallet, Settings, PiggyBank } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
@@ -31,7 +31,7 @@ export default function Home() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="mb-4 animate-pulse flex justify-center">
-            <Gem size={48} className="text-emerald-400" />
+            <img src="/api/logo" alt="Yenni" className="w-16 h-16" />
           </div>
           <div className="font-mono text-lg text-emerald-400">Yenni</div>
           <div className="text-sm text-slate-500 mt-2">Chargement...</div>
@@ -44,8 +44,8 @@ export default function Home() {
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="glass-strong rounded-2xl p-6 sm:p-10 max-w-lg w-full text-center animate-slide-up">
         <div className="mb-5 flex justify-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/20 flex items-center justify-center">
-            <Gem size={32} className="text-emerald-400" />
+          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/20 flex items-center justify-center p-3">
+            <img src="/api/logo" alt="Yenni" className="w-full h-full object-contain" />
           </div>
         </div>
         <h1 className="text-xl sm:text-2xl font-bold mb-2 bg-gradient-to-r from-emerald-400 to-emerald-400 bg-clip-text text-transparent">
