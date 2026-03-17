@@ -70,7 +70,7 @@ export async function GET() {
 
     return NextResponse.json(todos);
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR] GET /api/notifications", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
