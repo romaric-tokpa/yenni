@@ -4,7 +4,7 @@ import { updateUserAvatar, getUserById } from "@/lib/db";
 
 const MAX_SIZE = 500 * 1024; // 500 Ko
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await getSessionFromCookies();
     if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
   try {
     const session = await getSessionFromCookies();
     if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
