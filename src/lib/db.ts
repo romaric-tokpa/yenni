@@ -1179,12 +1179,10 @@ const BACKUP_DIR = path.join(process.cwd(), "data", "backups");
 const LAST_BACKUP_FILE = path.join(process.cwd(), "data", "last_auto_backup.txt");
 
 export async function ensureDailyBackup(): Promise<string | null> {
-  if (isTurso()) return null;
+  if (isTurso() || process.env.TURSO_DATABASE_URL) return null;
   const dir = path.dirname(BACKUP_DIR);
-  if (!process.env.TURSO_DATABASE_URL) {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  }
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
   const today = new Date().toISOString().slice(0, 10);
   const backupPath = path.join(BACKUP_DIR, `backup-${today}.json`);
@@ -1201,7 +1199,7 @@ export async function ensureDailyBackup(): Promise<string | null> {
 }
 
 export async function getAutoBackupList(): Promise<Array<{ date: string; path: string }>> {
-  if (isTurso() || !fs.existsSync(BACKUP_DIR)) return [];
+  if (isTurso() || process.env.TURSO_DATABASE_URL || !fs.existsSync(BACKUP_DIR)) return [];
   const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith("backup-") && f.endsWith(".json"));
   return files
     .map((f) => {

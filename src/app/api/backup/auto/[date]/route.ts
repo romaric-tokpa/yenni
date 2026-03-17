@@ -8,6 +8,9 @@ export async function GET(
   { params }: { params: Promise<{ date: string }> }
 ) {
   try {
+    if (process.env.TURSO_DATABASE_URL) {
+      return NextResponse.json({ error: "Sauvegardes locales non disponibles en production" }, { status: 404 });
+    }
     const { date } = await params;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json({ error: "Date invalide" }, { status: 400 });
