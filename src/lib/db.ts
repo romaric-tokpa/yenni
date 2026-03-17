@@ -2,7 +2,7 @@ import path from "path";
 import fs from "fs";
 import type { InStatement } from "@libsql/client";
 import { getDbClient, isTurso } from "./db/client";
-import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, MonthlySaving, FixedChargePayment, Loan, LoanPayment, PlannedExpense } from "./types";
+import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, MonthlySaving, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput } from "./types";
 import { DEFAULT_CONFIG } from "./constants";
 
 // ── Helpers ──
@@ -23,7 +23,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -228,6 +228,15 @@ export async function updateExpense(id: number, updates: Partial<Omit<Expense, "
 export async function deleteExpense(id: number): Promise<boolean> {
   await ensureMigrations();
   const db = getDbClient();
+  const linkedSchedule = await getScheduleByExpenseId(id);
+  if (linkedSchedule) {
+    const unpaid = await markScheduleUnpaid(linkedSchedule.loan_id, linkedSchedule.number);
+    return unpaid !== null;
+  }
+  const linkedPayment = await getPaymentByExpenseId(id);
+  if (linkedPayment) {
+    return await deleteLoanPayment(linkedPayment.id);
+  }
   await db.execute({ sql: "UPDATE planned_expenses SET expense_id = NULL, status = 'cancelled' WHERE expense_id = ?", args: [id] });
   const rs = await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [id] });
   return (rs.rowsAffected ?? 0) > 0;
@@ -275,6 +284,10 @@ export async function addIncome(inc: Omit<Income, "id" | "created_at">): Promise
 
 export async function deleteIncome(id: number): Promise<boolean> {
   await ensureMigrations();
+  const linkedPayment = await getPaymentByIncomeId(id);
+  if (linkedPayment) {
+    return await deleteLoanPayment(linkedPayment.id);
+  }
   const rs = await getDbClient().execute({ sql: "DELETE FROM incomes WHERE id = ?", args: [id] });
   return (rs.rowsAffected ?? 0) > 0;
 }
@@ -295,7 +308,14 @@ export async function getConfig(): Promise<BudgetConfig> {
   const rs = await getDbClient().execute("SELECT data FROM config WHERE id = 1");
   if (rs.rows.length > 0) {
     try {
-      return JSON.parse((rs.rows[0] as Row).data as string);
+      const saved = JSON.parse((rs.rows[0] as Row).data as string) as BudgetConfig;
+      const mergedCategories = [...(saved.categories || [])];
+      for (const dc of DEFAULT_CONFIG.categories) {
+        if (!mergedCategories.some((c) => c.id === dc.id)) {
+          mergedCategories.push(dc);
+        }
+      }
+      return { ...saved, categories: mergedCategories };
     } catch {
       return DEFAULT_CONFIG;
     }
@@ -392,8 +412,8 @@ export async function addLoan(l: Omit<Loan, "id" | "created_at">): Promise<Loan>
   await ensureMigrations();
   const db = getDbClient();
   const rs = await db.execute({
-    sql: `INSERT INTO loans (type, label, lender_borrower, total_amount, remaining_amount, interest_rate, fees, monthly_payment, start_date, end_date, next_due_date, notes, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    sql: `INSERT INTO loans (type, label, lender_borrower, total_amount, remaining_amount, interest_rate, fees, monthly_payment, start_date, end_date, next_due_date, notes, status, bank_name, agency, loan_number, first_payment_date, payment_day, total_payments, paid_payments, insurance_rate, tax_rate, fees_amount)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     args: [
       l.type,
       l.label,
@@ -408,6 +428,16 @@ export async function addLoan(l: Omit<Loan, "id" | "created_at">): Promise<Loan>
       l.next_due_date || "",
       l.notes || "",
       l.status || "active",
+      l.bank_name ?? "",
+      l.agency ?? "",
+      l.loan_number ?? "",
+      l.first_payment_date ?? "",
+      l.payment_day ?? 25,
+      l.total_payments ?? 0,
+      l.paid_payments ?? 0,
+      l.insurance_rate ?? 0,
+      l.tax_rate ?? 0,
+      l.fees_amount ?? 0,
     ],
   });
   return rowToObj<Loan>(rs.rows[0] as Row, rs.columns);
@@ -420,8 +450,9 @@ export async function updateLoan(id: number, updates: Partial<Loan>): Promise<Lo
   if (currentRs.rows.length === 0) return null;
   const current = rowToObj<Loan>(currentRs.rows[0] as Row, currentRs.columns);
   const m = { ...current, ...updates };
+  const paidPayments = m.paid_payments ?? (current as Loan).paid_payments ?? 0;
   await db.execute({
-    sql: `UPDATE loans SET type=?, label=?, lender_borrower=?, total_amount=?, remaining_amount=?, interest_rate=?, fees=?, monthly_payment=?, start_date=?, end_date=?, next_due_date=?, notes=?, status=? WHERE id=?`,
+    sql: `UPDATE loans SET type=?, label=?, lender_borrower=?, total_amount=?, remaining_amount=?, interest_rate=?, fees=?, monthly_payment=?, start_date=?, end_date=?, next_due_date=?, notes=?, status=?, paid_payments=? WHERE id=?`,
     args: [
       m.type,
       m.label,
@@ -436,6 +467,7 @@ export async function updateLoan(id: number, updates: Partial<Loan>): Promise<Lo
       m.next_due_date,
       m.notes,
       m.status,
+      paidPayments,
       id,
     ],
   });
@@ -447,6 +479,213 @@ export async function deleteLoan(id: number): Promise<boolean> {
   await ensureMigrations();
   const rs = await getDbClient().execute({ sql: "DELETE FROM loans WHERE id = ?", args: [id] });
   return (rs.rowsAffected ?? 0) > 0;
+}
+
+// ── Loan Schedule ──
+
+export async function getLoanSchedule(loanId: number): Promise<LoanScheduleRow[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT * FROM loan_schedule WHERE loan_id = ? ORDER BY number ASC",
+    args: [loanId],
+  });
+  return rowsToObjs<LoanScheduleRow>(rs.rows as Row[], rs.columns);
+}
+
+export async function saveLoanSchedule(userId: number, loanId: number, rows: LoanScheduleInput[]): Promise<void> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const tx = await db.transaction("write");
+  try {
+    await tx.execute({ sql: "DELETE FROM loan_schedule WHERE loan_id = ?", args: [loanId] });
+    for (const r of rows) {
+      await tx.execute({
+        sql: `INSERT INTO loan_schedule (user_id, loan_id, number, due_date, principal, interest, insurance, tax_interest, tax_insurance, fees, total_payment, remaining_balance, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          userId,
+          loanId,
+          r.number,
+          r.due_date,
+          r.principal,
+          r.interest,
+          r.insurance,
+          r.tax_interest,
+          r.tax_insurance,
+          r.fees,
+          r.total_payment,
+          r.remaining_balance,
+          r.status,
+        ],
+      });
+    }
+    await tx.commit();
+  } finally {
+    tx.close();
+  }
+}
+
+export async function markSchedulePaid(loanId: number, scheduleNumber: number, note?: string): Promise<LoanScheduleRow | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const tx = await db.transaction("write");
+  try {
+    const rs = await tx.execute({
+      sql: "SELECT * FROM loan_schedule WHERE loan_id = ? AND number = ?",
+      args: [loanId, scheduleNumber],
+    });
+    if (rs.rows.length === 0) return null;
+    const row = rowToObj<LoanScheduleRow>(rs.rows[0] as Row, rs.columns);
+    if (row.status === "paid") {
+      await tx.commit();
+      return row;
+    }
+    const now = new Date().toISOString();
+    await tx.execute({
+      sql: "UPDATE loan_schedule SET status = 'paid', paid_at = ?, payment_note = ? WHERE loan_id = ? AND number = ?",
+      args: [now, note ?? "", loanId, scheduleNumber],
+    });
+    const loanRs = await tx.execute({ sql: "SELECT * FROM loans WHERE id = ?", args: [loanId] });
+    if (loanRs.rows.length > 0) {
+      const loan = rowToObj<Loan>(loanRs.rows[0] as Row, loanRs.columns);
+      const paidCount = (loan.paid_payments ?? 0) + 1;
+      const newRemaining = row.remaining_balance;
+      await tx.execute({
+        sql: "UPDATE loans SET remaining_amount = ?, paid_payments = ?, status = ? WHERE id = ?",
+        args: [newRemaining, paidCount, newRemaining === 0 ? "completed" : loan.status, loanId],
+      });
+    }
+    await tx.commit();
+    const updated = await db.execute({
+      sql: "SELECT * FROM loan_schedule WHERE loan_id = ? AND number = ?",
+      args: [loanId, scheduleNumber],
+    });
+    return rowToObj<LoanScheduleRow>(updated.rows[0] as Row, updated.columns);
+  } finally {
+    tx.close();
+  }
+}
+
+export async function updateScheduleExpenseId(loanId: number, scheduleNumber: number, expenseId: number): Promise<void> {
+  await ensureMigrations();
+  await getDbClient().execute({
+    sql: "UPDATE loan_schedule SET expense_id = ? WHERE loan_id = ? AND number = ?",
+    args: [expenseId, loanId, scheduleNumber],
+  });
+}
+
+export async function getScheduleByExpenseId(expenseId: number): Promise<{ loan_id: number; number: number } | null> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT loan_id, number FROM loan_schedule WHERE expense_id = ?",
+    args: [expenseId],
+  });
+  if (rs.rows.length === 0) return null;
+  const r = rs.rows[0] as Row;
+  return { loan_id: r.loan_id as number, number: r.number as number };
+}
+
+export async function markScheduleUnpaid(loanId: number, scheduleNumber: number): Promise<LoanScheduleRow | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const tx = await db.transaction("write");
+  try {
+    const rs = await tx.execute({
+      sql: "SELECT * FROM loan_schedule WHERE loan_id = ? AND number = ?",
+      args: [loanId, scheduleNumber],
+    });
+    if (rs.rows.length === 0) return null;
+    const row = rowToObj<LoanScheduleRow>(rs.rows[0] as Row, rs.columns);
+    if (row.status !== "paid") {
+      await tx.commit();
+      return row;
+    }
+    const expenseId = (row as Row).expense_id as number | undefined;
+    if (typeof expenseId === "number" && expenseId > 0) {
+      await tx.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [expenseId] });
+    }
+    await tx.execute({
+      sql: "UPDATE loan_schedule SET status = 'pending', paid_at = NULL, payment_note = '', expense_id = NULL WHERE loan_id = ? AND number = ?",
+      args: [loanId, scheduleNumber],
+    });
+    const loanRs = await tx.execute({ sql: "SELECT * FROM loans WHERE id = ?", args: [loanId] });
+    if (loanRs.rows.length > 0) {
+      const loan = rowToObj<Loan>(loanRs.rows[0] as Row, loanRs.columns);
+      const paidCount = Math.max(0, (loan.paid_payments ?? 0) - 1);
+      const prevRow = await tx.execute({
+        sql: "SELECT remaining_balance FROM loan_schedule WHERE loan_id = ? AND number = ?",
+        args: [loanId, scheduleNumber - 1],
+      });
+      const newRemaining = prevRow.rows.length > 0
+        ? Number((prevRow.rows[0] as Row).remaining_balance)
+        : loan.total_amount;
+      await tx.execute({
+        sql: "UPDATE loans SET remaining_amount = ?, paid_payments = ?, status = ? WHERE id = ?",
+        args: [newRemaining, paidCount, "active", loanId],
+      });
+    }
+    await tx.commit();
+    const updated = await db.execute({
+      sql: "SELECT * FROM loan_schedule WHERE loan_id = ? AND number = ?",
+      args: [loanId, scheduleNumber],
+    });
+    return rowToObj<LoanScheduleRow>(updated.rows[0] as Row, updated.columns);
+  } finally {
+    tx.close();
+  }
+}
+
+export async function getUpcomingSchedules(
+  userId: number,
+  daysAhead: number = 7
+): Promise<(LoanScheduleRow & { loan_label: string })[]> {
+  await ensureMigrations();
+  const today = new Date().toISOString().split("T")[0];
+  const future = new Date();
+  future.setDate(future.getDate() + daysAhead);
+  const endDate = future.toISOString().split("T")[0];
+  const rs = await getDbClient().execute({
+    sql: `SELECT s.*, l.label as loan_label FROM loan_schedule s
+          JOIN loans l ON l.id = s.loan_id
+          WHERE s.user_id = ? AND s.status IN ('pending','upcoming') AND s.due_date >= ? AND s.due_date <= ?
+          ORDER BY s.due_date ASC`,
+    args: [userId, today, endDate],
+  });
+  return rowsToObjs<LoanScheduleRow & { loan_label: string }>(rs.rows as Row[], rs.columns);
+}
+
+export async function getOverdueSchedules(userId: number): Promise<(LoanScheduleRow & { loan_label: string })[]> {
+  await ensureMigrations();
+  const today = new Date().toISOString().split("T")[0];
+  const rs = await getDbClient().execute({
+    sql: `SELECT s.*, l.label as loan_label FROM loan_schedule s
+          JOIN loans l ON l.id = s.loan_id
+          WHERE s.user_id = ? AND s.status IN ('pending','overdue') AND s.due_date < ?
+          ORDER BY s.due_date ASC`,
+    args: [userId, today],
+  });
+  return rowsToObjs<LoanScheduleRow & { loan_label: string }>(rs.rows as Row[], rs.columns);
+}
+
+export async function refreshScheduleStatuses(userId: number): Promise<void> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const today = new Date().toISOString().split("T")[0];
+  const future = new Date();
+  future.setDate(future.getDate() + 7);
+  const in7Days = future.toISOString().split("T")[0];
+  await db.execute({
+    sql: "UPDATE loan_schedule SET status = 'overdue' WHERE user_id = ? AND status IN ('pending','upcoming') AND due_date < ?",
+    args: [userId, today],
+  });
+  await db.execute({
+    sql: "UPDATE loan_schedule SET status = 'upcoming' WHERE user_id = ? AND status = 'pending' AND due_date >= ? AND due_date <= ?",
+    args: [userId, today, in7Days],
+  });
+  await db.execute({
+    sql: "UPDATE loan_schedule SET status = 'pending' WHERE user_id = ? AND status = 'upcoming' AND due_date > ?",
+    args: [userId, in7Days],
+  });
 }
 
 // ── Loan Payments ──
@@ -482,6 +721,42 @@ export async function getLoanPaymentsByDateRange(start: string, end: string): Pr
     args: [start, end],
   });
   return rowsToObjs<LoanPayment>(rs.rows as Row[], rs.columns);
+}
+
+export async function updateLoanPaymentExpenseId(paymentId: number, expenseId: number): Promise<void> {
+  await ensureMigrations();
+  await getDbClient().execute({
+    sql: "UPDATE loan_payments SET expense_id = ? WHERE id = ?",
+    args: [expenseId, paymentId],
+  });
+}
+
+export async function updateLoanPaymentIncomeId(paymentId: number, incomeId: number): Promise<void> {
+  await ensureMigrations();
+  await getDbClient().execute({
+    sql: "UPDATE loan_payments SET income_id = ? WHERE id = ?",
+    args: [incomeId, paymentId],
+  });
+}
+
+export async function getPaymentByExpenseId(expenseId: number): Promise<{ id: number } | null> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT id FROM loan_payments WHERE expense_id = ?",
+    args: [expenseId],
+  });
+  if (rs.rows.length === 0) return null;
+  return { id: (rs.rows[0] as Row).id as number };
+}
+
+export async function getPaymentByIncomeId(incomeId: number): Promise<{ id: number } | null> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT id FROM loan_payments WHERE income_id = ?",
+    args: [incomeId],
+  });
+  if (rs.rows.length === 0) return null;
+  return { id: (rs.rows[0] as Row).id as number };
 }
 
 export async function addLoanPayment(p: Omit<LoanPayment, "id" | "created_at">): Promise<LoanPayment> {
@@ -578,6 +853,14 @@ export async function deleteLoanPayment(id: number): Promise<boolean> {
   const paymentRs = await db.execute({ sql: "SELECT * FROM loan_payments WHERE id = ?", args: [id] });
   if (paymentRs.rows.length === 0) return false;
   const payment = rowToObj<LoanPayment>(paymentRs.rows[0] as Row, paymentRs.columns);
+  const expenseId = (payment as Row).expense_id as number | undefined;
+  const incomeId = (payment as Row).income_id as number | undefined;
+  if (typeof expenseId === "number" && expenseId > 0) {
+    await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [expenseId] });
+  }
+  if (typeof incomeId === "number" && incomeId > 0) {
+    await db.execute({ sql: "DELETE FROM incomes WHERE id = ?", args: [incomeId] });
+  }
   const del = await db.execute({ sql: "DELETE FROM loan_payments WHERE id = ?", args: [id] });
   if ((del.rowsAffected ?? 0) > 0) {
     const loanRs = await db.execute({ sql: "SELECT * FROM loans WHERE id = ?", args: [payment.loan_id] });

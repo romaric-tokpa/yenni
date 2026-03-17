@@ -127,6 +127,91 @@ export interface Loan {
   notes: string;
   status: "active" | "completed" | "defaulted";
   created_at: string;
+  insurance_rate?: number;
+  tax_rate?: number;
+  fees_amount?: number;
+  effective_rate?: number;
+  bank_name?: string;
+  agency?: string;
+  loan_number?: string;
+  first_payment_date?: string;
+  payment_day?: number;
+  total_payments?: number;
+  paid_payments?: number;
+}
+
+export interface LoanScheduleRow {
+  id: number;
+  user_id: number;
+  loan_id: number;
+  number: number;
+  due_date: string;
+  principal: number;
+  interest: number;
+  insurance: number;
+  tax_interest: number;
+  tax_insurance: number;
+  fees: number;
+  total_payment: number;
+  remaining_balance: number;
+  status: "paid" | "pending" | "overdue" | "upcoming";
+  paid_at: string | null;
+  payment_note: string;
+  expense_id?: number | null;
+}
+
+export interface LoanScheduleInput {
+  number: number;
+  due_date: string;
+  principal: number;
+  interest: number;
+  insurance: number;
+  tax_interest: number;
+  tax_insurance: number;
+  fees: number;
+  total_payment: number;
+  remaining_balance: number;
+  status: "paid" | "pending";
+}
+
+export interface LoanStats {
+  totalBorrowed: number;
+  totalCost: number;
+  totalInterest: number;
+  totalInsurance: number;
+  totalTaxes: number;
+  totalFees: number;
+  totalRepaid: number;
+  remainingBalance: number;
+  paidCount: number;
+  totalCount: number;
+  progressPercent: number;
+  monthlyPayment: number;
+  nextDueDate: string | null;
+  nextDueAmount: number;
+  endDate: string;
+  debtRatio: number;
+  daysUntilNextDue: number;
+  overdueCount: number;
+}
+
+export interface LoanFormData {
+  type: "bank";
+  label: string;
+  bank_name: string;
+  agency: string;
+  loan_number: string;
+  total_amount: number;
+  interest_rate: number;
+  insurance_rate: number;
+  tax_rate: number;
+  fees_amount: number;
+  monthly_payment: number;
+  total_payments: number;
+  start_date: string;
+  first_payment_date: string;
+  payment_day: number;
+  already_paid: number;
 }
 
 export interface LoanPayment {
@@ -138,6 +223,8 @@ export interface LoanPayment {
   time: string;
   notes: string;
   created_at: string;
+  expense_id?: number | null;
+  income_id?: number | null;
 }
 
 export interface PlannedExpense {
@@ -164,7 +251,7 @@ export interface CalendarEvent {
   icon?: string;
 }
 
-export type NotificationSourceType = "loan_due" | "planned_expense" | "reminder";
+export type NotificationSourceType = "loan_due" | "loan_overdue" | "loan_upcoming" | "planned_expense" | "reminder";
 
 export interface NotificationTodo {
   id: string;
@@ -178,4 +265,9 @@ export interface NotificationTodo {
   link: string;
   is_overdue: boolean;
   days_left: number;
+  loan_id?: number;
+  schedule_number?: number;
+  action_label?: string;
+  action_url?: string;
+  priority?: "high" | "medium" | "low";
 }

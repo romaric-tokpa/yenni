@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { mutate } from "swr";
-import { BudgetConfig, Expense, Income, Project, FixedChargePayment, Loan, LoanPayment, PlannedExpense } from "@/lib/types";
+import { BudgetConfig, Expense, Income, Project, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput } from "@/lib/types";
 import { DEFAULT_CONFIG } from "@/lib/constants";
 
 /** Invalide le cache de l'historique pour forcer un rafraîchissement */
@@ -215,10 +215,10 @@ export function useBudget() {
   const removeExpense = useCallback(async (id: number) => {
     const r = await fetch(`/api/expenses?id=${id}`, { method: "DELETE" });
     if (r.ok) {
-      await Promise.all([fetchExpenses(), fetchPlannedExpenses()]);
+      await Promise.all([fetchExpenses(), fetchPlannedExpenses(), fetchLoans(), fetchLoanPayments()]);
       invalidateHistoryCache();
     }
-  }, [fetchExpenses, fetchPlannedExpenses]);
+  }, [fetchExpenses, fetchPlannedExpenses, fetchLoans, fetchLoanPayments]);
 
   const updateExpense = useCallback(
     async (id: number, updates: Partial<Omit<Expense, "id" | "created_at">>) => {
@@ -257,10 +257,10 @@ export function useBudget() {
   const removeIncome = useCallback(async (id: number) => {
     const r = await fetch(`/api/incomes?id=${id}`, { method: "DELETE" });
     if (r.ok) {
-      await fetchIncomes();
+      await Promise.all([fetchIncomes(), fetchLoans(), fetchLoanPayments()]);
       invalidateHistoryCache();
     }
-  }, [fetchIncomes]);
+  }, [fetchIncomes, fetchLoans, fetchLoanPayments]);
 
   const addFixedPayment = useCallback(
     async (p: Omit<FixedChargePayment, "id" | "created_at">) => {
@@ -287,13 +287,30 @@ export function useBudget() {
     }
   }, [fetchFixedPayments]);
 
-  const addLoan = useCallback(async (l: Omit<Loan, "id" | "created_at">, isExisting = false, monthsPaid = 0) => {
-    const r = await fetch("/api/loans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(l) });
-    if (!r.ok) return false;
+  const addLoan = useCallback(
+    async (
+      l: Omit<Loan, "id" | "created_at">,
+      isExisting = false,
+      monthsPaid = 0,
+      schedule?: LoanScheduleInput[]
+    ): Promise<Loan | false> => {
+      const r = await fetch("/api/loans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(l),
+      });
+      if (!r.ok) return false;
 
-    const newLoan = await r.json();
+      const newLoan: Loan = await r.json();
 
-    if (isExisting && monthsPaid > 0 && l.monthly_payment > 0) {
+      if (l.type === "bank" && Array.isArray(schedule) && schedule.length > 0) {
+        const schedRes = await fetch("/api/loan-schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ loan_id: newLoan.id, schedule }),
+        });
+        if (!schedRes.ok) return false;
+      } else if (isExisting && monthsPaid > 0 && l.monthly_payment > 0) {
       const startDate = new Date(l.start_date || new Date().toISOString().split("T")[0]);
       const payments = [];
       for (let i = 0; i < monthsPaid; i++) {
@@ -350,8 +367,10 @@ export function useBudget() {
 
     await Promise.all([fetchLoans(), fetchLoanPayments()]);
     invalidateHistoryCache();
-    return true;
-  }, [fetchLoans, fetchLoanPayments, fetchExpenses, fetchIncomes]);
+    return newLoan;
+  },
+    [fetchLoans, fetchLoanPayments, fetchExpenses, fetchIncomes]
+  );
 
   const updateLoan = useCallback(async (id: number, updates: Partial<Loan>) => {
     const r = await fetch("/api/loans", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...updates }) });
@@ -372,30 +391,70 @@ export function useBudget() {
   const addLoanPayment = useCallback(async (p: Omit<LoanPayment, "id" | "created_at">) => {
     const r = await fetch("/api/loan-payments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
     if (r.ok) {
-      await Promise.all([fetchLoanPayments(), fetchLoans()]);
+      await Promise.all([fetchLoanPayments(), fetchLoans(), fetchExpenses(), fetchIncomes()]);
       invalidateHistoryCache();
       return true;
     }
     return false;
-  }, [fetchLoanPayments, fetchLoans]);
+  }, [fetchLoanPayments, fetchLoans, fetchExpenses, fetchIncomes]);
 
   const updateLoanPayment = useCallback(async (id: number, updates: Partial<Pick<LoanPayment, "amount" | "fees" | "date" | "time" | "notes">>) => {
     const r = await fetch(`/api/loan-payments?id=${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates) });
     if (r.ok) {
-      await Promise.all([fetchLoanPayments(), fetchLoans()]);
+      await Promise.all([fetchLoanPayments(), fetchLoans(), fetchExpenses(), fetchIncomes()]);
       invalidateHistoryCache();
       return true;
     }
     return false;
-  }, [fetchLoanPayments, fetchLoans]);
+  }, [fetchLoanPayments, fetchLoans, fetchExpenses, fetchIncomes]);
 
   const removeLoanPayment = useCallback(async (id: number) => {
     const r = await fetch(`/api/loan-payments?id=${id}`, { method: "DELETE" });
     if (r.ok) {
-      await Promise.all([fetchLoanPayments(), fetchLoans()]);
+      await Promise.all([fetchLoanPayments(), fetchLoans(), fetchExpenses(), fetchIncomes()]);
       invalidateHistoryCache();
     }
-  }, [fetchLoanPayments, fetchLoans]);
+  }, [fetchLoanPayments, fetchLoans, fetchExpenses, fetchIncomes]);
+
+  const fetchSchedule = useCallback(async (loanId: number): Promise<LoanScheduleRow[]> => {
+    const r = await fetch(`/api/loan-schedule?loan_id=${loanId}`);
+    if (r.ok) return r.json();
+    return [];
+  }, []);
+
+  const markSchedulePaid = useCallback(
+    async (loanId: number, number: number, note?: string): Promise<boolean> => {
+      const r = await fetch("/api/loan-schedule", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loan_id: loanId, number, action: "pay", note }),
+      });
+      if (r.ok) {
+        await Promise.all([fetchLoans(), fetchLoanPayments(), fetchExpenses()]);
+        invalidateHistoryCache();
+        return true;
+      }
+      return false;
+    },
+    [fetchLoans, fetchLoanPayments, fetchExpenses]
+  );
+
+  const markScheduleUnpaid = useCallback(
+    async (loanId: number, number: number): Promise<boolean> => {
+      const r = await fetch("/api/loan-schedule", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loan_id: loanId, number, action: "unpay" }),
+      });
+      if (r.ok) {
+        await Promise.all([fetchLoans(), fetchLoanPayments(), fetchExpenses()]);
+        invalidateHistoryCache();
+        return true;
+      }
+      return false;
+    },
+    [fetchLoans, fetchLoanPayments, fetchExpenses]
+  );
 
   const addPlannedExpense = useCallback(async (p: Omit<PlannedExpense, "id" | "created_at" | "expense_id">) => {
     const r = await fetch("/api/planned-expenses", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
@@ -637,6 +696,9 @@ export function useBudget() {
     addLoanPayment,
     updateLoanPayment,
     removeLoanPayment,
+    fetchSchedule,
+    markSchedulePaid,
+    markScheduleUnpaid,
     updateConfig,
     fetchConfig,
     updateSaving,

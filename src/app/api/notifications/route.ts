@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getLoans, getPlannedExpenses } from "@/lib/db";
+import { getSessionFromCookies } from "@/lib/auth";
+import { getLoans, getPlannedExpenses, getOverdueSchedules, getUpcomingSchedules, refreshScheduleStatuses } from "@/lib/db";
 import type { NotificationTodo } from "@/lib/types";
 
 function getTodayStr(): string {
@@ -14,16 +15,77 @@ function daysBetween(dateStr: string): number {
   return Math.ceil((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 
+function formatDate(d: string): string {
+  return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function formatCFA(n: number): string {
+  return n.toLocaleString("fr-FR", { maximumFractionDigits: 0 });
+}
+
 export async function GET() {
   try {
     const today = getTodayStr();
     const todos: NotificationTodo[] = [];
+    const session = await getSessionFromCookies();
 
-    // Prêts avec échéance à venir ou dépassée (dans les 7 prochains jours ou en retard)
+    // Échéances planifiées (loan_schedule) — nécessite auth
+    if (session) {
+      await refreshScheduleStatuses(session.userId);
+
+      const overdue = await getOverdueSchedules(session.userId);
+      overdue.forEach((s) => {
+        todos.push({
+          id: `loan-overdue-${s.loan_id}-${s.number}`,
+          type: "todo",
+          source_type: "loan_overdue",
+          source_id: s.loan_id,
+          title: `Échéance en retard — ${s.loan_label}`,
+          message: `Échéance n°${s.number} du ${formatDate(s.due_date)} — ${formatCFA(s.total_payment)} FCFA`,
+          amount: s.total_payment,
+          due_date: s.due_date,
+          link: `/loans?pay=${s.loan_id}&number=${s.number}`,
+          is_overdue: true,
+          days_left: daysBetween(s.due_date),
+          priority: "high",
+          action_label: "Payer",
+          action_url: `/loans?pay=${s.loan_id}&number=${s.number}`,
+          loan_id: s.loan_id,
+          schedule_number: s.number,
+        });
+      });
+
+      const upcoming = await getUpcomingSchedules(session.userId, 7);
+      upcoming.forEach((s) => {
+        const days = daysBetween(s.due_date);
+        todos.push({
+          id: `loan-upcoming-${s.loan_id}-${s.number}`,
+          type: "todo",
+          source_type: "loan_upcoming",
+          source_id: s.loan_id,
+          title: `Échéance dans ${days} jour(s) — ${s.loan_label}`,
+          message: `Échéance n°${s.number} le ${formatDate(s.due_date)} — ${formatCFA(s.total_payment)} FCFA`,
+          amount: s.total_payment,
+          due_date: s.due_date,
+          link: `/loans?view=${s.loan_id}`,
+          is_overdue: false,
+          days_left: days,
+          priority: "medium",
+          action_label: "Voir",
+          action_url: `/loans?view=${s.loan_id}`,
+          loan_id: s.loan_id,
+          schedule_number: s.number,
+        });
+      });
+    }
+
+    // Prêts sans tableau d'amortissement (legacy) — échéance à venir ou dépassée
     const loans = await getLoans();
     const activeLoans = loans.filter((l) => l.status === "active" && l.next_due_date);
+    const scheduleLoanIds = new Set(todos.filter((t) => t.loan_id).map((t) => t.loan_id));
 
     for (const loan of activeLoans) {
+      if (scheduleLoanIds.has(loan.id)) continue;
       const days = daysBetween(loan.next_due_date);
       if (days <= 7) {
         todos.push({

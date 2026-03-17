@@ -1,5 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLoanPayments, getLoanPaymentsByDateRange, addLoanPayment, addLoanPaymentsBatch, updateLoanPayment, deleteLoanPayment } from "@/lib/db";
+import { getSessionFromCookies } from "@/lib/auth";
+import {
+  getLoanPayments,
+  getLoanPaymentsByDateRange,
+  addLoanPayment,
+  addLoanPaymentsBatch,
+  updateLoanPayment,
+  deleteLoanPayment,
+  getLoan,
+  addExpense,
+  addIncome,
+  updateLoanPaymentExpenseId,
+  updateLoanPaymentIncomeId,
+} from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {
@@ -21,6 +34,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSessionFromCookies();
     const body = await req.json();
     if (body.batch && Array.isArray(body.payments) && body.loan_id) {
       const count = await addLoanPaymentsBatch(body.loan_id, body.payments);
@@ -30,6 +44,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
     const payment = await addLoanPayment(body);
+    const loan = await getLoan(body.loan_id);
+    if (loan && session) {
+      const dateStr = body.date;
+      const timeStr = body.time || "00:00";
+      const amount = body.amount + (body.fees || 0);
+      const desc = `${loan.type === "personal_lent" ? "Remb. reçu" : "Remboursement"} — ${loan.label}`;
+      if (loan.type === "personal_borrowed") {
+        const expense = await addExpense(
+          {
+            date: dateStr,
+            time: timeStr,
+            description: desc,
+            category: "loan_repayment",
+            amount,
+            notes: body.notes || "",
+          },
+          session.userId
+        );
+        await updateLoanPaymentExpenseId(payment.id, expense.id);
+      } else if (loan.type === "personal_lent") {
+        const income = await addIncome({
+          date: dateStr,
+          time: timeStr,
+          description: desc,
+          source: "loan_recovery",
+          amount: body.amount,
+          notes: body.notes || "",
+        });
+        await updateLoanPaymentIncomeId(payment.id, income.id);
+      }
+    }
     return NextResponse.json(payment, { status: 201 });
   } catch (err) {
     console.error("[API ERROR]", err);

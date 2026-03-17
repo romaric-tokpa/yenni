@@ -13,6 +13,7 @@ export const DEFAULT_CONFIG: BudgetConfig = {
     { id: "health", label: "Santé", icon: "heart-pulse", budget: 0, color: "#EC4899" },
     { id: "comm", label: "Communication", icon: "smartphone", budget: 0, color: "#06B6D4" },
     { id: "education", label: "Formation / Livres", icon: "book-open", budget: 0, color: "#6366F1" },
+    { id: "loan_repayment", label: "Remboursement de prêt", icon: "landmark", budget: 0, color: "#0EA5E9" },
     { id: "misc", label: "Divers / Imprévus", icon: "wrench", budget: 0, color: "#78716C" },
   ],
   savingsGoal: 0,

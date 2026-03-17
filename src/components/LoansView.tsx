@@ -1,14 +1,15 @@
 "use client";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { formatCFA } from "@/lib/constants";
 import { Loan, LoanPayment } from "@/lib/types";
 import Icon from "./ui/Icon";
 import AnimatedProgressBar from "./ui/AnimatedProgressBar";
+import LoanAnalysis from "./LoanAnalysis";
 import {
   Plus, X, Check, Trash2, Pencil, Clock, Banknote, ArrowDownLeft, ArrowUpRight,
   Building2, Users, HandCoins, ChevronDown, ChevronUp, AlertTriangle,
-  CircleCheck, CircleAlert,
+  CircleCheck, CircleAlert, BarChart3, Loader2,
 } from "lucide-react";
 
 const LOAN_TYPES = [
@@ -50,14 +51,21 @@ const LOAN_TYPES = [
 interface BudgetData {
   loans: Loan[];
   loanPayments: LoanPayment[];
-  addLoan: (l: Omit<Loan, "id" | "created_at">, isExisting?: boolean, monthsPaid?: number) => Promise<boolean>;
+  addLoan: (l: Omit<Loan, "id" | "created_at">, isExisting?: boolean, monthsPaid?: number, schedule?: import("@/lib/types").LoanScheduleInput[]) => Promise<Loan | false>;
   updateLoan: (id: number, u: Partial<Loan>) => Promise<void>;
   removeLoan: (id: number) => Promise<void>;
   addLoanPayment: (p: Omit<LoanPayment, "id" | "created_at">) => Promise<boolean>;
   updateLoanPayment: (id: number, u: Partial<Pick<LoanPayment, "amount" | "fees" | "date" | "time" | "notes">>) => Promise<boolean>;
   removeLoanPayment: (id: number) => Promise<void>;
+  fetchSchedule: (loanId: number) => Promise<import("@/lib/types").LoanScheduleRow[]>;
+  markSchedulePaid: (loanId: number, number: number, note?: string) => Promise<boolean>;
+  markScheduleUnpaid: (loanId: number, number: number) => Promise<boolean>;
   monthLoanPayments: number;
   totalDebt: number;
+  config: { salary?: number };
+  salaries: number[];
+  selectedMonth: number;
+  selectedYear: number;
 }
 
 export default function LoansView({
@@ -69,50 +77,72 @@ export default function LoansView({
 }) {
   const {
     loans, loanPayments, addLoan, removeLoan,
-    addLoanPayment, updateLoanPayment, removeLoanPayment, monthLoanPayments, totalDebt,
+    addLoanPayment, updateLoanPayment, removeLoanPayment,
+    fetchSchedule, markSchedulePaid, markScheduleUnpaid,
+    monthLoanPayments, totalDebt, config, salaries, selectedMonth, selectedYear,
   } = budget;
 
-  const [showNewLoan, setShowNewLoan] = useState(false);
   const [showPayModal, setShowPayModal] = useState<Loan | null>(null);
   const [editingPayment, setEditingPayment] = useState<{ payment: LoanPayment; loan: Loan } | null>(null);
   const [expandedLoan, setExpandedLoan] = useState<number | null>(null);
+  const [payingScheduleId, setPayingScheduleId] = useState<number | null>(null);
+  const [analysisLoanId, setAnalysisLoanId] = useState<number | null>(null);
+  const [analysisSchedule, setAnalysisSchedule] = useState<import("@/lib/types").LoanScheduleRow[]>([]);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const analysisRef = useRef<HTMLDivElement>(null);
 
   const searchParams = useSearchParams();
   const router = useRouter();
 
+  const salary = (salaries[selectedMonth] ?? 0) || config.salary || 0;
+
   useEffect(() => {
+    const viewId = searchParams.get("view");
     const payId = searchParams.get("pay");
-    if (payId && loans.length > 0) {
+    const payNumber = searchParams.get("number");
+    if (viewId && loans.length > 0) {
+      const id = parseInt(viewId, 10);
+      const loan = loans.find((l) => l.id === id);
+      if (loan && loan.type === "bank") {
+        setAnalysisLoanId(id);
+        router.replace("/loans", { scroll: false });
+      }
+    } else if (payId && loans.length > 0) {
       const id = parseInt(payId, 10);
       const loan = loans.find((l) => l.id === id);
       if (loan) {
-        setShowPayModal(loan);
-        setExpandedLoan(id);
-        router.replace("/loans", { scroll: false });
+        if (loan.type === "bank" && payNumber) {
+          setAnalysisLoanId(id);
+          router.replace("/loans", { scroll: false });
+        } else {
+          setShowPayModal(loan);
+          setExpandedLoan(id);
+          router.replace("/loans", { scroll: false });
+        }
       }
     }
   }, [searchParams, loans, router]);
 
+  useEffect(() => {
+    if (!analysisLoanId) {
+      setAnalysisSchedule([]);
+      return;
+    }
+    let cancelled = false;
+    setAnalysisLoading(true);
+    fetchSchedule(analysisLoanId).then((s) => {
+      if (!cancelled) {
+        setAnalysisSchedule(s);
+        setAnalysisLoading(false);
+        setTimeout(() => analysisRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [analysisLoanId, fetchSchedule]);
+
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
   const nowTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-
-  const defaultForm = {
-    type: "bank" as Loan["type"],
-    label: "",
-    lender_borrower: "",
-    total_amount: "",
-    interest_rate: "",
-    fees: "",
-    monthly_payment: "",
-    start_date: todayStr,
-    end_date: "",
-    next_due_date: "",
-    notes: "",
-    isExisting: false,
-    months_paid: "",
-  };
-  const [loanForm, setLoanForm] = useState(defaultForm);
 
   const [payForm, setPayForm] = useState({
     amount: "",
@@ -151,45 +181,6 @@ export default function LoansView({
     () => loans.filter((l) => (l.type === "bank" || l.type === "personal_borrowed") && l.status === "active").reduce((s, l) => s + l.remaining_amount, 0),
     [loans]
   );
-
-  const handleAddLoan = async () => {
-    if (!loanForm.label || !loanForm.total_amount || Number(loanForm.total_amount) <= 0) {
-      showToast("Remplis les champs obligatoires", "error");
-      return;
-    }
-    const monthsPaid = loanForm.isExisting ? Math.max(0, Number(loanForm.months_paid) || 0) : 0;
-    const payment = Number(loanForm.monthly_payment) || 0;
-
-    if (loanForm.isExisting && monthsPaid > 0 && payment <= 0) {
-      showToast("Renseigne le montant par échéance", "error");
-      return;
-    }
-
-    const amt = Number(loanForm.total_amount);
-    const ok = await addLoan({
-      type: loanForm.type,
-      label: loanForm.label,
-      lender_borrower: loanForm.lender_borrower,
-      total_amount: amt,
-      remaining_amount: amt,
-      interest_rate: Number(loanForm.interest_rate) || 0,
-      fees: Number(loanForm.fees) || 0,
-      monthly_payment: payment,
-      start_date: loanForm.start_date,
-      end_date: loanForm.end_date,
-      next_due_date: loanForm.next_due_date,
-      notes: loanForm.notes,
-      status: "active",
-    }, loanForm.isExisting, monthsPaid);
-    if (ok) {
-      showToast(loanForm.isExisting
-        ? `Prêt importé avec ${monthsPaid} échéance${monthsPaid > 1 ? "s" : ""} historiques`
-        : loanForm.type === "personal_lent" ? "Prêt enregistré" : "Emprunt enregistré"
-      );
-      setShowNewLoan(false);
-      setLoanForm(defaultForm);
-    }
-  };
 
   const handleEditPayment = async () => {
     if (!editingPayment) return;
@@ -231,6 +222,32 @@ export default function LoansView({
     }
   };
 
+  const handlePaySchedule = async (loan: Loan) => {
+    if (loan.type !== "bank") return;
+    setPayingScheduleId(loan.id);
+    try {
+      const schedule = await fetchSchedule(loan.id);
+      const today = new Date().toISOString().split("T")[0];
+      const nextDueRow =
+        schedule.find((s) => s.status !== "paid" && s.due_date >= today) ||
+        schedule.find((s) => s.status === "overdue" || s.status === "pending");
+      if (!nextDueRow) {
+        showToast("Aucune échéance à payer ce mois", "info");
+        return;
+      }
+      const ok = await markSchedulePaid(loan.id, nextDueRow.number);
+      if (ok) {
+        showToast(`Échéance #${nextDueRow.number} payée !`);
+      } else {
+        showToast("Erreur lors du paiement", "error");
+      }
+    } catch {
+      showToast("Erreur", "error");
+    } finally {
+      setPayingScheduleId(null);
+    }
+  };
+
   const getDueStatus = (loan: Loan): "ok" | "warn" | "overdue" => {
     if (!loan.next_due_date) return "ok";
     const due = new Date(loan.next_due_date);
@@ -242,9 +259,6 @@ export default function LoansView({
 
   const typeInfo = (type: Loan["type"]) => LOAN_TYPES.find((t) => t.id === type) || LOAN_TYPES[0];
 
-  const isBank = loanForm.type === "bank";
-  const isLent = loanForm.type === "personal_lent";
-
   return (
     <div className="animate-slide-up">
       <div className="flex justify-between items-start mb-5 lg:mb-6">
@@ -255,7 +269,7 @@ export default function LoansView({
           </p>
         </div>
         <button
-          onClick={() => setShowNewLoan(true)}
+          onClick={() => router.push("/loans/new")}
           className="btn-primary px-4 py-2.5 rounded-xl text-xs lg:text-sm font-semibold flex items-center gap-1.5 shrink-0"
         >
           <Plus size={16} /> Nouveau
@@ -350,23 +364,50 @@ export default function LoansView({
                   </div>
 
                   <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => {
-                        const n = new Date();
-                        setPayForm({
-                          amount: String(loan.monthly_payment || ""),
-                          fees: "",
-                          date: n.toISOString().split("T")[0],
-                          time: `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`,
-                          notes: "",
-                        });
-                        setShowPayModal(loan);
-                      }}
-                      className="flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                      style={{ background: ti.color + "22", color: ti.color }}
-                    >
-                      <ti.actionIcon size={14} /> {ti.actionLabel}
-                    </button>
+                    {loan.type === "bank" && (
+                      <button
+                        onClick={() => setAnalysisLoanId(loan.id)}
+                        className="py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30"
+                      >
+                        <BarChart3 size={14} /> Analyse
+                      </button>
+                    )}
+                    {loan.type === "bank" ? (
+                      <button
+                        onClick={() => handlePaySchedule(loan)}
+                        disabled={payingScheduleId === loan.id}
+                        className="flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                        style={{ background: ti.color + "22", color: ti.color }}
+                      >
+                        {payingScheduleId === loan.id ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" /> Paiement...
+                          </>
+                        ) : (
+                          <>
+                            <Check size={14} /> Payer l'échéance du mois
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          const n = new Date();
+                          setPayForm({
+                            amount: String(loan.monthly_payment || ""),
+                            fees: "",
+                            date: n.toISOString().split("T")[0],
+                            time: `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`,
+                            notes: "",
+                          });
+                          setShowPayModal(loan);
+                        }}
+                        className="flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                        style={{ background: ti.color + "22", color: ti.color }}
+                      >
+                        <ti.actionIcon size={14} /> {ti.actionLabel}
+                      </button>
+                    )}
                     <button
                       onClick={() => setExpandedLoan(isExpanded ? null : loan.id)}
                       className="px-3 py-2 rounded-xl bg-white/5 text-slate-400 hover:text-slate-300 transition-colors"
@@ -469,173 +510,57 @@ export default function LoansView({
               </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* ── Modal — Nouveau prêt ── */}
-      {showNewLoan && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
-          onClick={() => setShowNewLoan(false)}>
-          <div className="glass-strong w-full sm:w-[90%] sm:max-w-[500px] rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-sm font-bold flex items-center gap-2">
-                <Plus size={16} className="text-emerald-400" /> Nouveau Prêt
-              </h2>
-              <button onClick={() => setShowNewLoan(false)} className="text-slate-400 p-1"><X size={18} /></button>
-            </div>
-            <div className="grid gap-2.5">
-              <div className="grid grid-cols-3 gap-1.5">
-                {LOAN_TYPES.map((t) => {
-                  const sel = loanForm.type === t.id;
-                  return (
-                    <button key={t.id} onClick={() => setLoanForm({ ...loanForm, type: t.id })}
-                      className={`py-2 px-1 rounded-lg text-center transition-all ${sel ? "ring-2" : "bg-white/[0.04] hover:bg-white/[0.06]"}`}
-                      style={sel ? { background: t.color + "18", outlineColor: t.color } : {}}>
-                      <t.Icon size={16} className="mx-auto mb-1" style={{ color: sel ? t.color : "#64748b" }} />
-                      <div className="text-[9px] font-medium leading-tight"
-                        style={{ color: sel ? t.color : "#94a3b8" }}>{t.label}</div>
-                    </button>
-                  );
-                })}
+          {/* ── Analyse du prêt (en bas de page) ── */}
+          {analysisLoanId && (() => {
+            const loan = loans.find((l) => l.id === analysisLoanId);
+            if (!loan) return null;
+            const handleMarkPaid = async (num: number, note?: string) => {
+              const ok = await markSchedulePaid(loan.id, num, note);
+              if (ok) {
+                showToast("Échéance marquée comme payée !");
+                const s = await fetchSchedule(loan.id);
+                setAnalysisSchedule(s);
+              } else {
+                showToast("Erreur", "error");
+              }
+            };
+            const handleMarkUnpaid = async (num: number) => {
+              const ok = await markScheduleUnpaid(loan.id, num);
+              if (ok) {
+                showToast("Paiement annulé");
+                const s = await fetchSchedule(loan.id);
+                setAnalysisSchedule(s);
+              } else {
+                showToast("Erreur", "error");
+              }
+            };
+            return (
+              <div ref={analysisRef} className="mt-8 pt-6 border-t border-white/10">
+                <h2 className="text-base font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                  <BarChart3 size={18} className="text-indigo-400" />
+                  Analyse — {loan.label}
+                </h2>
+                {analysisLoading ? (
+                  <div className="glass rounded-2xl p-12 text-center text-slate-500">Chargement...</div>
+                ) : (
+                  <div className="glass rounded-2xl p-4 lg:p-6">
+                    <LoanAnalysis
+                      loan={loan}
+                      schedule={analysisSchedule}
+                      salary={salary}
+                      onMarkPaid={handleMarkPaid}
+                      onMarkUnpaid={handleMarkUnpaid}
+                      onClose={() => {
+                        setAnalysisLoanId(null);
+                        setAnalysisSchedule([]);
+                      }}
+                    />
+                  </div>
+                )}
               </div>
-              <button type="button"
-                onClick={() => setLoanForm({ ...loanForm, isExisting: !loanForm.isExisting, months_paid: "" })}
-                className={`w-full flex items-center gap-2 p-2 rounded-lg transition-all text-left ${
-                  loanForm.isExisting ? "bg-amber-500/10 ring-1 ring-amber-500/30" : "bg-white/[0.04] hover:bg-white/[0.06]"
-                }`}>
-                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
-                  loanForm.isExisting ? "border-amber-400 bg-amber-400" : "border-slate-600"
-                }`}>
-                  {loanForm.isExisting && <Check size={10} className="text-black" />}
-                </div>
-                <span className={`text-[10px] font-medium ${loanForm.isExisting ? "text-amber-300" : "text-slate-400"}`}>
-                  Prêt déjà en cours {loanForm.isExisting && "— aucune écriture comptable"}
-                </span>
-              </button>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-1">
-                  <label className="text-[10px] text-slate-400 mb-0.5 block">
-                    {isBank ? "Banque" : isLent ? "Prêté à" : "De"}
-                  </label>
-                  <input className="input-field !text-xs !py-2"
-                    placeholder={isBank ? "SGBCI..." : "Ali..."}
-                    value={loanForm.lender_borrower} onChange={(e) => setLoanForm({ ...loanForm, lender_borrower: e.target.value })} />
-                </div>
-                <div className="col-span-1">
-                  <label className="text-[10px] text-slate-400 mb-0.5 block">Intitulé</label>
-                  <input className="input-field !text-xs !py-2"
-                    placeholder="Motif..."
-                    value={loanForm.label} onChange={(e) => setLoanForm({ ...loanForm, label: e.target.value })} />
-                </div>
-                <div className="col-span-1">
-                  <label className="text-[10px] text-slate-400 mb-0.5 block">Montant</label>
-                  <input type="number" className="input-field font-mono !text-xs !py-2" placeholder="0"
-                    value={loanForm.total_amount} onChange={(e) => setLoanForm({ ...loanForm, total_amount: e.target.value })} />
-                </div>
-              </div>
-              {isBank ? (
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-0.5 block">Mensualité</label>
-                    <input type="number" className="input-field font-mono !text-xs !py-2" placeholder="0"
-                      value={loanForm.monthly_payment} onChange={(e) => setLoanForm({ ...loanForm, monthly_payment: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-0.5 block">Taux %</label>
-                    <input type="number" step="0.1" className="input-field font-mono !text-xs !py-2" placeholder="0"
-                      value={loanForm.interest_rate} onChange={(e) => setLoanForm({ ...loanForm, interest_rate: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-0.5 block">Frais</label>
-                    <input type="number" className="input-field font-mono !text-xs !py-2" placeholder="0"
-                      value={loanForm.fees} onChange={(e) => setLoanForm({ ...loanForm, fees: e.target.value })} />
-                  </div>
-                </div>
-              ) : loanForm.isExisting ? (
-                <div>
-                  <label className="text-[10px] text-slate-400 mb-0.5 block">Montant par échéance</label>
-                  <input type="number" className="input-field font-mono !text-xs !py-2" placeholder="Ex: 50000"
-                    value={loanForm.monthly_payment} onChange={(e) => setLoanForm({ ...loanForm, monthly_payment: e.target.value })} />
-                </div>
-              ) : null}
-              {isBank ? (
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-0.5 block">Début</label>
-                    <input type="date" className="input-field !text-xs !py-2" value={loanForm.start_date}
-                      onChange={(e) => setLoanForm({ ...loanForm, start_date: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-0.5 block">Fin</label>
-                    <input type="date" className="input-field !text-xs !py-2" value={loanForm.end_date}
-                      onChange={(e) => setLoanForm({ ...loanForm, end_date: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-0.5 block">Échéance</label>
-                    <input type="date" className="input-field !text-xs !py-2" value={loanForm.next_due_date}
-                      onChange={(e) => setLoanForm({ ...loanForm, next_due_date: e.target.value })} />
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-0.5 block">Date</label>
-                    <input type="date" className="input-field !text-xs !py-2" value={loanForm.start_date}
-                      onChange={(e) => setLoanForm({ ...loanForm, start_date: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-0.5 block">Échéance</label>
-                    <input type="date" className="input-field !text-xs !py-2" value={loanForm.next_due_date}
-                      onChange={(e) => setLoanForm({ ...loanForm, next_due_date: e.target.value })} />
-                  </div>
-                </div>
-              )}
-              {loanForm.isExisting && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-0.5 block">Échéances déjà payées</label>
-                    <input type="number" className="input-field font-mono !text-xs !py-2" placeholder="Ex: 14"
-                      value={loanForm.months_paid} onChange={(e) => setLoanForm({ ...loanForm, months_paid: e.target.value })} />
-                  </div>
-                  <div className="flex items-end">
-                    {Number(loanForm.months_paid) > 0 && Number(loanForm.monthly_payment) > 0 ? (
-                      <div className="text-[10px] text-amber-300/80 pb-2">
-                        Déjà payé: {formatCFA(Number(loanForm.months_paid) * Number(loanForm.monthly_payment))} — Reste: {formatCFA(Math.max(0, Number(loanForm.total_amount) - Number(loanForm.months_paid) * Number(loanForm.monthly_payment)))}
-                      </div>
-                    ) : Number(loanForm.months_paid) > 0 ? (
-                      <div className="text-[10px] text-red-400/70 pb-2">Renseigne la mensualité</div>
-                    ) : null}
-                  </div>
-                </div>
-              )}
-              <div>
-                <label className="text-[10px] text-slate-400 mb-0.5 block">Notes (optionnel)</label>
-                <input className="input-field !text-xs !py-2" placeholder="Détails..."
-                  value={loanForm.notes} onChange={(e) => setLoanForm({ ...loanForm, notes: e.target.value })} />
-              </div>
-              {loanForm.total_amount && Number(loanForm.total_amount) > 0 && (
-                <div className={`p-2 rounded-lg flex items-center gap-2 text-[10px] ${
-                  loanForm.isExisting ? "bg-amber-500/10 text-amber-300"
-                    : isLent ? "bg-red-500/10 text-red-300" : "bg-emerald-500/10 text-emerald-300"
-                }`}>
-                  {loanForm.isExisting ? <Clock size={14} /> : isLent ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />}
-                  <span className="font-medium">
-                    {loanForm.isExisting ? "Suivi uniquement — aucun impact trésorerie"
-                      : isLent ? `${formatCFA(Number(loanForm.total_amount))} sortira de ta trésorerie`
-                      : `${formatCFA(Number(loanForm.total_amount))} entrera dans ta trésorerie`
-                    }
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-3 mt-4">
-              <button onClick={() => setShowNewLoan(false)} className="flex-1 py-2.5 rounded-xl border border-white/10 text-slate-400 text-xs">Annuler</button>
-              <button onClick={handleAddLoan} className="btn-primary flex-1 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5">
-                <Check size={14} /> Enregistrer
-              </button>
-            </div>
-          </div>
+            );
+          })()}
         </div>
       )}
 
