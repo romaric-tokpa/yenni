@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
       new URL(req.url).searchParams.get("year") ||
         String(new Date().getFullYear())
     );
-    return NextResponse.json(getSalaries(year));
+    return NextResponse.json(await getSalaries(year));
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
@@ -19,7 +19,7 @@ export async function PUT(req: NextRequest) {
     if (month === undefined || !year || amount === undefined) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
-    setSalary(month, year, Math.max(0, amount));
+    await setSalary(month, year, Math.max(0, amount));
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });

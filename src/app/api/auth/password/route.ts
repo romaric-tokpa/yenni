@@ -17,14 +17,14 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Le nouveau mot de passe doit contenir au moins 6 caractères" }, { status: 400 });
     }
 
-    const user = getUserById(session.userId);
+    const user = await getUserById(session.userId);
     if (!user) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
 
     const valid = await bcrypt.compare(current_password, user.password_hash);
     if (!valid) return NextResponse.json({ error: "Mot de passe actuel incorrect" }, { status: 403 });
 
     const hash = await bcrypt.hash(new_password, 12);
-    updateUserPassword(user.id, hash);
+    await updateUserPassword(user.id, hash);
 
     return NextResponse.json({ ok: true });
   } catch {

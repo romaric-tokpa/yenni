@@ -7,17 +7,17 @@ export async function GET(req: NextRequest) {
     const start = sp.get("start");
     const end = sp.get("end");
     if (start && end) {
-      return NextResponse.json(getFixedChargePaymentsByDateRange(start, end));
+      return NextResponse.json(await getFixedChargePaymentsByDateRange(start, end));
     }
     const month = sp.get("month");
     const year = sp.get("year");
     if (month !== null && year !== null) {
       const m = parseInt(month);
       const y = parseInt(year);
-      ensureRecurringPayments(m, y);
-      return NextResponse.json(getFixedChargePayments(m, y));
+      await ensureRecurringPayments(m, y);
+      return NextResponse.json(await getFixedChargePayments(m, y));
     }
-    return NextResponse.json(getFixedChargePayments());
+    return NextResponse.json(await getFixedChargePayments());
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
@@ -51,7 +51,7 @@ export async function DELETE(req: NextRequest) {
   try {
     const id = parseInt(new URL(req.url).searchParams.get("id") || "0");
     if (!id) return NextResponse.json({ error: "ID requis" }, { status: 400 });
-    const ok = deleteFixedChargePayment(id);
+    const ok = await deleteFixedChargePayment(id);
     if (!ok) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json({ success: true });
   } catch {

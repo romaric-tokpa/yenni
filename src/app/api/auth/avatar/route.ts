@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
 
     await mkdir(AVATARS_DIR, { recursive: true });
 
-    const oldUser = getUserById(session.userId);
+    const oldUser = await getUserById(session.userId);
     if (oldUser?.avatar_path) {
       const oldFile = getAvatarFilePath(path.basename(oldUser.avatar_path));
       try { await unlink(oldFile); } catch { /* file may not exist */ }
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     await fd.close();
 
     const avatarPath = `/uploads/avatars/${filename}`;
-    updateUserAvatar(session.userId, avatarPath);
+    await updateUserAvatar(session.userId, avatarPath);
 
     return NextResponse.json({ avatar_path: getAvatarUrl(avatarPath) });
   } catch {
@@ -60,7 +60,7 @@ export async function DELETE() {
       try { await unlink(oldFile); } catch { /* file may not exist */ }
     }
 
-    updateUserAvatar(session.userId, null);
+    await updateUserAvatar(session.userId, null);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });

@@ -5,7 +5,7 @@ import {
   deleteProjectPurchase,
   getProjects,
   deleteExpense,
-  getDb,
+  getProjectPurchase,
 } from "@/lib/db";
 
 export async function GET(
@@ -18,7 +18,7 @@ export async function GET(
     if (isNaN(projectId)) {
       return NextResponse.json({ error: "ID invalide" }, { status: 400 });
     }
-    const purchases = getProjectPurchases(projectId);
+    const purchases = await getProjectPurchases(projectId);
     return NextResponse.json(purchases);
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -35,7 +35,8 @@ export async function POST(
     if (isNaN(projectId)) {
       return NextResponse.json({ error: "ID invalide" }, { status: 400 });
     }
-    const project = getProjects().find((p) => p.id === projectId);
+    const projects = await getProjects();
+    const project = projects.find((p) => p.id === projectId);
     if (!project || project.status !== "completed") {
       return NextResponse.json({ error: "Projet non trouvé ou non réalisé" }, { status: 400 });
     }
@@ -51,7 +52,7 @@ export async function POST(
         { status: 400 }
       );
     }
-    const purchase = addProjectPurchase({
+    const purchase = await addProjectPurchase({
       project_id: projectId,
       description: String(description),
       amount: Number(amount),
@@ -71,10 +72,10 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "ID requis" }, { status: 400 });
     }
     const purchaseId = parseInt(id, 10);
-    const purchase = getDb().prepare("SELECT * FROM project_purchases WHERE id = ?").get(purchaseId) as { expense_id: number | null } | undefined;
-    const ok = deleteProjectPurchase(purchaseId);
+    const purchase = await getProjectPurchase(purchaseId);
+    const ok = await deleteProjectPurchase(purchaseId);
     if (ok && purchase?.expense_id) {
-      deleteExpense(purchase.expense_id);
+      await deleteExpense(purchase.expense_id);
     }
     return ok
       ? NextResponse.json({ success: true })

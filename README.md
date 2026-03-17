@@ -29,6 +29,34 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Base de données : Turso (production) ou SQLite locale (développement)
+
+L'application utilise **Turso** (SQLite hébergé) pour la production sur Vercel, et **SQLite locale** (`data/budget.db`) en développement.
+
+### Configuration Turso (Vercel)
+
+1. Créez une base sur [turso.tech](https://turso.tech)
+2. Récupérez l’URL et le token d’authentification
+3. Ajoutez ces variables d’environnement sur Vercel :
+   - `TURSO_DATABASE_URL` : URL de la base (ex. `libsql://votre-db-votre-org.turso.io`)
+   - `TURSO_AUTH_TOKEN` : Token d’authentification
+
+Sans ces variables, l’app utilise une base SQLite locale (`data/budget.db`).
+
+### Migrations
+
+Les migrations sont dans `src/lib/db/migrations/` et s’exécutent automatiquement au démarrage.
+
+## Mise en production
+
+Avant de déployer en local, réinitialiser les données de développement :
+
+```bash
+./scripts/reset-for-production.sh
+```
+
+Sur Vercel, les données sont stockées dans Turso et persistent entre les déploiements.
+
 ## Docker
 
 Démarrer l'application avec Docker :
@@ -51,6 +79,7 @@ Les données (base SQLite, sauvegardes, avatars) sont persistées dans des volum
 ```bash
 docker compose up -d      # Démarrer en arrière-plan
 docker compose down       # Arrêter
+docker compose down -v    # Arrêter et supprimer les volumes (reset complet)
 docker compose logs -f    # Voir les logs
 ```
 

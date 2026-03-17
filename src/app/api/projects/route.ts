@@ -8,7 +8,7 @@ import {
 
 export async function GET() {
   try {
-    return NextResponse.json(getProjects());
+    return NextResponse.json(await getProjects());
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const project = addProject(body);
+    const project = await addProject(body);
     return NextResponse.json(project, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -49,7 +49,7 @@ export async function DELETE(req: NextRequest) {
     const id = new URL(req.url).searchParams.get("id");
     if (!id)
       return NextResponse.json({ error: "ID requis" }, { status: 400 });
-    const ok = deleteProject(parseInt(id));
+    const ok = await deleteProject(parseInt(id));
     return ok
       ? NextResponse.json({ success: true })
       : NextResponse.json({ error: "Non trouvé" }, { status: 404 });

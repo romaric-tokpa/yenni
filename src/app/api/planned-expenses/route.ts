@@ -8,11 +8,11 @@ export async function GET(req: NextRequest) {
     const execute = sp.get("execute");
     const executeId = sp.get("execute_id");
     if (execute === "true") {
-      const result = executeDuePlannedExpenses();
+      const result = await executeDuePlannedExpenses();
       return NextResponse.json(result);
     }
     if (executeId) {
-      const expense = executePlannedExpenseById(parseInt(executeId));
+      const expense = await executePlannedExpenseById(parseInt(executeId));
       if (!expense) return NextResponse.json({ error: "Non trouvé ou déjà exécuté" }, { status: 404 });
       return NextResponse.json(expense);
     }
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     if (!body.due_date || !body.description || !body.category || !body.amount || body.amount <= 0) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
-    const planned = addPlannedExpense(body);
+    const planned = await addPlannedExpense(body);
     return NextResponse.json(planned, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -40,7 +40,7 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     const { id, ...updates } = body;
     if (!id) return NextResponse.json({ error: "ID requis" }, { status: 400 });
-    const updated = updatePlannedExpense(id, updates);
+    const updated = await updatePlannedExpense(id, updates);
     if (!updated) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json(updated);
   } catch {
@@ -52,7 +52,7 @@ export async function DELETE(req: NextRequest) {
   try {
     const id = parseInt(new URL(req.url).searchParams.get("id") || "0");
     if (!id) return NextResponse.json({ error: "ID requis" }, { status: 400 });
-    const ok = deletePlannedExpense(id);
+    const ok = await deletePlannedExpense(id);
     if (!ok) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json({ success: true });
   } catch {

@@ -16,7 +16,7 @@ export async function GET(
     if (isNaN(projectId)) {
       return NextResponse.json({ error: "ID invalide" }, { status: 400 });
     }
-    const funds = getProjectFunds(projectId);
+    const funds = await getProjectFunds(projectId);
     return NextResponse.json(funds);
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -40,7 +40,7 @@ export async function POST(
     }
     const fundDate = date || new Date().toISOString().split("T")[0];
     const amt = Number(amount);
-    const fund = addProjectFund({
+    const fund = await addProjectFund({
       project_id: projectId,
       amount: amt,
       date: fundDate,
@@ -63,7 +63,7 @@ export async function PUT(
     if (!fundId || isNaN(fundId)) {
       return NextResponse.json({ error: "ID requis" }, { status: 400 });
     }
-    const fund = updateProjectFund(fundId, {
+    const fund = await updateProjectFund(fundId, {
       amount: body.amount,
       date: body.date,
       notes: body.notes,
@@ -82,7 +82,7 @@ export async function DELETE(req: NextRequest) {
     if (!id) {
       return NextResponse.json({ error: "ID requis" }, { status: 400 });
     }
-    const ok = deleteProjectFund(parseInt(id, 10));
+    const ok = await deleteProjectFund(parseInt(id, 10));
     return ok
       ? NextResponse.json({ success: true })
       : NextResponse.json({ error: "Non trouvé" }, { status: 404 });

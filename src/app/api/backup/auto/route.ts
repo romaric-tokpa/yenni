@@ -5,8 +5,8 @@ import fs from "fs";
 
 export async function GET() {
   try {
-    ensureDailyBackup();
-    const list = getAutoBackupList();
+    await ensureDailyBackup();
+    const list = await getAutoBackupList();
     return NextResponse.json({
       backups: list.map((b) => ({
         date: b.date,

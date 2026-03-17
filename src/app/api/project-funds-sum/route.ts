@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
     if (isNaN(month) || month < 0 || month > 11 || isNaN(year)) {
       return NextResponse.json({ error: "month (0-11) et year requis" }, { status: 400 });
     }
-    const sum = getProjectFundsSumForMonth(month, year);
+    const sum = await getProjectFundsSumForMonth(month, year);
     return NextResponse.json({ sum });
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });

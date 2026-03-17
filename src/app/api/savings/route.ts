@@ -5,12 +5,12 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     if (searchParams.get("cumulative") === "true") {
-      return NextResponse.json(getTotalSavingsCumulative());
+      return NextResponse.json(await getTotalSavingsCumulative());
     }
     const year = parseInt(
       searchParams.get("year") || String(new Date().getFullYear())
     );
-    return NextResponse.json(getSavings(year));
+    return NextResponse.json(await getSavings(year));
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
@@ -22,7 +22,7 @@ export async function PUT(req: NextRequest) {
     if (month === undefined || !year || amount === undefined) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
-    setSaving(month, year, amount);
+    await setSaving(month, year, amount);
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });

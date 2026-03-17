@@ -3,7 +3,7 @@ import { exportBackup, importBackup } from "@/lib/db";
 
 export async function GET() {
   try {
-    const backup = exportBackup();
+    const backup = await exportBackup();
     const filename = `monbudget-backup-${new Date().toISOString().slice(0, 10)}.json`;
     return new NextResponse(JSON.stringify(backup, null, 2), {
       headers: {
@@ -23,7 +23,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const result = importBackup(body);
+    const result = await importBackup(body);
     if (!result.success) {
       return NextResponse.json(
         { error: result.error || "Restauration échouée" },

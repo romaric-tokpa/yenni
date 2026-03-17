@@ -20,7 +20,7 @@ export async function GET() {
     const todos: NotificationTodo[] = [];
 
     // Prêts avec échéance à venir ou dépassée (dans les 7 prochains jours ou en retard)
-    const loans = getLoans();
+    const loans = await getLoans();
     const activeLoans = loans.filter((l) => l.status === "active" && l.next_due_date);
 
     for (const loan of activeLoans) {
@@ -43,7 +43,7 @@ export async function GET() {
     }
 
     // Toutes les dépenses planifiées en attente
-    const planned = getPlannedExpenses("pending");
+    const planned = await getPlannedExpenses("pending");
     for (const p of planned) {
       const days = daysBetween(p.due_date);
       todos.push({

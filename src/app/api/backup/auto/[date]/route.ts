@@ -12,7 +12,7 @@ export async function GET(
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json({ error: "Date invalide" }, { status: 400 });
     }
-    const list = getAutoBackupList();
+    const list = await getAutoBackupList();
     const found = list.find((b) => b.date === date);
     if (!found || !fs.existsSync(found.path)) {
       return NextResponse.json({ error: "Sauvegarde introuvable" }, { status: 404 });

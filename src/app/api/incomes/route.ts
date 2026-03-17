@@ -7,14 +7,14 @@ export async function GET(req: NextRequest) {
     const start = searchParams.get("start");
     const end = searchParams.get("end");
     if (start && end) {
-      return NextResponse.json(getIncomesByDateRange(start, end));
+      return NextResponse.json(await getIncomesByDateRange(start, end));
     }
     const month = searchParams.get("month");
     const year = searchParams.get("year");
     const incomes =
       month !== null && year !== null
-        ? getIncomes(parseInt(month), parseInt(year))
-        : getIncomes();
+        ? await getIncomes(parseInt(month), parseInt(year))
+        : await getIncomes();
     return NextResponse.json(incomes);
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     if (!body.date || !body.description || !body.amount || body.amount <= 0) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
-    const income = addIncome(body);
+    const income = await addIncome(body);
     return NextResponse.json(income, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -40,7 +40,7 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get("id");
     if (!id)
       return NextResponse.json({ error: "ID requis" }, { status: 400 });
-    const ok = deleteIncome(parseInt(id));
+    const ok = await deleteIncome(parseInt(id));
     return ok
       ? NextResponse.json({ success: true })
       : NextResponse.json({ error: "Non trouvé" }, { status: 404 });

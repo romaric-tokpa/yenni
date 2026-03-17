@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
     const start = searchParams.get("start");
     const end = searchParams.get("end");
     if (start && end) {
-      return NextResponse.json(getExpensesByDateRange(start, end));
+      return NextResponse.json(await getExpensesByDateRange(start, end));
     }
     const month = searchParams.get("month");
     const year = searchParams.get("year");
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     ) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
-    const expense = addExpense(body);
+    const expense = await addExpense(body);
     return NextResponse.json(expense, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -60,7 +60,7 @@ export async function PUT(req: NextRequest) {
     ) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
-    const expense = updateExpense(id, {
+    const expense = await updateExpense(id, {
       date: body.date,
       time: body.time,
       description: body.description,
@@ -83,7 +83,7 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get("id");
     if (!id)
       return NextResponse.json({ error: "ID requis" }, { status: 400 });
-    const ok = deleteExpense(parseInt(id));
+    const ok = await deleteExpense(parseInt(id));
     return ok
       ? NextResponse.json({ success: true })
       : NextResponse.json({ error: "Non trouvé" }, { status: 404 });

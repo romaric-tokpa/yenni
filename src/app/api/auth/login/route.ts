@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email et mot de passe requis" }, { status: 400 });
     }
 
-    const user = getUserByEmail(email.toLowerCase().trim());
+    const user = await getUserByEmail(email.toLowerCase().trim());
     if (!user) {
       return NextResponse.json({ error: "Email ou mot de passe incorrect" }, { status: 401 });
     }

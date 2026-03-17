@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import InstallPrompt from "@/components/InstallPrompt";
+import PWARegister from "@/components/PWARegister";
 
 export const metadata: Metadata = {
   title: "Yenni — Gestion Financière",
@@ -21,6 +23,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {children}
         <InstallPrompt />
+        <PWARegister />
+        <Analytics />
       </body>
     </html>
   );

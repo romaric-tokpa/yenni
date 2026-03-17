@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email invalide" }, { status: 400 });
     }
 
-    if (getUserByEmail(email.toLowerCase())) {
+    if (await getUserByEmail(email.toLowerCase())) {
       return NextResponse.json({ error: "Cet email est déjà utilisé" }, { status: 409 });
     }
 
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     }
 
     const password_hash = await bcrypt.hash(password, 12);
-    const user = createUser({
+    const user = await createUser({
       first_name: first_name.trim(),
       last_name: last_name.trim(),
       phone: phone.trim(),
