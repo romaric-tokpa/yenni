@@ -15,7 +15,9 @@ export function getDbClient(): Client {
   } else {
     const dbPath = path.join(process.cwd(), "data", "budget.db");
     const dir = path.dirname(dbPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (!process.env.TURSO_DATABASE_URL && !fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
     client = createClient({ url: `file:${dbPath.replace(/\\/g, "/")}` });
   }
 
