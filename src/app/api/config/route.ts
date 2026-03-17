@@ -6,7 +6,7 @@ export async function GET(req: NextRequest) {
     await ensureDailyBackup();
     return NextResponse.json(await getConfig());
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
@@ -17,7 +17,7 @@ export async function PUT(req: NextRequest) {
     await saveConfig(body);
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ avatar_path: dataUri });
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
@@ -81,7 +81,7 @@ export async function DELETE(req: NextRequest) {
     await updateUserAvatar(session.userId, null);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

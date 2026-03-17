@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
     );
     return NextResponse.json(await getSalaries(year));
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
@@ -23,7 +23,7 @@ export async function PUT(req: NextRequest) {
     await setSalary(month, year, Math.max(0, amount));
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

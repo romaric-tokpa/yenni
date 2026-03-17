@@ -6,7 +6,7 @@ export async function GET(req: NextRequest) {
     const status = new URL(req.url).searchParams.get("status") || undefined;
     return NextResponse.json(await getLoans(status));
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     const loan = await addLoan(body);
     return NextResponse.json(loan, { status: 201 });
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
@@ -35,7 +35,7 @@ export async function PUT(req: NextRequest) {
     if (!loan) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json(loan);
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
@@ -48,7 +48,7 @@ export async function DELETE(req: NextRequest) {
     if (!ok) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

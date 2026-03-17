@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const sum = await getProjectFundsSumForMonth(month, year);
     return NextResponse.json({ sum });
   } catch (err) {
-    console.error("[API ERROR]", req.method, req.url, err);
+    console.error("[API ERROR]", err);
     return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
