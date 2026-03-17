@@ -28,7 +28,9 @@ export async function POST(req: NextRequest) {
     const ext = file.name.split(".").pop() || "jpg";
     const filename = `${session.userId}-${Date.now()}.${ext}`;
 
-    await mkdir(AVATARS_DIR, { recursive: true });
+    if (!process.env.TURSO_DATABASE_URL) {
+      await mkdir(AVATARS_DIR, { recursive: true });
+    }
 
     const oldUser = await getUserById(session.userId);
     if (oldUser?.avatar_path) {

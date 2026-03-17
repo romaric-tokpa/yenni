@@ -9,9 +9,7 @@ const LEGACY_AVATARS_DIR = path.join(process.cwd(), "public", "uploads", "avatar
 
 /** Chemin du fichier avatar (data d'abord, puis legacy) */
 export function getAvatarFilePath(filename: string): string {
-  if (!process.env.TURSO_DATABASE_URL) {
-    const dataPath = path.join(AVATARS_DIR, filename);
-    if (fs.existsSync(dataPath)) return dataPath;
-  }
+  const dataPath = path.join(AVATARS_DIR, filename);
+  if (!process.env.TURSO_DATABASE_URL && fs.existsSync(dataPath)) return dataPath;
   return path.join(LEGACY_AVATARS_DIR, filename);
 }
