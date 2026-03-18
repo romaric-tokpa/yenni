@@ -23,7 +23,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
