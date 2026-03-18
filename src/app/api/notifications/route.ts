@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/apiError";
 import { getSessionFromCookies } from "@/lib/auth";
-import { getLoans, getPlannedExpenses, getOverdueSchedules, getSchedulesForPeriod, refreshScheduleStatuses } from "@/lib/db";
+import { getLoans, getPlannedExpenses, getWishes, getOverdueSchedules, getSchedulesForPeriod, refreshScheduleStatuses } from "@/lib/db";
 import type { NotificationTodo } from "@/lib/types";
 
 function getTodayStr(): string {
@@ -132,6 +132,25 @@ export async function GET() {
         amount: p.amount,
         due_date: p.due_date,
         link: `/expenses?planned=${p.id}`,
+        is_overdue: days < 0,
+        days_left: days,
+      });
+    }
+
+    // Liste des envies (échéance à venir ou dépassée)
+    const wishes = await getWishes("pending");
+    for (const w of wishes) {
+      const days = daysBetween(w.target_date);
+      todos.push({
+        id: `wish-${w.id}`,
+        type: "todo",
+        source_type: "wish",
+        source_id: w.id,
+        title: "Envie à acheter",
+        message: w.name,
+        amount: w.estimated_amount,
+        due_date: w.target_date,
+        link: `/wishes?highlight=${w.id}`,
         is_overdue: days < 0,
         days_left: days,
       });

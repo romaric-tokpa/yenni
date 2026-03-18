@@ -1,9 +1,9 @@
 "use client";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { formatCFA, AVAILABLE_ICONS, CATEGORY_COLORS, MONTHS_SHORT } from "@/lib/constants";
-import { BudgetConfig, FixedCharge, FixedChargePayment, Category } from "@/lib/types";
+import { BudgetConfig, FixedCharge, FixedChargePayment, Category, WishCategory, WishSubcategory } from "@/lib/types";
 import Icon from "./ui/Icon";
-import { Coins, ClipboardList, FolderOpen, Plus, Trash2, X, Banknote, Check, Clock } from "lucide-react";
+import { Coins, ClipboardList, FolderOpen, Plus, Trash2, X, Banknote, Check, Clock, Heart } from "lucide-react";
 
 interface BudgetData {
   config: BudgetConfig;
@@ -140,6 +140,10 @@ export default function Settings({
   const [newCharge, setNewCharge] = useState({ label: "", amount: "", icon: "house" });
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCategory, setNewCategory] = useState({ label: "", budget: "", icon: "wrench", color: "#10B981" });
+  const [showAddWishCategory, setShowAddWishCategory] = useState(false);
+  const [newWishCategory, setNewWishCategory] = useState({ label: "", icon: "heart", color: "#EC4899" });
+  const [addingSubForIdx, setAddingSubForIdx] = useState<number | null>(null);
+  const [newSubLabel, setNewSubLabel] = useState("");
   const [showPayCharge, setShowPayCharge] = useState<FixedCharge | null>(null);
   const now = new Date();
   const [payForm, setPayForm] = useState({
@@ -214,6 +218,53 @@ export default function Settings({
   const removeCategory = (idx: number) => {
     const updated = config.categories.filter((_: Category, i: number) => i !== idx);
     saveImmediate({ ...config, categories: updated });
+  };
+
+  const wishCategories = config.wishCategories ?? [];
+
+  const addWishCategory = () => {
+    if (!newWishCategory.label) { showToast("Nom requis", "error"); return; }
+    const id = newWishCategory.label.toLowerCase().replace(/[^a-z0-9]/g, "_") + "_" + Date.now();
+    const cat: WishCategory = {
+      id,
+      label: newWishCategory.label,
+      icon: newWishCategory.icon,
+      color: newWishCategory.color,
+      subcategories: [],
+    };
+    saveImmediate({ ...config, wishCategories: [...wishCategories, cat] });
+    setNewWishCategory({ label: "", icon: "heart", color: "#EC4899" });
+    setShowAddWishCategory(false);
+    showToast("Catégorie d'envie ajoutée !");
+  };
+
+  const removeWishCategory = (idx: number) => {
+    const updated = wishCategories.filter((_: WishCategory, i: number) => i !== idx);
+    saveImmediate({ ...config, wishCategories: updated });
+  };
+
+  const addWishSubcategory = (catIdx: number, label: string) => {
+    if (!label.trim()) return;
+    const cat = wishCategories[catIdx];
+    const subs = cat.subcategories ?? [];
+    const id = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const newSub: WishSubcategory = { id, label: label.trim() };
+    const updated = wishCategories.map((c, i) =>
+      i === catIdx ? { ...c, subcategories: [...subs, newSub] } : c
+    );
+    saveImmediate({ ...config, wishCategories: updated });
+    setAddingSubForIdx(null);
+    setNewSubLabel("");
+    showToast("Sous-catégorie ajoutée !");
+  };
+
+  const removeWishSubcategory = (catIdx: number, subIdx: number) => {
+    const cat = wishCategories[catIdx];
+    const subs = (cat.subcategories ?? []).filter((_: WishSubcategory, i: number) => i !== subIdx);
+    const updated = wishCategories.map((c, i) =>
+      i === catIdx ? { ...c, subcategories: subs } : c
+    );
+    saveImmediate({ ...config, wishCategories: updated });
   };
 
   const addCategory = () => {
@@ -417,6 +468,83 @@ export default function Settings({
         )}
       </div>
 
+      {/* Catégories d'envies */}
+      <div className="glass-strong rounded-2xl p-4 lg:p-6 mt-4 lg:mt-6">
+        <div className="flex justify-between items-center mb-3 lg:mb-4">
+          <h3 className="text-xs lg:text-sm font-semibold flex items-center gap-2">
+            <Heart size={16} className="text-pink-400" /> Catégories d&apos;envies
+          </h3>
+          <button onClick={() => setShowAddWishCategory(true)}
+            className="text-pink-400 text-[10px] lg:text-xs font-medium flex items-center gap-1 hover:text-pink-300 transition-colors">
+            <Plus size={14} /> Ajouter
+          </button>
+        </div>
+        <p className="text-[10px] lg:text-xs text-slate-500 mb-3">
+          Définis tes propres catégories pour organiser ta liste des envies (ex: Électronique, Vêtements, Maison…).
+        </p>
+        {wishCategories.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-xs">
+            Aucune catégorie d&apos;envie. Ajoute-en pour organiser ta liste.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {wishCategories.map((cat: WishCategory, idx: number) => {
+              const subs = cat.subcategories ?? [];
+              const isAddingSub = addingSubForIdx === idx;
+              return (
+                <div key={cat.id} className="rounded-xl border border-white/5 overflow-hidden"
+                  style={{ borderLeft: `3px solid ${cat.color}` }}>
+                  <div className="flex items-center gap-2 lg:gap-3 p-2.5 lg:p-3 bg-white/[0.02] group">
+                    <span className="flex justify-center w-5">
+                      <Icon name={cat.icon} size={14} style={{ color: cat.color }} />
+                    </span>
+                    <span className="flex-1 text-[10px] lg:text-xs text-slate-400 truncate">{cat.label}</span>
+                    <button
+                      onClick={() => { setAddingSubForIdx(idx); setNewSubLabel(""); }}
+                      className="text-[10px] text-pink-400/80 hover:text-pink-400 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 lg:opacity-100">
+                      <Plus size={12} /> Sous-cat.
+                    </button>
+                    <button onClick={() => removeWishCategory(idx)}
+                      className="text-slate-600 hover:text-red-400 active:text-red-400 transition-colors p-1 opacity-0 group-hover:opacity-100 lg:opacity-100">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                  {(subs.length > 0 || isAddingSub) && (
+                    <div className="pl-8 pr-2 pb-2 space-y-1.5">
+                      {subs.map((sub: WishSubcategory, subIdx: number) => (
+                        <div key={sub.id} className="flex items-center gap-2 py-1">
+                          <span className="text-[10px] text-slate-500 flex-1 truncate">{sub.label}</span>
+                          <button onClick={() => removeWishSubcategory(idx, subIdx)}
+                            className="text-slate-600 hover:text-red-400 p-0.5">
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      ))}
+                      {isAddingSub && (
+                        <div className="flex gap-1.5 mt-1">
+                          <input
+                            className="input-field flex-1 text-xs py-1.5 px-2"
+                            placeholder="Nom de la sous-catégorie"
+                            value={newSubLabel}
+                            onChange={(e) => setNewSubLabel(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && addWishSubcategory(idx, newSubLabel)}
+                            autoFocus
+                          />
+                          <button onClick={() => addWishSubcategory(idx, newSubLabel)}
+                            className="btn-primary px-2 py-1.5 text-[10px] rounded-lg">Ajouter</button>
+                          <button onClick={() => { setAddingSubForIdx(null); setNewSubLabel(""); }}
+                            className="px-2 py-1.5 text-slate-500 text-[10px] rounded-lg border border-white/10">Annuler</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Modal — Ajouter une charge fixe */}
       {showAddCharge && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
@@ -510,6 +638,55 @@ export default function Settings({
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowAddCategory(false)} className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm">Annuler</button>
               <button onClick={addCategory} className="btn-primary flex-1 py-3 rounded-xl text-sm font-semibold">Ajouter</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal — Ajouter une catégorie d'envie */}
+      {showAddWishCategory && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
+          onClick={() => setShowAddWishCategory(false)}>
+          <div className="popup-panel w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-5">
+              <h2 className="text-base font-bold flex items-center gap-2">
+                <Heart size={18} className="text-pink-400" /> Nouvelle catégorie d&apos;envie
+              </h2>
+              <button onClick={() => setShowAddWishCategory(false)} className="text-slate-400 p-1"><X size={20} /></button>
+            </div>
+            <div className="grid gap-4">
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Nom</label>
+                <input className="input-field" placeholder="Ex: Électronique, Vêtements, Maison..."
+                  value={newWishCategory.label} onChange={(e) => setNewWishCategory({ ...newWishCategory, label: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-2 block">Icône</label>
+                <div className="flex gap-1.5 flex-wrap">
+                  {AVAILABLE_ICONS.slice(0, 18).map((iconName) => (
+                    <button key={iconName} onClick={() => setNewWishCategory({ ...newWishCategory, icon: iconName })}
+                      className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all
+                        ${newWishCategory.icon === iconName ? "bg-pink-500/30 ring-2 ring-pink-500" : "bg-white/5"}`}>
+                      <Icon name={iconName} size={16} className={newWishCategory.icon === iconName ? "text-pink-300" : "text-slate-400"} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-2 block">Couleur</label>
+                <div className="flex gap-2 flex-wrap">
+                  {CATEGORY_COLORS.map((color) => (
+                    <button key={color} onClick={() => setNewWishCategory({ ...newWishCategory, color })}
+                      className={`w-7 h-7 rounded-full transition-all ${newWishCategory.color === color ? "ring-2 ring-white scale-110" : ""}`}
+                      style={{ background: color }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowAddWishCategory(false)} className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm">Annuler</button>
+              <button onClick={addWishCategory} className="btn-primary flex-1 py-3 rounded-xl text-sm font-semibold">Ajouter</button>
             </div>
           </div>
         </div>

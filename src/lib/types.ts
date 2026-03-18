@@ -28,6 +28,21 @@ export interface Category {
   color: string;
 }
 
+/** Sous-catégorie d'une catégorie d'envie */
+export interface WishSubcategory {
+  id: string;
+  label: string;
+}
+
+/** Catégorie personnalisée pour les envies (liste des souhaits) */
+export interface WishCategory {
+  id: string;
+  label: string;
+  icon: string;
+  color: string;
+  subcategories?: WishSubcategory[];
+}
+
 export interface FixedCharge {
   id: string;
   label: string;
@@ -88,6 +103,8 @@ export interface BudgetConfig {
   otherIncome: number;
   fixedCharges: FixedCharge[];
   categories: Category[];
+  /** Catégories personnalisées pour la liste des envies */
+  wishCategories?: WishCategory[];
   savingsGoal: number;
   /** Date de début de la période d'épargne (YYYY-MM-DD). Définit le cadre temporel. */
   savingsGoalStartDate?: string;
@@ -241,6 +258,20 @@ export interface PlannedExpense {
   created_at: string;
 }
 
+export interface Wish {
+  id: number;
+  name: string;
+  target_date: string;
+  estimated_amount: number;
+  actual_amount: number | null;
+  category: string;
+  subcategory?: string | null;
+  notes: string;
+  status: "pending" | "purchased";
+  expense_id: number | null;
+  created_at: string;
+}
+
 export interface CalendarEvent {
   id: number;
   type: "expense" | "income" | "fixed" | "loan";
@@ -253,7 +284,7 @@ export interface CalendarEvent {
   icon?: string;
 }
 
-export type NotificationSourceType = "loan_due" | "loan_overdue" | "loan_upcoming" | "planned_expense" | "reminder";
+export type NotificationSourceType = "loan_due" | "loan_overdue" | "loan_upcoming" | "planned_expense" | "wish" | "reminder";
 
 export interface NotificationTodo {
   id: string;

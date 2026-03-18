@@ -4,6 +4,7 @@ export const DEFAULT_CONFIG: BudgetConfig = {
   salary: 0,
   otherIncome: 0,
   fixedCharges: [],
+  wishCategories: [],
   categories: [
     { id: "food", label: "Alimentation", icon: "utensils", budget: 0, color: "#10B981" },
     { id: "transport", label: "Transport", icon: "car", budget: 0, color: "#3B82F6" },

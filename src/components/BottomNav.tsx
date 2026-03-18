@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
   X,
   LogOut,
+  Heart,
 } from "lucide-react";
 
 const mainTabs = [
@@ -29,6 +30,7 @@ const mainTabs = [
 
 const moreTabs = [
   { href: "/savings", label: "Épargne", Icon: Landmark },
+  { href: "/wishes", label: "Envies", Icon: Heart },
   { href: "/loans", label: "Prêts", Icon: HandCoins },
   { href: "/projects", label: "Projets", Icon: FolderKanban },
   { href: "/history", label: "Historique", Icon: History },
@@ -79,6 +81,7 @@ export default function BottomNav({
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 className={`flex flex-col items-center justify-center min-w-[52px] py-2 transition-colors touch-manipulation ${
                   active ? "text-green-500" : "text-neutral-500"
                 }`}
@@ -128,6 +131,7 @@ export default function BottomNav({
                   <Link
                     key={href}
                     href={href}
+                    prefetch={false}
                     onClick={() => setMoreOpen(false)}
                     className={`flex items-center gap-2.5 min-h-[44px] px-3 rounded-lg transition-colors ${
                       active ? "bg-white/8 text-green-500" : "text-neutral-300"

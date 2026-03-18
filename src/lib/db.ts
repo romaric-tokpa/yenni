@@ -2,7 +2,7 @@ import path from "path";
 import fs from "fs";
 import type { InStatement } from "@libsql/client";
 import { getDbClient, isTurso } from "./db/client";
-import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, MonthlySaving, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput } from "./types";
+import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, MonthlySaving, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput, Wish } from "./types";
 import { DEFAULT_CONFIG } from "./constants";
 
 // ── Helpers ──
@@ -23,7 +23,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -238,6 +238,7 @@ export async function deleteExpense(id: number): Promise<boolean> {
     return await deleteLoanPayment(linkedPayment.id);
   }
   await db.execute({ sql: "UPDATE planned_expenses SET expense_id = NULL, status = 'cancelled' WHERE expense_id = ?", args: [id] });
+  await db.execute({ sql: "UPDATE wishes SET expense_id = NULL WHERE expense_id = ?", args: [id] });
   const rs = await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [id] });
   return (rs.rowsAffected ?? 0) > 0;
 }
@@ -315,7 +316,8 @@ export async function getConfig(): Promise<BudgetConfig> {
           mergedCategories.push(dc);
         }
       }
-      return { ...saved, categories: mergedCategories };
+      const wishCategories = Array.isArray(saved.wishCategories) ? saved.wishCategories : [];
+      return { ...saved, categories: mergedCategories, wishCategories };
     } catch {
       return DEFAULT_CONFIG;
     }
@@ -1360,6 +1362,89 @@ export async function executeDuePlannedExpenses(userId: number): Promise<{ execu
     tx.close();
   }
   return { executed: executedIds.length, ids: executedIds };
+}
+
+// ── Wishes (liste des envies) ──
+
+export async function getWishes(status?: "pending" | "purchased"): Promise<Wish[]> {
+  await ensureMigrations();
+  const db = getDbClient();
+  let rs;
+  if (status) {
+    rs = await db.execute({
+      sql: "SELECT * FROM wishes WHERE status = ? ORDER BY target_date ASC, created_at ASC",
+      args: [status],
+    });
+  } else {
+    rs = await db.execute("SELECT * FROM wishes ORDER BY target_date ASC, created_at ASC");
+  }
+  return rowsToObjs<Wish>(rs.rows as Row[], rs.columns);
+}
+
+export async function addWish(w: Omit<Wish, "id" | "created_at">): Promise<Wish> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "INSERT INTO wishes (name, target_date, estimated_amount, actual_amount, category, subcategory, notes, status, expense_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [w.name, w.target_date, w.estimated_amount, w.actual_amount ?? null, w.category, w.subcategory ?? null, w.notes || "", w.status || "pending", w.expense_id ?? null],
+  });
+  return rowToObj<Wish>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function updateWish(id: number, updates: Partial<Pick<Wish, "name" | "target_date" | "estimated_amount" | "actual_amount" | "category" | "subcategory" | "notes">>): Promise<Wish | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const currentRs = await db.execute({ sql: "SELECT * FROM wishes WHERE id = ?", args: [id] });
+  if (currentRs.rows.length === 0) return null;
+  const current = rowToObj<Wish>(currentRs.rows[0] as Row, currentRs.columns);
+  const merged = { ...current, ...updates };
+  await db.execute({
+    sql: "UPDATE wishes SET name=?, target_date=?, estimated_amount=?, actual_amount=?, category=?, subcategory=?, notes=? WHERE id=?",
+    args: [merged.name, merged.target_date, merged.estimated_amount, merged.actual_amount ?? null, merged.category, merged.subcategory ?? null, merged.notes || "", id],
+  });
+  if (current.status === "purchased" && current.expense_id) {
+    const amount = merged.actual_amount ?? merged.estimated_amount;
+    await db.execute({
+      sql: "UPDATE expenses SET description=?, category=?, amount=?, notes=? WHERE id=?",
+      args: [merged.name, merged.category, amount, merged.notes ? `[Envie achetée] ${merged.notes}` : "[Envie achetée]", current.expense_id],
+    });
+  }
+  const rs = await db.execute({ sql: "SELECT * FROM wishes WHERE id = ?", args: [id] });
+  return rowToObj<Wish>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function markWishPurchased(id: number, actualAmount: number, userId: number): Promise<Expense | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const wRs = await db.execute({ sql: "SELECT * FROM wishes WHERE id = ? AND status = 'pending'", args: [id] });
+  if (wRs.rows.length === 0) return null;
+  const w = rowToObj<Wish>(wRs.rows[0] as Row, wRs.columns);
+  const today = new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const ins = await db.execute({
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [userId, today, time, w.name, w.category, actualAmount, w.notes ? `[Envie achetée] ${w.notes}` : "[Envie achetée]"],
+  });
+  const expense = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
+  await db.execute({
+    sql: "UPDATE wishes SET status = 'purchased', actual_amount = ?, expense_id = ? WHERE id = ?",
+    args: [actualAmount, expense.id, id],
+  });
+  return expense;
+}
+
+export async function deleteWish(id: number): Promise<boolean> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const wRs = await db.execute({ sql: "SELECT * FROM wishes WHERE id = ?", args: [id] });
+  if (wRs.rows.length === 0) return false;
+  const w = rowToObj<Wish>(wRs.rows[0] as Row, wRs.columns);
+  if (w.status === "purchased" && w.expense_id) {
+    await db.execute({ sql: "UPDATE wishes SET expense_id = NULL WHERE id = ?", args: [id] });
+    await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [w.expense_id] });
+  }
+  const del = await db.execute({ sql: "DELETE FROM wishes WHERE id = ?", args: [id] });
+  return (del.rowsAffected ?? 0) > 0;
 }
 
 // ── Users ──

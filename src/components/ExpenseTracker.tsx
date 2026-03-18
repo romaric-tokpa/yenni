@@ -63,6 +63,14 @@ export default function ExpenseTracker({
     totalBudgetVar,
   } = budget;
 
+  const getCategoryDisplay = useCallback((categoryId: string) => {
+    const cat = config.categories.find((c: Category) => c.id === categoryId);
+    if (cat) return { label: cat.label, icon: cat.icon, color: cat.color };
+    const wishCat = config.wishCategories?.find((c) => c.id === categoryId);
+    if (wishCat) return { label: wishCat.label, icon: wishCat.icon, color: wishCat.color };
+    return { label: categoryId, icon: "wrench", color: "#6366f1" };
+  }, [config.categories, config.wishCategories]);
+
   const allHistory: HistoryItem[] = [
     ...expenses.map((e) => ({ kind: "expense" as const, data: e })),
     ...fixedPayments.map((p) => ({ kind: "fixed" as const, data: p })),
@@ -341,7 +349,7 @@ export default function ExpenseTracker({
             renderItem={(item) => {
               if (item.kind === "expense") {
                 const exp = item.data;
-                const cat = config.categories.find((c: Category) => c.id === exp.category);
+                const cat = getCategoryDisplay(exp.category);
                 return (
                   <div className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03]">
                     <div className="font-mono text-xs text-slate-400">
@@ -351,8 +359,8 @@ export default function ExpenseTracker({
                     <div className="text-[13px]">{exp.description}</div>
                     <div>
                       <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1"
-                        style={{ background: (cat?.color || "#6366f1") + "22", color: cat?.color || "#6366f1" }}>
-                        {cat && <Icon name={cat.icon} size={12} />}{cat?.label}
+                        style={{ background: cat.color + "22", color: cat.color }}>
+                        <Icon name={cat.icon} size={12} />{cat.label}
                       </span>
                     </div>
                     <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{formatCFA(exp.amount)}</div>
@@ -386,7 +394,7 @@ export default function ExpenseTracker({
           allHistory.map((item) => {
             if (item.kind === "expense") {
               const exp = item.data;
-              const cat = config.categories.find((c: Category) => c.id === exp.category);
+              const cat = getCategoryDisplay(exp.category);
               return (
                 <div key={`e-${exp.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03]">
                   <div className="font-mono text-xs text-slate-400">
@@ -396,8 +404,8 @@ export default function ExpenseTracker({
                   <div className="text-[13px]">{exp.description}</div>
                   <div>
                     <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1"
-                      style={{ background: (cat?.color || "#6366f1") + "22", color: cat?.color || "#6366f1" }}>
-                      {cat && <Icon name={cat.icon} size={12} />}{cat?.label}
+                      style={{ background: cat.color + "22", color: cat.color }}>
+                      <Icon name={cat.icon} size={12} />{cat.label}
                     </span>
                   </div>
                   <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{formatCFA(exp.amount)}</div>
@@ -481,17 +489,17 @@ export default function ExpenseTracker({
                 );
               }
               const exp = item.data;
-              const cat = config.categories.find((c: Category) => c.id === exp.category);
+              const cat = getCategoryDisplay(exp.category);
               return (
                 <div className="mb-2">
-                  <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={cat ? { borderLeft: `3px solid ${cat.color}` } : undefined}>
+                  <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: `3px solid ${cat.color}` }}>
                     <div className="flex justify-between items-start mb-1.5">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium truncate">{exp.description}</div>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-[10px] font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1"
-                            style={{ background: (cat?.color || "#6366f1") + "22", color: cat?.color || "#6366f1" }}>
-                            {cat && <Icon name={cat.icon} size={10} />}{cat?.label}
+                            style={{ background: cat.color + "22", color: cat.color }}>
+                            <Icon name={cat.icon} size={10} />{cat.label}
                           </span>
                           <span className="font-mono text-[10px] text-slate-500">
                             {new Date(exp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
@@ -544,19 +552,19 @@ export default function ExpenseTracker({
               );
             }
             const exp = item.data;
-            const cat = config.categories.find((c: Category) => c.id === exp.category);
+            const cat = getCategoryDisplay(exp.category);
             return (
-              <div key={`e-${exp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={cat ? { borderLeft: `3px solid ${cat.color}` } : undefined}>
+              <div key={`e-${exp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: `3px solid ${cat.color}` }}>
                 <div className="flex justify-between items-start mb-1.5">
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{exp.description}</div>
                     <div className="flex items-center gap-2 mt-1">
                       <span
                         className="text-[10px] font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1"
-                        style={{ background: (cat?.color || "#6366f1") + "22", color: cat?.color || "#6366f1" }}
+                        style={{ background: cat.color + "22", color: cat.color }}
                       >
-                        {cat && <Icon name={cat.icon} size={10} />}
-                        {cat?.label}
+                        <Icon name={cat.icon} size={10} />
+                        {cat.label}
                       </span>
                       <span className="font-mono text-[10px] text-slate-500">
                         {new Date(exp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
@@ -685,7 +693,7 @@ export default function ExpenseTracker({
       )}
 
       {/* ── Historique par période ── */}
-      <HistoryByPeriod config={config} selectedYear={selectedYear} />
+      <HistoryByPeriod config={config} selectedYear={selectedYear} getCategoryDisplay={getCategoryDisplay} />
 
       {/* Modal — Planifier / Modifier une dépense */}
       {showPlanModal && (
@@ -863,7 +871,15 @@ function getDateRange(period: PeriodType, selectedYear: number, periodIndex: num
   }
 }
 
-function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selectedYear: number }) {
+function HistoryByPeriod({
+  config,
+  selectedYear,
+  getCategoryDisplay,
+}: {
+  config: BudgetConfig;
+  selectedYear: number;
+  getCategoryDisplay: (categoryId: string) => { label: string; icon: string; color: string };
+}) {
   const [period, setPeriod] = useState<PeriodType>("month");
   const [periodIndex, setPeriodIndex] = useState(new Date().getMonth());
   const [dayDate, setDayDate] = useState(new Date().toISOString().split("T")[0]);
@@ -1008,15 +1024,13 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
                       <span className="font-mono text-[11px] font-bold text-red-400">-{formatCFA(dayTotal)}</span>
                     </div>
                     {items.map((e) => {
-                      const cat = config.categories.find((c: Category) => c.id === e.category);
+                      const cat = getCategoryDisplay(e.category);
                       return (
                         <div key={e.id} className="flex items-center gap-3 px-3.5 py-2 border-b border-white/[0.02] last:border-0">
-                          {cat && (
-                            <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0"
-                              style={{ background: (cat.color || "#6366f1") + "22" }}>
-                              <Icon name={cat.icon} size={12} style={{ color: cat.color }} />
-                            </span>
-                          )}
+                          <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0"
+                            style={{ background: cat.color + "22" }}>
+                            <Icon name={cat.icon} size={12} style={{ color: cat.color }} />
+                          </span>
                           <div className="flex-1 min-w-0">
                             <div className="text-xs truncate">{e.description}</div>
                             {e.time && e.time !== "00:00" && (

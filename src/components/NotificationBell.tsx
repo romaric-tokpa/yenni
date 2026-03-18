@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { useBudgetContext } from "@/contexts/BudgetContext";
-import { Bell, Check, HandCoins, Receipt, RefreshCw, X } from "lucide-react";
+import { Bell, Check, HandCoins, Receipt, RefreshCw, X, Heart } from "lucide-react";
 import { formatCFA } from "@/lib/constants";
 import type { NotificationTodo } from "@/lib/types";
 
@@ -102,8 +102,10 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
 
   const overdueLoans = todos.filter((t) => t.is_overdue && (t.source_type === "loan_due" || t.source_type === "loan_overdue"));
   const plannedOverdue = todos.filter((t) => t.source_type === "planned_expense" && t.is_overdue);
+  const wishOverdue = todos.filter((t) => t.source_type === "wish" && t.is_overdue);
   const loanTodos = todos.filter((t) => (t.source_type === "loan_due" || t.source_type === "loan_upcoming") && !t.is_overdue);
   const plannedTodos = todos.filter((t) => t.source_type === "planned_expense" && !t.is_overdue);
+  const wishTodos = todos.filter((t) => t.source_type === "wish" && !t.is_overdue);
 
   const renderTodoItem = (t: NotificationTodo) => {
     const dl = dueLabel(t);
@@ -118,9 +120,21 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
           ? "bg-amber-500/20 text-amber-400"
           : t.source_type === "loan_due"
             ? "bg-teal-500/20 text-teal-400"
-            : "bg-amber-500/20 text-amber-400";
+            : t.source_type === "wish"
+              ? "bg-pink-500/20 text-pink-400"
+              : "bg-amber-500/20 text-amber-400";
     const actionBtn =
-      t.source_type === "loan_overdue" && t.loan_id != null && t.schedule_number != null ? (
+      t.source_type === "wish" ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            goTo();
+          }}
+          className="px-2.5 py-1.5 rounded-lg bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 text-[11px] font-semibold transition-colors"
+        >
+          Voir
+        </button>
+      ) : t.source_type === "loan_overdue" && t.loan_id != null && t.schedule_number != null ? (
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -169,6 +183,8 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
           <button type="button" onClick={goTo} className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${iconClass} hover:opacity-80 transition-opacity`}>
             {t.source_type === "loan_due" || t.source_type === "loan_overdue" || t.source_type === "loan_upcoming" ? (
               <HandCoins size={18} />
+            ) : t.source_type === "wish" ? (
+              <Heart size={18} />
             ) : (
               <Receipt size={18} />
             )}
@@ -253,8 +269,10 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
               <div className="p-2">
                 <Section title="En retard" items={overdueLoans} accent="text-red-400" />
                 <Section title="Dépenses planifiées en retard" items={plannedOverdue} accent="text-amber-400" />
+                <Section title="Envies en retard" items={wishOverdue} accent="text-pink-400" />
                 <Section title="Prêts à venir" items={loanTodos} accent="text-teal-400" />
                 <Section title="Dépenses planifiées" items={plannedTodos} accent="text-emerald-400" />
+                <Section title="Liste des envies" items={wishTodos} accent="text-pink-400" />
               </div>
             )}
           </div>

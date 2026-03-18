@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  Heart,
 } from "lucide-react";
 
 const tabs = [
@@ -25,6 +26,7 @@ const tabs = [
   { href: "/calendar", label: "Calendrier", Icon: CalendarDays },
   { href: "/budget", label: "Budget", Icon: PieChart },
   { href: "/savings", label: "Épargne", Icon: Landmark },
+  { href: "/wishes", label: "Envies", Icon: Heart },
   { href: "/loans", label: "Prêts", Icon: HandCoins },
   { href: "/projects", label: "Projets", Icon: FolderKanban },
   { href: "/history", label: "Historique", Icon: History },
@@ -48,7 +50,7 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
       {/* Zone scrollable : logo + nav (le scroll ne s'applique qu'ici si besoin) */}
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
         <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2"} mb-5 shrink-0`}>
-          <Link href="/dashboard" className="flex items-center gap-2 min-w-0">
+          <Link href="/dashboard" prefetch={false} className="flex items-center gap-2 min-w-0">
             <img src="/api/logo" alt="Yenni" className="w-9 h-9 shrink-0" />
             {!collapsed && (
               <span className="font-semibold text-emerald-400 truncate">Yenni</span>
@@ -63,6 +65,7 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 title={collapsed ? label : undefined}
                 className={`relative flex items-center ${collapsed ? "justify-center px-2" : "gap-3 px-3"} py-2.5 rounded-lg text-[13px] font-medium transition-all
                   ${active
