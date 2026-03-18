@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { formatCFA, MONTHS_FULL } from "@/lib/constants";
+import { useState, useEffect } from "react";
+import { formatCFA, MONTHS_FULL, getSelectableYears } from "@/lib/constants";
 import Avatar from "./ui/Avatar";
 import { BudgetConfig, Category, FixedCharge } from "@/lib/types";
 import MonthlyBarChart from "./charts/MonthlyBarChart";
@@ -35,6 +35,7 @@ interface BudgetData {
   monthSaving: number;
   totalMonthSpent: number;
   totalBudgetVar: number;
+  effectiveCategoryBudgets?: Record<string, number>;
   monthLoanPayments: number;
   monthLoanRepayments: number;
   monthLoanRecovered: number;
@@ -48,9 +49,9 @@ interface BudgetData {
 }
 
 function StatusDot({ level }: { level: "good" | "warn" | "bad" }) {
-  if (level === "good") return <CircleCheck size={16} className="text-emerald-400" />;
-  if (level === "warn") return <CircleAlert size={16} className="text-amber-400" />;
-  return <CircleMinus size={16} className="text-red-400" />;
+  if (level === "good") return <CircleCheck size={14} className="text-green-500" />;
+  if (level === "warn") return <CircleAlert size={14} className="text-amber-500" />;
+  return <CircleMinus size={14} className="text-red-500" />;
 }
 
 export default function Dashboard({ budget, user }: { budget: BudgetData; user?: AuthUser | null }) {
@@ -69,6 +70,7 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     monthSaving,
     totalMonthSpent,
     totalBudgetVar,
+    effectiveCategoryBudgets = {},
     monthLoanPayments,
     monthLoanRepayments,
     monthLoanRecovered,
@@ -82,6 +84,15 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
   } = budget;
 
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [monthlyChartData, setMonthlyChartData] = useState<Array<{ month: number; Revenus: number; Dépenses: number }> | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/budget-summary?year=${selectedYear}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setMonthlyChartData(Array.isArray(d) && d.length === 12 ? d : null))
+      .catch(() => setMonthlyChartData(null));
+  }, [selectedYear]);
+
   const chargesRate = totalIncome > 0 ? (totalFixed / totalIncome) * 100 : 0;
   const realMonthlySavings = monthSaving + totalProjectSaved;
   const savingsRate = totalIncome > 0 ? (realMonthlySavings / totalIncome) * 100 : 0;
@@ -105,6 +116,7 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
         totalProjectSaved,
         catSpending,
         categories: config.categories,
+        effectiveBudgets: effectiveCategoryBudgets,
       });
     } catch {
       // silent fail
@@ -117,38 +129,38 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
       label: "Actifs (Revenus)",
       value: formatCFA(totalIncome),
       sub: "Total entrées du mois",
-      color: "text-emerald-400",
-      shadow: "shadow-emerald-500/10",
+      color: "text-green-500",
+      shadow: "",
       IconComp: TrendingUp,
-      iconColor: "text-emerald-400",
+      iconColor: "text-green-500",
     },
     {
       label: "Passifs (Sorties)",
       value: formatCFA(totalExpenses),
       sub: `Fixes ${formatCFA(totalFixed)} + Dép. ${formatCFA(totalMonthSpent)}${monthLoanRepayments > 0 ? ` + Remb. ${formatCFA(monthLoanRepayments)}` : ""} + Ép. ${formatCFA(monthSaving)}`,
-      color: "text-red-400",
-      shadow: "shadow-red-500/10",
+      color: "text-red-500",
+      shadow: "",
       IconComp: TrendingDown,
-      iconColor: "text-red-400",
+      iconColor: "text-red-500",
     },
     {
       label: "Solde Disponible",
       value: formatCFA(Math.abs(soldeNet)),
       sub: soldeNet >= 0 ? `${formatCFA(dailyBudget)} / jour · ${daysLeftInMonth} jour${daysLeftInMonth > 1 ? "s" : ""} restant${daysLeftInMonth > 1 ? "s" : ""}` : "Solde négatif",
-      color: soldeNet >= 0 ? "text-emerald-400" : "text-red-400",
-      shadow: soldeNet >= 0 ? "shadow-emerald-500/10" : "shadow-red-500/10",
+      color: soldeNet >= 0 ? "text-green-500" : "text-red-500",
+      shadow: "",
       IconComp: soldeNet >= 0 ? Wallet : Scale,
-      iconColor: soldeNet >= 0 ? "text-emerald-400" : "text-red-400",
+      iconColor: soldeNet >= 0 ? "text-green-500" : "text-red-500",
       prefix: soldeNet < 0 ? "-" : "",
     },
     {
       label: "Épargne Cumulée",
       value: formatCFA(totalSaved),
       sub: `${config.savingsGoal > 0 ? ((totalSaved / config.savingsGoal) * 100).toFixed(1) : 0}% objectif${totalProjectSaved > 0 ? ` · Projets ${formatCFA(totalProjectSaved)}` : ""}`,
-      color: "text-amber-400",
-      shadow: "shadow-amber-500/10",
+      color: "text-amber-500",
+      shadow: "",
       IconComp: Trophy,
-      iconColor: "text-amber-400",
+      iconColor: "text-amber-500",
     },
   ];
 
@@ -180,128 +192,104 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     },
   ];
 
+  const greeting = user ? `Bonjour, ${user.first_name}` : "Tableau de bord";
+
   return (
     <div className="animate-slide-up">
-      <div className="flex flex-col gap-3 mb-5 lg:mb-7">
-        {/* Ligne supérieure : titre + profil utilisateur */}
-        <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          {user && (
+            <Avatar
+              avatarPath={user.avatar_path}
+              firstName={user.first_name}
+              lastName={user.last_name}
+              size="lg"
+              className="shrink-0"
+            />
+          )}
           <div>
-            <h1 className="text-xl lg:text-2xl font-bold text-slate-100">Tableau de bord</h1>
-            <p className="text-slate-500 text-xs sm:text-sm mt-0.5">
-              {MONTHS_FULL[selectedMonth]} {selectedYear} — Vue d&apos;ensemble
+            <h1 className="text-xl lg:text-2xl font-bold tracking-tight">{greeting}</h1>
+            <p className="text-neutral-500 text-xs lg:text-sm mt-0.5">
+              {MONTHS_FULL[selectedMonth]} {selectedYear}
             </p>
           </div>
-          {user && (
-            <div className="flex items-center gap-2.5">
-              <div className="text-right hidden sm:block">
-                <p className="text-sm font-semibold text-slate-200 leading-tight">{user.first_name} {user.last_name}</p>
-                <p className="text-[10px] text-slate-500">Bienvenue !</p>
-              </div>
-              <Avatar avatarPath={user.avatar_path} firstName={user.first_name} lastName={user.last_name} size="lg" />
-            </div>
-          )}
         </div>
-        {/* Sélecteurs mois / année + Export */}
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            className="input-field w-full sm:w-36"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(Number(e.target.value))}
-          >
-            {MONTHS_FULL.map((m, i) => (
-              <option key={i} value={i}>{m}</option>
-            ))}
+        <div className="flex items-center gap-2 shrink-0">
+          <select className="input-field w-32 text-sm py-2" value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))}>
+            {MONTHS_FULL.map((m, i) => <option key={i} value={i}>{m}</option>)}
           </select>
-          <select
-            className="input-field w-24"
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(Number(e.target.value))}
-          >
-            {Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i).map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
+          <select className="input-field w-24 text-sm py-2" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}>
+            {getSelectableYears().map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
           <button
             onClick={handleExportPDF}
             disabled={exportingPdf}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
-            title="Exporter le bilan en PDF"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-xs font-medium transition-colors"
           >
             <FileDown size={14} />
-            {exportingPdf ? "Export..." : "PDF"}
+            {exportingPdf ? "..." : "PDF"}
           </button>
         </div>
       </div>
 
-      {/* Saisie du salaire net du mois */}
-      <div className={`glass-strong rounded-2xl p-3 lg:p-4 mb-5 lg:mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-3 ${monthSalary === 0 ? "ring-1 ring-amber-500/30" : ""}`}>
+      {/* Salaire */}
+      <div className={`rounded-xl border p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-3 ${monthSalary === 0 ? "border-amber-500/40 bg-amber-500/5" : "border-white/5 bg-white/[0.02]"}`}>
         <div className="flex items-center gap-2 flex-shrink-0">
           <Banknote size={18} className={monthSalary > 0 ? "text-emerald-400" : "text-amber-400"} />
-          <span className="text-xs lg:text-sm font-semibold text-slate-300">
-            {monthSalary > 0 ? "Salaire net perçu" : "Salaire non renseigné"}
-          </span>
+          <span className="text-sm font-medium text-neutral-300">{monthSalary > 0 ? "Salaire du mois" : "Salaire non renseigné"}</span>
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
-          <input
-            type="number"
-            className="input-field font-mono text-sm lg:text-base flex-1 sm:w-48"
-            placeholder="Saisir le salaire du mois"
-            defaultValue={monthSalary || ""}
-            key={`sal-${selectedMonth}`}
-            onChange={(e) => updateSalary(selectedMonth, Number(e.target.value) || 0)}
-          />
-          <span className="text-[10px] lg:text-xs text-slate-500 flex-shrink-0">FCFA</span>
-        </div>
+        <input
+          type="number"
+          className="input-field font-mono text-sm flex-1 sm:w-44"
+          placeholder="0 FCFA"
+          defaultValue={monthSalary || ""}
+          key={`sal-${selectedMonth}`}
+          onChange={(e) => updateSalary(selectedMonth, Number(e.target.value) || 0)}
+        />
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-5 lg:mb-6">
+      {/* KPIs principaux */}
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {kpis.map((k, i) => (
-          <div
-            key={i}
-            className={`glass kpi-card rounded-2xl p-4 lg:p-5 ${k.shadow} shadow-lg`}
-          >
-            <div className="flex justify-between items-center mb-2 lg:mb-3">
-              <span className="text-[10px] lg:text-xs text-slate-400 font-medium">
-                {k.label}
-              </span>
-              <k.IconComp size={20} className={k.iconColor} />
-            </div>
-            <div className={`font-mono text-lg lg:text-2xl font-bold ${k.color}`}>
-              {k.value}
-            </div>
-            <div className="text-[10px] lg:text-[11px] text-slate-500 mt-0.5 lg:mt-1">{k.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 lg:gap-3 mb-5 lg:mb-7">
-        {miniKpis.map((k, i) => (
-          <div
-            key={i}
-            className="glass rounded-xl p-3 lg:p-4 flex justify-between items-center"
-          >
+          <div key={i} className="flex items-start gap-3">
+            <k.IconComp size={20} className={`shrink-0 mt-0.5 ${k.iconColor}`} />
             <div className="min-w-0">
-              <div className="text-[9px] lg:text-[11px] text-slate-500 truncate">{k.label}</div>
-              <div className="font-mono text-xs lg:text-base font-bold mt-0.5">
-                {k.value}
-              </div>
+              <div className="text-[10px] text-neutral-500">{k.label}</div>
+              <div className={`font-mono text-base lg:text-lg font-bold mt-0.5 ${k.color}`}>{k.prefix ?? ""}{k.value}</div>
+              <div className="text-[10px] text-neutral-500 mt-0.5 line-clamp-2">{k.sub}</div>
             </div>
-            <span className="ml-1 shrink-0">
-              <StatusDot level={k.level} />
-            </span>
           </div>
         ))}
+        </div>
       </div>
 
-      <div className="glass-strong rounded-2xl p-4 lg:p-6 mb-5 lg:mb-6">
-        <h3 className="text-sm lg:text-base font-semibold mb-4 lg:mb-5 text-slate-100 flex items-center gap-2">
-          <FolderOpen size={16} className="text-emerald-400" /> Budget par Catégorie
+      {/* Mini KPIs */}
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        {miniKpis.map((k, i) => (
+          <div key={i} className="flex justify-between items-center py-2 px-3 rounded-lg bg-white/[0.02] border border-white/5">
+            <div className="min-w-0">
+              <div className="text-[10px] text-neutral-500 truncate">{k.label}</div>
+              <div className="font-mono text-xs font-semibold mt-0.5 truncate">{k.value}</div>
+            </div>
+            <StatusDot level={k.level} />
+          </div>
+        ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+          <FolderOpen size={14} className="text-emerald-400" /> Budget par catégorie
         </h3>
         <div className="grid gap-3 lg:gap-3.5">
           {config.categories.map((cat: Category) => {
+            const budget = effectiveCategoryBudgets[cat.id] ?? cat.budget;
             const spent = catSpending[cat.id] || 0;
-            const pct = cat.budget > 0 ? Math.min((spent / cat.budget) * 100, 150) : 0;
-            const isOver = spent > cat.budget;
+            const pct = budget > 0 ? Math.min((spent / budget) * 100, 150) : 0;
+            const isOver = spent > budget;
             return (
               <div key={cat.id}>
                 <div className="flex justify-between items-center mb-1">
@@ -310,15 +298,15 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
                     {cat.label}
                   </span>
                   <div className="flex items-center gap-2 lg:gap-3">
-                    <span className={`font-mono text-[10px] lg:text-xs ${isOver ? "text-red-400" : "text-slate-400"}`}>
-                      {formatCFA(spent)} / {formatCFA(cat.budget)}
+                    <span className={`font-mono text-[10px] lg:text-xs ${isOver ? "text-red-400" : "text-neutral-400"}`}>
+                      {formatCFA(spent)} / {formatCFA(budget)}
                     </span>
                     <StatusDot level={isOver ? "bad" : pct > 80 ? "warn" : "good"} />
                   </div>
                 </div>
                 <AnimatedProgressBar
                   value={spent}
-                  max={cat.budget}
+                  max={budget}
                   duration={0.6}
                   className="h-1.5 lg:h-2"
                   gradient={
@@ -335,37 +323,42 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 mb-5 lg:mb-6">
-        <div className="glass-strong rounded-2xl p-4 lg:p-6">
-          <h3 className="text-xs lg:text-sm font-semibold mb-3 lg:mb-4 text-slate-300 flex items-center gap-2">
-            <PieChart size={14} className="text-emerald-400" /> Répartition du Budget
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
+          <h3 className="text-xs font-semibold mb-2 text-neutral-400 flex items-center gap-1.5">
+            <PieChart size={12} className="text-emerald-400" /> Répartition du budget
           </h3>
-          <BudgetPieChart categories={config.categories} />
+          <BudgetPieChart categories={config.categories} effectiveBudgets={effectiveCategoryBudgets} />
         </div>
-        <div className="glass-strong rounded-2xl p-4 lg:p-6">
-          <h3 className="text-xs lg:text-sm font-semibold mb-3 lg:mb-4 text-slate-300 flex items-center gap-2">
-            <BarChart3 size={14} className="text-emerald-400" /> Revenus vs Dépenses
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
+          <h3 className="text-xs font-semibold mb-2 text-neutral-400 flex items-center gap-1.5">
+            <BarChart3 size={12} className="text-emerald-400" /> Revenus vs Dépenses
           </h3>
           <MonthlyBarChart
+            monthlyData={monthlyChartData ?? undefined}
             totalIncome={totalIncome}
             totalFixed={totalFixed}
             totalVariable={totalMonthSpent}
+            currentMonth={selectedMonth}
           />
         </div>
       </div>
 
-      <div className="glass-strong rounded-2xl p-4 lg:p-6">
-        <h3 className="text-sm lg:text-base font-semibold mb-3 lg:mb-4 text-slate-100 flex items-center gap-2">
-          <ClipboardList size={16} className="text-emerald-400" /> Détail des Charges Fixes
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+          <ClipboardList size={14} className="text-emerald-400" /> Charges fixes
         </h3>
+        {config.fixedCharges.length === 0 ? (
+          <p className="text-neutral-500 text-xs py-4">Aucune charge fixe configurée</p>
+        ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-2.5">
           {config.fixedCharges.map((ch: FixedCharge) => (
             <div
               key={ch.id}
-              className="flex justify-between items-center px-3 lg:px-4 py-2.5 lg:py-3 bg-white/[0.02] rounded-xl border border-white/5"
+              className="flex justify-between items-center px-3 lg:px-4 py-2.5 lg:py-3 rounded-lg border border-white/5 bg-white/[0.02]"
             >
               <span className="text-xs lg:text-[13px] flex items-center gap-1.5">
-                <Icon name={ch.icon} size={14} className="text-slate-400" />
+                <Icon name={ch.icon} size={14} className="text-neutral-400" />
                 {ch.label}
               </span>
               <span className="font-mono text-xs lg:text-[13px] text-red-300 font-semibold">
@@ -374,6 +367,7 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
             </div>
           ))}
         </div>
+        )}
       </div>
     </div>
   );

@@ -11,18 +11,15 @@ import { Loader2 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 
 function AppShell({ children }: { children: React.ReactNode }) {
-  const { dailyBudget, loading, toast, showToast } = useBudgetContext();
+  const { dailyBudget, loading, toast, showToast, dismissToast } = useBudgetContext();
   const { user, loading: authLoading, logout } = useAuth();
 
   if (authLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="mb-4 animate-pulse flex justify-center">
-            <img src="/api/logo" alt="Yenni" className="w-16 h-16" />
-          </div>
-          <div className="font-mono text-lg text-emerald-400">Yenni</div>
-          <div className="text-sm text-slate-500 mt-2">Chargement...</div>
+          <img src="/api/logo" alt="Yenni" className="w-12 h-12 mx-auto mb-3 opacity-80" />
+          <div className="text-sm text-neutral-500">Chargement...</div>
         </div>
       </div>
     );
@@ -31,28 +28,25 @@ function AppShell({ children }: { children: React.ReactNode }) {
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader2 size={32} className="text-emerald-400 animate-spin" />
+        <Loader2 size={24} className="text-green-500 animate-spin" />
       </div>
     );
   }
 
   return (
     <div className="flex flex-col lg:flex-row min-h-screen">
-      {toast && <Toast message={toast.msg} type={toast.type} />}
+      {toast && <Toast message={toast.msg} type={toast.type} onDismiss={dismissToast} />}
       <Sidebar dailyBudget={dailyBudget} user={user} onLogout={logout} />
       <BottomNav dailyBudget={dailyBudget} user={user} onLogout={logout} />
       <div className="flex-1 flex flex-col lg:max-h-screen overflow-hidden">
-        <header className="sticky top-0 z-40 flex justify-between items-center min-h-[52px] h-14 lg:h-auto px-4 lg:pt-4 lg:px-8 lg:pb-3 bg-[var(--bg-primary)]/80 backdrop-blur-sm border-b border-white/5 shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <Avatar avatarPath={user.avatar_path} firstName={user.first_name} lastName={user.last_name} size="md" />
-            <div className="min-w-0 hidden sm:block">
-              <p className="text-sm font-semibold text-slate-200 truncate">{user.first_name} {user.last_name}</p>
-              <p className="text-[10px] text-slate-500 truncate">Bienvenue</p>
-            </div>
+        <header className="sticky top-0 z-40 flex justify-between items-center h-12 px-4 lg:px-6 border-b border-white/5 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Avatar avatarPath={user.avatar_path} firstName={user.first_name} lastName={user.last_name} size="sm" />
+            <p className="text-sm font-medium text-neutral-200 truncate hidden sm:block">{user.first_name}</p>
           </div>
           <NotificationBell showToast={showToast} />
         </header>
-        <main className="flex-1 px-4 pt-2 pb-24 lg:pb-8 lg:pt-4 lg:px-8 overflow-y-auto">
+        <main className="flex-1 px-4 pb-20 lg:pb-6 lg:px-6 pt-4 overflow-y-auto">
           <PageTransition>{children}</PageTransition>
         </main>
       </div>

@@ -12,6 +12,7 @@ interface ToastState {
 interface BudgetContextValue extends BudgetReturn {
   toast: ToastState | null;
   showToast: (msg: string, type?: string) => void;
+  dismissToast: () => void;
 }
 
 const BudgetContext = createContext<BudgetContextValue | null>(null);
@@ -22,11 +23,12 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
 
   const showToast = (msg: string, type = "success") => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 2500);
   };
 
+  const dismissToast = () => setToast(null);
+
   return (
-    <BudgetContext.Provider value={{ ...budget, toast, showToast }}>
+    <BudgetContext.Provider value={{ ...budget, toast, showToast, dismissToast }}>
       {children}
     </BudgetContext.Provider>
   );

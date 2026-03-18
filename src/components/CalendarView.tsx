@@ -234,94 +234,80 @@ export default function CalendarView({
   return (
     <div className="animate-slide-up">
       {/* Header */}
-      <div className="flex flex-col gap-3 mb-5 lg:mb-6">
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-xl lg:text-2xl font-bold">Calendrier</h1>
-            <p className="text-slate-500 text-xs lg:text-sm mt-0.5">
-              Suivi journalier des entrées et sorties
-            </p>
-          </div>
-          <div className="flex gap-2 shrink-0">
-            <button onClick={() => setShowExpenseModal(true)}
-              className="px-3 py-2.5 lg:px-4 rounded-xl text-xs lg:text-sm font-semibold flex items-center gap-1.5 border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
-              <TrendingDown size={14} /> <span className="hidden sm:inline">Dépense</span>
-            </button>
-            <button onClick={() => setShowIncomeModal(true)}
-              className="btn-primary px-3 py-2.5 lg:px-4 rounded-xl text-xs lg:text-sm font-semibold flex items-center gap-1.5">
-              <TrendingUp size={14} /> <span className="hidden sm:inline">Revenu</span>
-            </button>
-          </div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-xl lg:text-2xl font-bold tracking-tight">Calendrier</h1>
+          <p className="text-neutral-500 text-xs lg:text-sm mt-1">
+            Suivi journalier des entrées et sorties — {MONTHS_FULL[selectedMonth]} {selectedYear}
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button
+            onClick={() => setShowExpenseModal(true)}
+            className="px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-500/40 text-red-400 hover:bg-red-500/10 transition-colors"
+          >
+            <TrendingDown size={16} strokeWidth={2.5} />
+            Dépense
+          </button>
+          <button
+            onClick={() => setShowIncomeModal(true)}
+            className="btn-primary px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2"
+          >
+            <TrendingUp size={16} strokeWidth={2.5} />
+            Revenu
+          </button>
         </div>
       </div>
 
       {/* Monthly summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 lg:gap-4 mb-5 lg:mb-6">
-        <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
-          <div className="flex items-center gap-1.5 mb-1">
-            <ArrowUpCircle size={14} className="text-emerald-400" />
-            <span className="text-[9px] lg:text-[11px] text-slate-500">Revenus</span>
-          </div>
-          <div className="font-mono text-sm lg:text-xl font-bold text-emerald-400">
-            +{formatCFA(totalIncome)}
-          </div>
-        </div>
-        <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
-          <div className="flex items-center gap-1.5 mb-1">
-            <ArrowDownCircle size={14} className="text-orange-400" />
-            <span className="text-[9px] lg:text-[11px] text-slate-500">Charges</span>
-          </div>
-          <div className="font-mono text-sm lg:text-xl font-bold text-orange-400">
-            -{formatCFA(totalFixed)}
-          </div>
-        </div>
-        <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
-          <div className="flex items-center gap-1.5 mb-1">
-            <HandCoins size={14} className="text-teal-400" />
-            <span className="text-[9px] lg:text-[11px] text-slate-500">Prêts</span>
-          </div>
-          <div className="font-mono text-sm lg:text-xl font-bold text-teal-400">
-            -{formatCFA(monthLoanPayments)}
-          </div>
-        </div>
-        <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
-          <div className="flex items-center gap-1.5 mb-1">
-            <ArrowDownCircle size={14} className="text-amber-400" />
-            <span className="text-[9px] lg:text-[11px] text-slate-500">Dépenses</span>
-          </div>
-          <div className="font-mono text-sm lg:text-xl font-bold text-amber-400">
-            -{formatCFA(totalMonthSpent)}
-          </div>
-        </div>
-        <div className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Wallet size={14} className={soldeNet >= 0 ? "text-emerald-400" : "text-red-400"} />
-            <span className="text-[9px] lg:text-[11px] text-slate-500">Solde</span>
-          </div>
-          <div className={`font-mono text-sm lg:text-xl font-bold ${soldeNet >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-            {soldeNet >= 0 ? "+" : "-"}{formatCFA(Math.abs(soldeNet))}
-          </div>
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+          {[
+            { label: "Revenus", value: `+${formatCFA(totalIncome)}`, color: "text-emerald-400", icon: ArrowUpCircle },
+            { label: "Charges fixes", value: `-${formatCFA(totalFixed)}`, color: "text-orange-400", icon: ArrowDownCircle },
+            { label: "Prêts", value: `-${formatCFA(monthLoanPayments)}`, color: "text-teal-400", icon: HandCoins },
+            { label: "Dépenses", value: `-${formatCFA(totalMonthSpent)}`, color: "text-amber-400", icon: ArrowDownCircle },
+            { label: "Solde", value: `${soldeNet >= 0 ? "+" : "-"}${formatCFA(Math.abs(soldeNet))}`, color: soldeNet >= 0 ? "text-emerald-400" : "text-red-400", icon: Wallet },
+          ].map((s, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <s.icon size={16} className={`shrink-0 ${s.color}`} />
+              <div>
+                <div className="text-[10px] text-neutral-500">{s.label}</div>
+                <div className={`font-mono text-sm font-bold ${s.color}`}>{s.value}</div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Month navigator */}
-      <div className="glass-strong rounded-2xl p-4 lg:p-6 mb-5 lg:mb-6">
+      {/* Month navigator & calendar */}
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 lg:p-6 mb-6">
         <div className="flex justify-between items-center mb-4">
-          <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-white/5 text-slate-400 transition-colors">
+          <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-colors">
             <ChevronLeft size={20} />
           </button>
-          <h2 className="text-sm lg:text-base font-semibold">
-            {MONTHS_FULL[selectedMonth]} {selectedYear}
-          </h2>
-          <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-white/5 text-slate-400 transition-colors">
+          <div className="flex flex-col items-center gap-0.5">
+            <h2 className="text-base font-semibold">
+              {MONTHS_FULL[selectedMonth]} {selectedYear}
+            </h2>
+            {(selectedMonth !== now.getMonth() || selectedYear !== now.getFullYear()) && (
+              <button
+                onClick={() => { setSelectedMonth(now.getMonth()); setSelectedYear(now.getFullYear()); setSelectedDate(todayStr); }}
+                className="text-[10px] text-emerald-400 hover:text-emerald-300 font-medium"
+              >
+                Aujourd&apos;hui
+              </button>
+            )}
+          </div>
+          <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-colors">
             <ChevronRight size={20} />
           </button>
         </div>
 
         {/* Day headers */}
-        <div className="grid grid-cols-7 gap-1 mb-1">
+        <div className="grid grid-cols-7 gap-1 mb-2">
           {DAYS_FR.map((d) => (
-            <div key={d} className="text-center text-[9px] lg:text-[11px] text-slate-500 font-medium py-1">
+            <div key={d} className="text-center text-[10px] text-neutral-500 font-medium py-1">
               {d}
             </div>
           ))}
@@ -344,16 +330,16 @@ export default function CalendarView({
               <button
                 key={day}
                 onClick={() => setSelectedDate(isSelected ? null : dateStr)}
-                className={`relative rounded-xl p-1 lg:p-1.5 min-h-[52px] lg:min-h-[68px] flex flex-col items-center transition-all border
+                className={`relative rounded-lg p-1.5 lg:p-2 min-h-[56px] lg:min-h-[72px] flex flex-col items-center justify-start transition-all border
                   ${isSelected
-                    ? "bg-emerald-500/20 border-emerald-500/50"
+                    ? "bg-emerald-500/20 border-emerald-500/50 ring-1 ring-emerald-500/30"
                     : isToday
-                      ? "bg-white/[0.04] border-emerald-500/30"
-                      : "border-transparent hover:bg-white/[0.03]"
+                      ? "bg-white/[0.05] border-emerald-500/40"
+                      : "border-white/5 hover:bg-white/[0.04]"
                   }`}
               >
                 <span className={`text-[11px] lg:text-xs font-medium mb-0.5
-                  ${isToday ? "text-emerald-400 font-bold" : "text-slate-300"}`}>
+                  ${isToday ? "text-emerald-400 font-bold" : "text-neutral-300"}`}>
                   {day}
                 </span>
                 {hasEvents && (
@@ -394,7 +380,7 @@ export default function CalendarView({
 
       {/* Selected day detail */}
       {selectedDate && (
-        <div className="glass-strong rounded-2xl p-4 lg:p-6 animate-slide-up">
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 lg:p-6 animate-slide-up">
           <h3 className="text-sm lg:text-base font-semibold mb-3 lg:mb-4 flex items-center gap-2">
             <Clock size={16} className="text-emerald-400" />
             {new Date(selectedDate + "T00:00:00").toLocaleDateString("fr-FR", {
@@ -402,8 +388,18 @@ export default function CalendarView({
             })}
           </h3>
           {selectedEvents.length === 0 ? (
-            <div className="text-center py-6 text-slate-500 text-xs">
-              Aucune transaction ce jour
+            <div className="text-center py-8">
+              <p className="text-neutral-500 text-sm mb-3">Aucune transaction ce jour</p>
+              <div className="flex gap-2 justify-center">
+                <button onClick={() => { setExpenseForm({ ...expenseForm, date: selectedDate }); setShowExpenseModal(true); }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border border-red-500/40 text-red-400 hover:bg-red-500/10 flex items-center gap-1.5">
+                  <TrendingDown size={14} /> Dépense
+                </button>
+                <button onClick={() => { setIncomeForm({ ...incomeForm, date: selectedDate }); setShowIncomeModal(true); }}
+                  className="btn-primary px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5">
+                  <TrendingUp size={14} /> Revenu
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-2">
@@ -423,7 +419,7 @@ export default function CalendarView({
                   : "rgba(16,185,129,0.15)";
                 return (
                   <div key={`${ev.type}-${ev.id}`}
-                    className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                    className="flex items-center gap-3 p-3 rounded-lg border border-white/5 bg-white/[0.02]">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
                       style={{ background: bgColor }}>
                       {ev.type === "expense" ? (
@@ -439,7 +435,7 @@ export default function CalendarView({
                     <div className="flex-1 min-w-0">
                       <div className="text-xs lg:text-sm font-medium truncate">{ev.description}</div>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[9px] lg:text-[10px] text-slate-500">
+                        <span className="text-[9px] lg:text-[10px] text-neutral-500">
                           {ev.time !== "00:00" ? ev.time : ""}
                         </span>
                         {cat && (
@@ -470,7 +466,7 @@ export default function CalendarView({
                         {ev.type === "income" ? "+" : "-"}{formatCFA(ev.amount)}
                       </span>
                       <button onClick={() => handleDeleteEvent(ev)}
-                        className="text-slate-600 hover:text-red-400 active:text-red-400 transition-colors p-1">
+                        className="text-neutral-500 hover:text-red-400 transition-colors p-1">
                         <X size={14} />
                       </button>
                     </div>
@@ -484,9 +480,9 @@ export default function CalendarView({
 
       {/* Modal — Ajouter un revenu */}
       {showIncomeModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
           onClick={() => setShowIncomeModal(false)}>
-          <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base lg:text-lg font-bold flex items-center gap-2">
@@ -499,24 +495,24 @@ export default function CalendarView({
             <div className="grid gap-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Date</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Date</label>
                   <input type="date" className="input-field" value={incomeForm.date}
                     onChange={(e) => setIncomeForm({ ...incomeForm, date: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Heure</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Heure</label>
                   <input type="time" className="input-field" value={incomeForm.time}
                     onChange={(e) => setIncomeForm({ ...incomeForm, time: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Description</label>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Description</label>
                 <input className="input-field" placeholder="Ex: Salaire mars, Freelance..."
                   value={incomeForm.description} onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Source</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Source</label>
                   <select className="input-field" value={incomeForm.source}
                     onChange={(e) => setIncomeForm({ ...incomeForm, source: e.target.value })}>
                     {INCOME_SOURCES.map((s) => (
@@ -525,22 +521,22 @@ export default function CalendarView({
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Montant (FCFA)</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Montant (FCFA)</label>
                   <input type="number" className="input-field font-mono" placeholder="0"
                     value={incomeForm.amount} onChange={(e) => setIncomeForm({ ...incomeForm, amount: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Notes (optionnel)</label>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Notes (optionnel)</label>
                 <input className="input-field" placeholder="Notes..."
                   value={incomeForm.notes} onChange={(e) => setIncomeForm({ ...incomeForm, notes: e.target.value })} />
               </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowIncomeModal(false)}
-                className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm">Annuler</button>
+                className="flex-1 py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium transition-colors">Annuler</button>
               <button onClick={handleAddIncome}
-                className="btn-primary flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5">
+                className="btn-primary flex-1 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
                 <Check size={16} /> Enregistrer
               </button>
             </div>
@@ -550,39 +546,39 @@ export default function CalendarView({
 
       {/* Modal — Ajouter une dépense */}
       {showExpenseModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
           onClick={() => setShowExpenseModal(false)}>
-          <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base lg:text-lg font-bold flex items-center gap-2">
                 <TrendingDown size={18} className="text-red-400" /> Nouvelle Dépense
               </h2>
-              <button onClick={() => setShowExpenseModal(false)} className="text-slate-400 hover:text-white p-1">
+              <button onClick={() => setShowExpenseModal(false)} className="text-neutral-400 hover:text-white p-1 transition-colors">
                 <X size={20} />
               </button>
             </div>
             <div className="grid gap-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Date</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Date</label>
                   <input type="date" className="input-field" value={expenseForm.date}
                     onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Heure</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Heure</label>
                   <input type="time" className="input-field" value={expenseForm.time}
                     onChange={(e) => setExpenseForm({ ...expenseForm, time: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Description</label>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Description</label>
                 <input className="input-field" placeholder="Ex: Courses marché..."
                   value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Catégorie</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Catégorie</label>
                   <select className="input-field" value={expenseForm.category}
                     onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}>
                     {config.categories.map((c) => (
@@ -591,23 +587,22 @@ export default function CalendarView({
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Montant (FCFA)</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Montant (FCFA)</label>
                   <input type="number" className="input-field font-mono" placeholder="0"
                     value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Notes (optionnel)</label>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Notes (optionnel)</label>
                 <input className="input-field" placeholder="Notes..."
                   value={expenseForm.notes} onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })} />
               </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowExpenseModal(false)}
-                className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm">Annuler</button>
+                className="flex-1 py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium transition-colors">Annuler</button>
               <button onClick={handleAddExpense}
-                className="flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 text-white"
-                style={{ background: "linear-gradient(135deg, #ef4444, #dc2626)" }}>
+                className="flex-1 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 bg-red-500 hover:bg-red-600 text-white transition-colors">
                 <Check size={16} /> Enregistrer
               </button>
             </div>

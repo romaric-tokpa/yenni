@@ -31,12 +31,15 @@ export function useBudget() {
   const [fixedPayments, setFixedPayments] = useState<FixedChargePayment[]>([]);
   const [savings, setSavings] = useState<number[]>(Array(12).fill(0));
   const [totalSavedManualCumulative, setTotalSavedManualCumulative] = useState(0);
+  const [savedInPeriod, setSavedInPeriod] = useState<number | null>(null);
   const [salaries, setSalaries] = useState<number[]>(Array(12).fill(0));
+  const [otherIncomes, setOtherIncomes] = useState<number[]>(Array(12).fill(0));
   const [projects, setProjects] = useState<Project[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loanPayments, setLoanPayments] = useState<LoanPayment[]>([]);
   const [plannedExpenses, setPlannedExpenses] = useState<PlannedExpense[]>([]);
   const [monthProjectFunds, setMonthProjectFunds] = useState(0);
+  const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>({});
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(true);
@@ -95,12 +98,41 @@ export function useBudget() {
     } catch { /* ignore */ }
   }, [selectedYear]);
 
+  const fetchSavedInPeriod = useCallback(async () => {
+    const start = config.savingsGoalStartDate;
+    const end = config.savingsGoalDeadline;
+    if (!start || !end || start >= end) {
+      setSavedInPeriod(null);
+      return;
+    }
+    try {
+      const r = await fetch(`/api/savings?startDate=${start}&endDate=${end}`);
+      if (r.ok) setSavedInPeriod(await r.json());
+      else setSavedInPeriod(0);
+    } catch { setSavedInPeriod(0); }
+  }, [config.savingsGoalStartDate, config.savingsGoalDeadline]);
+
   const fetchSalaries = useCallback(async () => {
     try {
       const r = await fetch(`/api/salaries?year=${selectedYear}`);
       if (r.ok) setSalaries(await r.json());
     } catch { /* ignore */ }
   }, [selectedYear]);
+
+  const fetchOtherIncomes = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/other-incomes?year=${selectedYear}`);
+      if (r.ok) setOtherIncomes(await r.json());
+    } catch { /* ignore */ }
+  }, [selectedYear]);
+
+  const fetchCategoryBudgets = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/category-budgets?month=${selectedMonth}&year=${selectedYear}`);
+      if (r.ok) setCategoryBudgets(await r.json());
+      else setCategoryBudgets({});
+    } catch { setCategoryBudgets({}); }
+  }, [selectedMonth, selectedYear]);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -143,7 +175,6 @@ export function useBudget() {
 
   const fetchPlannedExpenses = useCallback(async () => {
     try {
-      await fetch("/api/planned-expenses?execute=true");
       const r = await fetch("/api/planned-expenses");
       if (r.ok) { const data = await r.json(); setPlannedExpenses(Array.isArray(data) ? data : []); }
     } catch { /* ignore */ }
@@ -157,13 +188,15 @@ export function useBudget() {
       fetchFixedPayments(),
       fetchSavings(),
       fetchSalaries(),
+      fetchOtherIncomes(),
       fetchProjects(),
       fetchMonthProjectFunds(),
+      fetchCategoryBudgets(),
       fetchLoans(),
       fetchLoanPayments(),
       fetchPlannedExpenses(),
     ]).then(() => setLoading(false));
-  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchProjects, fetchMonthProjectFunds, fetchLoans, fetchLoanPayments, fetchPlannedExpenses]);
+  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchOtherIncomes, fetchProjects, fetchMonthProjectFunds, fetchCategoryBudgets, fetchLoans, fetchLoanPayments, fetchPlannedExpenses]);
 
   useEffect(() => {
     fetchExpenses();
@@ -171,12 +204,18 @@ export function useBudget() {
     fetchFixedPayments();
     fetchLoanPayments();
     fetchMonthProjectFunds();
-  }, [selectedMonth, selectedYear, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchLoanPayments, fetchMonthProjectFunds]);
+    fetchCategoryBudgets();
+  }, [selectedMonth, selectedYear, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchLoanPayments, fetchMonthProjectFunds, fetchCategoryBudgets]);
 
   useEffect(() => {
     fetchSavings();
     fetchSalaries();
-  }, [selectedYear, fetchSavings, fetchSalaries]);
+    fetchOtherIncomes();
+  }, [selectedYear, fetchSavings, fetchSalaries, fetchOtherIncomes]);
+
+  useEffect(() => {
+    fetchSavedInPeriod();
+  }, [fetchSavedInPeriod]);
 
   /** Rafraîchit toutes les données pour garder totaux et historique synchronisés */
   const refreshAll = useCallback(async () => {
@@ -187,13 +226,37 @@ export function useBudget() {
       fetchFixedPayments(),
       fetchSavings(),
       fetchSalaries(),
+      fetchOtherIncomes(),
       fetchProjects(),
       fetchMonthProjectFunds(),
+      fetchCategoryBudgets(),
       fetchLoans(),
       fetchLoanPayments(),
       fetchPlannedExpenses(),
     ]);
-  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchProjects, fetchMonthProjectFunds, fetchLoans, fetchLoanPayments, fetchPlannedExpenses]);
+    await fetchSavedInPeriod();
+  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchOtherIncomes, fetchProjects, fetchMonthProjectFunds, fetchCategoryBudgets, fetchLoans, fetchLoanPayments, fetchPlannedExpenses, fetchSavedInPeriod]);
+
+  const updateCategoryBudget = useCallback(
+    async (categoryId: string, amount: number) => {
+      const r = await fetch("/api/category-budgets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          month: selectedMonth,
+          year: selectedYear,
+          category_id: categoryId,
+          amount: Math.max(0, amount),
+        }),
+      });
+      if (r.ok) {
+        setCategoryBudgets((prev) => ({ ...prev, [categoryId]: Math.max(0, amount) }));
+        return true;
+      }
+      return false;
+    },
+    [selectedMonth, selectedYear]
+  );
 
   const addExpense = useCallback(
     async (exp: Omit<Expense, "id" | "created_at">) => {
@@ -521,9 +584,10 @@ export function useBudget() {
         body: JSON.stringify({ month, year: selectedYear, amount }),
       });
       await fetchSavings();
+      await fetchSavedInPeriod();
       invalidateHistoryCache();
     },
-    [savings, selectedYear, fetchSavings]
+    [savings, selectedYear, fetchSavings, fetchSavedInPeriod]
   );
 
   const updateSalary = useCallback(
@@ -539,6 +603,21 @@ export function useBudget() {
       invalidateHistoryCache();
     },
     [salaries, selectedYear]
+  );
+
+  const updateOtherIncome = useCallback(
+    async (month: number, amount: number) => {
+      const ns = [...otherIncomes];
+      ns[month] = amount;
+      setOtherIncomes(ns);
+      await fetch("/api/other-incomes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month, year: selectedYear, amount }),
+      });
+      invalidateHistoryCache();
+    },
+    [otherIncomes, selectedYear]
   );
 
   const addProject = useCallback(
@@ -610,6 +689,7 @@ export function useBudget() {
 
   const monthSaving = savings[selectedMonth] || 0;
   const monthSalary = salaries[selectedMonth] || 0;
+  const monthOtherIncome = otherIncomes[selectedMonth] || 0;
 
   const loansById = useMemo(() => {
     const map: Record<number, Loan> = {};
@@ -653,17 +733,26 @@ export function useBudget() {
 
   const totalSaved = totalSavedManual + totalProjectSaved;
 
-  // Actifs : salaire + autres revenus + revenus saisis + remboursements reçus (prêts perso)
-  const totalIncome = monthSalary + config.otherIncome + totalMonthIncomes + monthLoanRecovered;
+  // Actifs : salaire + autres revenus (par mois) + revenus saisis + remboursements reçus (prêts perso)
+  const totalIncome = monthSalary + monthOtherIncome + totalMonthIncomes + monthLoanRecovered;
   // Passifs : charges fixes + dépenses + épargne + fonds projet (prélevés du solde) + remboursements dettes
   const totalExpenses = totalFixed + totalMonthSpent + monthSaving + monthProjectFunds + monthLoanRepayments;
   // Solde net = Actifs - Passifs
   const soldeNet = totalIncome - totalExpenses;
   // Reste à vivre budgété (avant dépenses variables et épargne)
   const resteAVivre = totalIncome - totalFixed;
+  /** Budget effectif par catégorie pour le mois sélectionné (override mensuel ou défaut config) */
+  const effectiveCategoryBudgets = useMemo(() => {
+    const map: Record<string, number> = {};
+    config.categories.forEach((c) => {
+      map[c.id] = categoryBudgets[c.id] ?? c.budget;
+    });
+    return map;
+  }, [config.categories, categoryBudgets]);
+
   const totalBudgetVar = useMemo(
-    () => config.categories.reduce((s, c) => s + c.budget, 0),
-    [config]
+    () => Object.values(effectiveCategoryBudgets).reduce((s, v) => s + v, 0),
+    [effectiveCategoryBudgets]
   );
   const daysLeft = getDaysLeftInMonth(selectedMonth, selectedYear);
   const dailyBudget = soldeNet > 0 ? Math.round(soldeNet / Math.max(1, daysLeft)) : 0;
@@ -677,6 +766,8 @@ export function useBudget() {
     loanPayments,
     savings,
     salaries,
+    otherIncomes,
+    updateOtherIncome,
     projects,
     selectedMonth,
     selectedYear,
@@ -719,9 +810,12 @@ export function useBudget() {
     soldeNet,
     resteAVivre,
     totalBudgetVar,
+    effectiveCategoryBudgets,
+    updateCategoryBudget,
     dailyBudget,
     totalSaved,
     totalSavedManualCumulative,
+    savedInPeriod,
     totalProjectSaved,
     monthSalary,
     monthSaving,

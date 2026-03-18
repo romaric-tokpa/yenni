@@ -23,7 +23,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -353,6 +353,21 @@ export async function getTotalSavingsCumulative(): Promise<number> {
   return Number((rs.rows[0] as Row)?.total ?? 0);
 }
 
+/** Somme des épargnes dans la période [startDate, endDate] (inclusif). */
+export async function getSavingsInPeriod(startDate: string, endDate: string): Promise<number> {
+  await ensureMigrations();
+  const [sy, sm] = startDate.split("-").map(Number);
+  const [ey, em] = endDate.split("-").map(Number);
+  const startVal = sy * 12 + (sm - 1); // month 1-12 → 0-11
+  const endVal = ey * 12 + (em - 1);
+  const rs = await getDbClient().execute({
+    sql: `SELECT COALESCE(SUM(amount), 0) as total FROM savings 
+          WHERE (year * 12 + month) BETWEEN ? AND ?`,
+    args: [startVal, endVal],
+  });
+  return Number((rs.rows[0] as Row)?.total ?? 0);
+}
+
 export async function setSaving(month: number, year: number, amount: number): Promise<void> {
   await ensureMigrations();
   await getDbClient().execute({
@@ -382,6 +397,56 @@ export async function setSalary(month: number, year: number, amount: number): Pr
   await getDbClient().execute({
     sql: "INSERT INTO salaries (month, year, amount) VALUES (?, ?, ?) ON CONFLICT(month, year) DO UPDATE SET amount = excluded.amount",
     args: [month, year, amount],
+  });
+}
+
+// ── Other Incomes ──
+
+export async function getOtherIncomes(year: number): Promise<number[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT month, amount FROM other_incomes WHERE year = ? ORDER BY month",
+    args: [year],
+  });
+  const rows = rowsToObjs<{ month: number; amount: number }>(rs.rows as Row[], rs.columns);
+  const result = Array(12).fill(0);
+  rows.forEach((r) => {
+    result[r.month] = r.amount;
+  });
+  return result;
+}
+
+export async function setOtherIncome(month: number, year: number, amount: number): Promise<void> {
+  await ensureMigrations();
+  await getDbClient().execute({
+    sql: "INSERT INTO other_incomes (month, year, amount) VALUES (?, ?, ?) ON CONFLICT(month, year) DO UPDATE SET amount = excluded.amount",
+    args: [month, year, amount],
+  });
+}
+
+// ── Category budgets (par mois) ──
+
+/** Retourne les budgets par catégorie pour un mois donné. Seules les entrées explicites sont retournées. */
+export async function getCategoryBudgets(month: number, year: number): Promise<Record<string, number>> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT category_id, amount FROM category_budgets WHERE month = ? AND year = ?",
+    args: [month, year],
+  });
+  const result: Record<string, number> = {};
+  for (const row of rs.rows) {
+    const r = row as Row;
+    result[r.category_id as string] = Number(r.amount ?? 0);
+  }
+  return result;
+}
+
+export async function setCategoryBudget(month: number, year: number, categoryId: string, amount: number): Promise<void> {
+  await ensureMigrations();
+  await getDbClient().execute({
+    sql: `INSERT INTO category_budgets (month, year, category_id, amount) VALUES (?, ?, ?, ?)
+          ON CONFLICT(month, year, category_id) DO UPDATE SET amount = excluded.amount`,
+    args: [month, year, categoryId, Math.max(0, amount)],
   });
 }
 
@@ -600,14 +665,14 @@ export async function markScheduleUnpaid(loanId: number, scheduleNumber: number)
       await tx.commit();
       return row;
     }
-    const expenseId = (row as Row).expense_id as number | undefined;
-    if (typeof expenseId === "number" && expenseId > 0) {
-      await tx.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [expenseId] });
-    }
+    const expenseId = row.expense_id ?? undefined;
     await tx.execute({
       sql: "UPDATE loan_schedule SET status = 'pending', paid_at = NULL, payment_note = '', expense_id = NULL WHERE loan_id = ? AND number = ?",
       args: [loanId, scheduleNumber],
     });
+    if (typeof expenseId === "number" && expenseId > 0) {
+      await tx.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [expenseId] });
+    }
     const loanRs = await tx.execute({ sql: "SELECT * FROM loans WHERE id = ?", args: [loanId] });
     if (loanRs.rows.length > 0) {
       const loan = rowToObj<Loan>(loanRs.rows[0] as Row, loanRs.columns);
@@ -644,12 +709,22 @@ export async function getUpcomingSchedules(
   const future = new Date();
   future.setDate(future.getDate() + daysAhead);
   const endDate = future.toISOString().split("T")[0];
+  return getSchedulesForPeriod(userId, today, endDate);
+}
+
+/** Échéances du mois en cours (entre startDate et endDate inclus) */
+export async function getSchedulesForPeriod(
+  userId: number,
+  startDate: string,
+  endDate: string
+): Promise<(LoanScheduleRow & { loan_label: string })[]> {
+  await ensureMigrations();
   const rs = await getDbClient().execute({
     sql: `SELECT s.*, l.label as loan_label FROM loan_schedule s
           JOIN loans l ON l.id = s.loan_id
           WHERE s.user_id = ? AND s.status IN ('pending','upcoming') AND s.due_date >= ? AND s.due_date <= ?
           ORDER BY s.due_date ASC`,
-    args: [userId, today, endDate],
+    args: [userId, startDate, endDate],
   });
   return rowsToObjs<LoanScheduleRow & { loan_label: string }>(rs.rows as Row[], rs.columns);
 }
@@ -853,8 +928,9 @@ export async function deleteLoanPayment(id: number): Promise<boolean> {
   const paymentRs = await db.execute({ sql: "SELECT * FROM loan_payments WHERE id = ?", args: [id] });
   if (paymentRs.rows.length === 0) return false;
   const payment = rowToObj<LoanPayment>(paymentRs.rows[0] as Row, paymentRs.columns);
-  const expenseId = (payment as Row).expense_id as number | undefined;
-  const incomeId = (payment as Row).income_id as number | undefined;
+  const expenseId = payment.expense_id ?? undefined;
+  const incomeId = payment.income_id ?? undefined;
+  await db.execute({ sql: "UPDATE loan_payments SET expense_id = NULL, income_id = NULL WHERE id = ?", args: [id] });
   if (typeof expenseId === "number" && expenseId > 0) {
     await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [expenseId] });
   }
@@ -1361,6 +1437,7 @@ export interface BackupData {
     config: BudgetConfig;
     savings: Array<{ id?: number; month: number; year: number; amount: number }>;
     salaries: Array<{ id?: number; month: number; year: number; amount: number }>;
+    other_incomes: Array<{ id?: number; month: number; year: number; amount: number }>;
     projects: Project[];
     fixed_charge_payments: FixedChargePayment[];
     loans: Loan[];
@@ -1372,11 +1449,12 @@ export interface BackupData {
 export async function exportBackup(): Promise<BackupData> {
   await ensureMigrations();
   const db = getDbClient();
-  const [expensesRs, incomesRs, savingsRs, salariesRs, projectsRs, fcpRs, loansRs, loanPayRs, plannedRs] = await Promise.all([
+  const [expensesRs, incomesRs, savingsRs, salariesRs, otherIncomesRs, projectsRs, fcpRs, loansRs, loanPayRs, plannedRs] = await Promise.all([
     db.execute("SELECT * FROM expenses ORDER BY id"),
     db.execute("SELECT * FROM incomes ORDER BY id"),
     db.execute("SELECT * FROM savings ORDER BY year, month"),
     db.execute("SELECT * FROM salaries ORDER BY year, month"),
+    db.execute("SELECT * FROM other_incomes ORDER BY year, month"),
     db.execute("SELECT * FROM projects ORDER BY id"),
     db.execute("SELECT * FROM fixed_charge_payments ORDER BY id"),
     db.execute("SELECT * FROM loans ORDER BY id"),
@@ -1394,6 +1472,7 @@ export async function exportBackup(): Promise<BackupData> {
       config,
       savings: rowsToObjs(savingsRs.rows as Row[], savingsRs.columns),
       salaries: rowsToObjs(salariesRs.rows as Row[], salariesRs.columns),
+      other_incomes: rowsToObjs(otherIncomesRs.rows as Row[], otherIncomesRs.columns),
       projects: rowsToObjs<Project>(projectsRs.rows as Row[], projectsRs.columns),
       fixed_charge_payments: rowsToObjs<FixedChargePayment>(fcpRs.rows as Row[], fcpRs.columns),
       loans: rowsToObjs<Loan>(loansRs.rows as Row[], loansRs.columns),
@@ -1422,6 +1501,7 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
       { sql: "DELETE FROM incomes" },
       { sql: "DELETE FROM savings" },
       { sql: "DELETE FROM salaries" },
+      { sql: "DELETE FROM other_incomes" },
       { sql: "DELETE FROM project_purchases" },
       { sql: "DELETE FROM project_funds" },
       { sql: "DELETE FROM projects" },
@@ -1447,6 +1527,9 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
     }
     for (const s of data.salaries || []) {
       batch.push({ sql: "INSERT INTO salaries (month, year, amount) VALUES (?, ?, ?)", args: [s.month, s.year, s.amount ?? 0] });
+    }
+    for (const o of data.other_incomes || []) {
+      batch.push({ sql: "INSERT INTO other_incomes (month, year, amount) VALUES (?, ?, ?)", args: [o.month, o.year, o.amount ?? 0] });
     }
     for (const p of data.projects || []) {
       batch.push({

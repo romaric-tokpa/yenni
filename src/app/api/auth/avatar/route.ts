@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiErrorResponse } from "@/lib/apiError";
 import { getSessionFromCookies } from "@/lib/auth";
 import { updateUserAvatar, getUserById } from "@/lib/db";
 
-const MAX_SIZE = 500 * 1024; // 500 Ko
+const MAX_SIZE = 5 * 1024 * 1024; // 5 Mo
 
 export async function GET(req: NextRequest) {
   try {
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
 
     if (!file) return NextResponse.json({ error: "Aucun fichier fourni" }, { status: 400 });
     if (file.size > MAX_SIZE) {
-      return NextResponse.json({ error: "Fichier trop volumineux (max 500 Ko)" }, { status: 400 });
+      return NextResponse.json({ error: "Fichier trop volumineux (max 5 Mo)" }, { status: 400 });
     }
 
     const validTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ avatar_path: dataUri });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -82,6 +83,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

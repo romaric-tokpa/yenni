@@ -7,6 +7,7 @@ services:
       - monbudget_data:/app/data
     environment:
       - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET:-changez-moi-en-production-min-32-caracteres}
     restart: unless-stopped
 
 volumes:

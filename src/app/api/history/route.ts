@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiErrorResponse } from "@/lib/apiError";
 import {
   getExpensesByDateRange,
   getIncomesByDateRange,
@@ -7,6 +8,7 @@ import {
   getLoans,
   getSavings,
   getSalaries,
+  getOtherIncomes,
   getProjects,
   getPlannedExpenses,
 } from "@/lib/db";
@@ -24,7 +26,7 @@ export async function GET(req: NextRequest) {
 
     const y = year ? parseInt(year) : new Date().getFullYear();
 
-    const [expenses, incomes, fixedPayments, loanPayments, loans, savings, salaries, projects, allPlanned] = await Promise.all([
+    const [expenses, incomes, fixedPayments, loanPayments, loans, savings, salaries, otherIncomes, projects, allPlanned] = await Promise.all([
       getExpensesByDateRange(start, end),
       getIncomesByDateRange(start, end),
       getFixedChargePaymentsByDateRange(start, end),
@@ -32,6 +34,7 @@ export async function GET(req: NextRequest) {
       getLoans(),
       getSavings(y),
       getSalaries(y),
+      getOtherIncomes(y),
       getProjects(),
       getPlannedExpenses(),
     ]);
@@ -46,11 +49,12 @@ export async function GET(req: NextRequest) {
       loans,
       savings,
       salaries,
+      otherIncomes,
       projects,
       plannedExpenses,
     });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

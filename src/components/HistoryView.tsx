@@ -1,7 +1,7 @@
 "use client";
 import { useState, useMemo, useCallback } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { formatCFA, MONTHS_FULL, MONTHS_SHORT } from "@/lib/constants";
+import { formatCFA, MONTHS_FULL, MONTHS_SHORT, getSelectableYears } from "@/lib/constants";
 
 const fetcher = (url: string) => fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : Promise.reject(new Error("Fetch failed"))));
 import { Expense, Income, FixedChargePayment, LoanPayment, Loan, Project, PlannedExpense } from "@/lib/types";
@@ -152,6 +152,7 @@ export default function HistoryView() {
   const loans: Loan[] = data?.loans ?? [];
   const savings: number[] = data?.savings ?? [];
   const salaries: number[] = data?.salaries ?? [];
+  const otherIncomes: number[] = data?.otherIncomes ?? [];
   const projects: Project[] = data?.projects ?? [];
   const plannedExpenses: PlannedExpense[] = data?.plannedExpenses ?? [];
 
@@ -217,6 +218,15 @@ export default function HistoryView() {
             amount: salAmt, type: "income", detail: "salaire", sign: "in",
           });
         }
+        const othAmt = otherIncomes[m] || 0;
+        if (othAmt > 0) {
+          const dateStr = `${year}-${String(m + 1).padStart(2, "0")}-01`;
+          items.push({
+            id: `oth-${m}`, date: dateStr, time: "00:00",
+            description: `Autres revenus ${MONTHS_SHORT[m]}`,
+            amount: othAmt, type: "income", detail: "autres", sign: "in",
+          });
+        }
       });
     }
 
@@ -272,7 +282,7 @@ export default function HistoryView() {
       return cmp !== 0 ? cmp : b.time.localeCompare(a.time);
     });
     return items;
-  }, [expenses, incomes, fixedPayments, loanPayments, loansById, savings, salaries, loans, projects, plannedExpenses, period, relevantMonths, year, range.start, range.end]);
+  }, [expenses, incomes, fixedPayments, loanPayments, loansById, savings, salaries, otherIncomes, loans, projects, plannedExpenses, period, relevantMonths, year, range.start, range.end]);
 
   const filteredTx = useMemo(
     () => txFilter === "all" ? allTx : allTx.filter((t) => t.type === txFilter),
@@ -344,7 +354,7 @@ export default function HistoryView() {
             <RefreshCw size={16} className={refreshing || loading ? "animate-spin" : ""} />
           </button>
           <select className="input-field w-24" value={year} onChange={(e) => setYear(Number(e.target.value))}>
-            {Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i).map((y) => (
+            {getSelectableYears().map((y) => (
               <option key={y} value={y}>{y}</option>
             ))}
           </select>

@@ -1,7 +1,19 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 
-const SECRET = new TextEncoder().encode(process.env.JWT_SECRET || "yenni-secret-key-change-in-production-2024");
+let _secret: Uint8Array | null = null;
+
+function getJwtSecret(): Uint8Array {
+  if (_secret) return _secret;
+  const secret = process.env.JWT_SECRET;
+  const isProd = process.env.NODE_ENV === "production";
+  const isBuild = typeof process.env.NEXT_PHASE !== "undefined";
+  if (isProd && !isBuild && (!secret || secret.length < 32)) {
+    throw new Error("JWT_SECRET doit être défini et faire au moins 32 caractères en production");
+  }
+  _secret = new TextEncoder().encode(secret || "yenni-dev-secret-not-for-production");
+  return _secret;
+}
 const COOKIE_NAME = "mb_session";
 const EXPIRES_IN = 60 * 60 * 24 * 30; // 30 jours
 
@@ -17,13 +29,13 @@ export async function createSession(payload: SessionPayload): Promise<string> {
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime(`${EXPIRES_IN}s`)
     .setIssuedAt()
-    .sign(SECRET);
+    .sign(getJwtSecret());
   return token;
 }
 
 export async function verifySession(token: string): Promise<SessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, SECRET);
+    const { payload } = await jwtVerify(token, getJwtSecret());
     return payload as unknown as SessionPayload;
   } catch {
     return null;
@@ -49,11 +61,15 @@ export function getAvatarUrl(avatarPath: string | null): string | null {
   return avatarPath.startsWith("/api/avatars/") ? avatarPath : null;
 }
 
-/** Options pour les cookies de session. Secure=true uniquement sur Vercel (HTTPS). */
+/** Options pour les cookies de session. Secure=true quand l'app est servie en HTTPS. */
 export function getCookieOptions() {
+  const secure =
+    process.env.VERCEL === "1" ||
+    process.env.SECURE_COOKIE === "true" ||
+    (process.env.NODE_ENV === "production" && process.env.NEXTAUTH_URL?.startsWith("https://"));
   return {
     httpOnly: true,
-    secure: process.env.VERCEL === "1",
+    secure,
     sameSite: "lax" as const,
     maxAge: EXPIRES_IN,
     path: "/",

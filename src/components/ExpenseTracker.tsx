@@ -1,7 +1,7 @@
 "use client";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatCFA, MONTHS_FULL, VIRTUAL_LIST_THRESHOLD } from "@/lib/constants";
+import { formatCFA, MONTHS_FULL, VIRTUAL_LIST_THRESHOLD, getSelectableYears } from "@/lib/constants";
 import { BudgetConfig, Expense, FixedChargePayment, Category, PlannedExpense } from "@/lib/types";
 import { Plus, Trash2, X, FileText, Check, Landmark, CalendarClock, Clock, CircleCheck, Pencil, CirclePlay, History, Calendar, ChevronLeft, ChevronRight, FileSpreadsheet } from "lucide-react";
 import { exportExpensesCSV } from "@/lib/exportUtils";
@@ -246,71 +246,72 @@ export default function ExpenseTracker({
 
   return (
     <div className="animate-slide-up">
-      <div className="flex flex-col gap-3 mb-5 lg:mb-6">
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-xl lg:text-2xl font-bold">Suivi des Dépenses</h1>
-            <p className="text-slate-500 text-xs lg:text-sm mt-0.5">
-              {allHistory.length} transactions en {MONTHS_FULL[selectedMonth]} {selectedYear}
-            </p>
-          </div>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-xl lg:text-2xl font-bold tracking-tight">Suivi des Dépenses</h1>
+          <p className="text-neutral-500 text-xs lg:text-sm mt-1">
+            {allHistory.length} transaction{allHistory.length !== 1 ? "s" : ""} — {MONTHS_FULL[selectedMonth]} {selectedYear}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            className="input-field w-32 text-sm py-2"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(Number(e.target.value))}
+          >
+            {MONTHS_FULL.map((m, i) => (
+              <option key={i} value={i}>{m}</option>
+            ))}
+          </select>
+          <select
+            className="input-field w-24 text-sm py-2"
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(Number(e.target.value))}
+          >
+            {getSelectableYears().map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => exportExpensesCSV(expenses, fixedPayments, selectedMonth, selectedYear, config.categories)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-neutral-400 hover:text-white hover:border-white/20 text-xs font-medium transition-colors"
+            title="Exporter en CSV/Excel"
+          >
+            <FileSpreadsheet size={14} />
+            CSV
+          </button>
           <button
             onClick={() => setShowModal(true)}
-            className="btn-primary min-h-[44px] px-4 py-2.5 lg:px-5 rounded-xl text-xs lg:text-sm font-semibold flex items-center gap-1.5 shrink-0 touch-manipulation"
+            className="btn-primary px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 shrink-0"
           >
-            <Plus size={16} /> <span className="hidden sm:inline">Nouvelle</span> Dépense
+            <Plus size={18} strokeWidth={2.5} />
+            Nouvelle dépense
           </button>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-        <select
-          className="input-field w-full sm:w-36"
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(Number(e.target.value))}
-        >
-          {MONTHS_FULL.map((m, i) => (
-            <option key={i} value={i}>{m}</option>
+      </div>
+
+      {/* Stats bar */}
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[
+            { label: "Dépenses variables", value: formatCFA(totalMonthSpent), color: "text-amber-400" },
+            { label: "Charges fixes", value: formatCFA(totalFixed), color: "text-orange-400" },
+            { label: "Total sorties", value: formatCFA(totalAllSpent), color: "text-red-300" },
+            { label: "Reste budget", value: formatCFA(totalBudgetVar - totalMonthSpent), color: totalBudgetVar - totalMonthSpent >= 0 ? "text-emerald-400" : "text-red-400" },
+          ].map((s, i) => (
+            <div key={i} className="text-center">
+              <div className="text-[10px] lg:text-xs text-neutral-500">{s.label}</div>
+              <div className={`font-mono text-sm lg:text-lg font-bold mt-0.5 ${s.color}`}>{s.value}</div>
+            </div>
           ))}
-        </select>
-        <select
-          className="input-field w-24"
-          value={selectedYear}
-          onChange={(e) => setSelectedYear(Number(e.target.value))}
-        >
-          {Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i).map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-        <button
-          onClick={() => exportExpensesCSV(expenses, fixedPayments, selectedMonth, selectedYear, config.categories)}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
-          title="Exporter les dépenses en CSV/Excel"
-        >
-          <FileSpreadsheet size={14} />
-          CSV
-        </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 lg:gap-4 mb-5 lg:mb-6">
-        {[
-          { label: "Dépenses var.", value: formatCFA(totalMonthSpent), color: "text-amber-400" },
-          { label: "Charges fixes", value: formatCFA(totalFixed), color: "text-orange-400" },
-          { label: "Total sorties", value: formatCFA(totalAllSpent), color: "text-red-300" },
-          { label: "Reste budget", value: formatCFA(totalBudgetVar - totalMonthSpent), color: totalBudgetVar - totalMonthSpent >= 0 ? "text-emerald-400" : "text-red-400" },
-        ].map((s, i) => (
-          <div key={i} className="glass rounded-xl lg:rounded-2xl p-3 lg:p-5 text-center">
-            <div className="text-[9px] lg:text-[11px] text-slate-500">{s.label}</div>
-            <div className={`font-mono text-sm lg:text-xl font-bold mt-0.5 lg:mt-1 ${s.color}`}>
-              {s.value}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Desktop table — scroll horizontal sur tablette */}
-      <div className="hidden md:block glass-strong rounded-2xl overflow-x-auto">
+      {/* Desktop table */}
+      <div className="hidden md:block rounded-xl border border-white/5 bg-white/[0.02] overflow-x-auto">
         <div className="min-w-[580px]">
-        <div className="grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3 bg-amber-500/10 border-b border-white/5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+        <div className="grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3 bg-white/[0.03] border-b border-white/5 text-[10px] font-semibold text-neutral-500 uppercase tracking-wider">
           <div>Date</div>
           <div>Description</div>
           <div>Type</div>
@@ -318,11 +319,18 @@ export default function ExpenseTracker({
           <div />
         </div>
         {allHistory.length === 0 ? (
-          <div className="py-16 text-center text-slate-500">
-            <div className="mb-3 flex justify-center">
-              <FileText size={36} className="text-slate-600" />
+          <div className="py-16 text-center">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-amber-500/10 mb-4">
+              <FileText size={28} className="text-amber-400/80" />
             </div>
-            Aucune transaction pour {MONTHS_FULL[selectedMonth]}
+            <p className="text-neutral-500 text-sm">Aucune transaction pour {MONTHS_FULL[selectedMonth]} {selectedYear}</p>
+            <button
+              onClick={() => setShowModal(true)}
+              className="mt-4 btn-primary px-5 py-2.5 rounded-lg text-sm font-medium inline-flex items-center gap-2"
+            >
+              <Plus size={16} />
+              Ajouter une dépense
+            </button>
           </div>
         ) : allHistory.length > VIRTUAL_LIST_THRESHOLD ? (
           <VirtualList
@@ -425,11 +433,18 @@ export default function ExpenseTracker({
       {/* Mobile card list */}
       <div className="md:hidden">
         {allHistory.length === 0 ? (
-          <div className="glass-strong rounded-2xl py-12 text-center text-slate-500">
-            <div className="mb-3 flex justify-center">
-              <FileText size={36} className="text-slate-600" />
+          <div className="rounded-xl border border-white/5 bg-white/[0.02] py-12 text-center">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-amber-500/10 mb-4">
+              <FileText size={28} className="text-amber-400/80" />
             </div>
-            Aucune transaction pour {MONTHS_FULL[selectedMonth]}
+            <p className="text-neutral-500 text-sm">Aucune transaction pour {MONTHS_FULL[selectedMonth]}</p>
+            <button
+              onClick={() => setShowModal(true)}
+              className="mt-4 btn-primary px-5 py-2.5 rounded-lg text-sm font-medium inline-flex items-center gap-2"
+            >
+              <Plus size={16} />
+              Ajouter une dépense
+            </button>
           </div>
         ) : allHistory.length > VIRTUAL_LIST_THRESHOLD ? (
           <VirtualList
@@ -442,7 +457,7 @@ export default function ExpenseTracker({
                 const fp = item.data;
                 return (
                   <div className="mb-2">
-                    <div className="glass rounded-xl p-3.5 border-l-2 border-orange-500/50">
+                    <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(249 115 22 / 0.6)" }}>
                       <div className="flex justify-between items-start mb-1.5">
                         <div>
                           <div className="text-[13px] font-medium flex items-center gap-1.5">
@@ -469,7 +484,7 @@ export default function ExpenseTracker({
               const cat = config.categories.find((c: Category) => c.id === exp.category);
               return (
                 <div className="mb-2">
-                  <div className="glass rounded-xl p-3.5">
+                  <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={cat ? { borderLeft: `3px solid ${cat.color}` } : undefined}>
                     <div className="flex justify-between items-start mb-1.5">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium truncate">{exp.description}</div>
@@ -501,7 +516,7 @@ export default function ExpenseTracker({
             if (item.kind === "fixed") {
               const fp = item.data;
               return (
-                <div key={`f-${fp.id}`} className="glass rounded-xl p-3.5 border-l-2 border-orange-500/50">
+                <div key={`f-${fp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(249 115 22 / 0.6)" }}>
                   <div className="flex justify-between items-start mb-1.5">
                     <div>
                       <div className="text-[13px] font-medium flex items-center gap-1.5">
@@ -531,7 +546,7 @@ export default function ExpenseTracker({
             const exp = item.data;
             const cat = config.categories.find((c: Category) => c.id === exp.category);
             return (
-              <div key={`e-${exp.id}`} className="glass rounded-xl p-3.5">
+              <div key={`e-${exp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={cat ? { borderLeft: `3px solid ${cat.color}` } : undefined}>
                 <div className="flex justify-between items-start mb-1.5">
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{exp.description}</div>
@@ -564,15 +579,15 @@ export default function ExpenseTracker({
         )}
       </div>
 
-      {/* ── Section dépenses planifiées ── */}
+      {/* Section dépenses planifiées */}
       {(pendingPlanned.length > 0 || executedPlanned.length > 0) && (
-        <div ref={plannedSectionRef} className="mt-5 lg:mt-6">
+        <div ref={plannedSectionRef} className="mt-6">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-sm font-bold flex items-center gap-2">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
               <CalendarClock size={16} className="text-emerald-400" /> Dépenses planifiées
             </h3>
             <button onClick={() => setShowPlanModal(true)}
-              className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
+              className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 transition-colors">
               <Plus size={14} /> Planifier
             </button>
           </div>
@@ -585,8 +600,10 @@ export default function ExpenseTracker({
                 return (
                   <div
                     key={p.id}
-                    className={`glass rounded-xl p-3.5 border-l-2 transition-all ${
-                      isHighlighted ? "ring-2 ring-emerald-400 ring-offset-2 ring-offset-[var(--bg-primary)] border-emerald-400" : "border-emerald-500/50"
+                    className={`rounded-xl border p-3.5 transition-all ${
+                      isHighlighted
+                        ? "ring-2 ring-emerald-400 ring-offset-2 ring-offset-[var(--bg-primary)] border-emerald-500/60 bg-emerald-500/5"
+                        : "border-white/5 bg-white/[0.02] border-l-[3px] border-l-emerald-500/50"
                     }`}
                   >
                     <div className="flex justify-between items-start">
@@ -636,12 +653,12 @@ export default function ExpenseTracker({
           )}
           {executedPlanned.length > 0 && (
             <details className="group">
-              <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-400 flex items-center gap-1 mb-2">
+              <summary className="text-[10px] text-neutral-500 cursor-pointer hover:text-neutral-400 flex items-center gap-1 mb-2">
                 <CircleCheck size={12} className="text-emerald-500" /> {executedPlanned.length} exécutée{executedPlanned.length > 1 ? "s" : ""}
               </summary>
               <div className="space-y-1.5">
                 {executedPlanned.slice(0, 5).map((p) => (
-                  <div key={p.id} className="glass rounded-lg p-2.5 flex items-center gap-3 opacity-50">
+                  <div key={p.id} className="rounded-lg border border-white/5 bg-white/[0.02] p-2.5 flex items-center gap-3 opacity-60">
                     <CircleCheck size={14} className="text-emerald-400 shrink-0" />
                     <span className="text-xs flex-1 truncate">{p.description}</span>
                     <span className="font-mono text-xs text-slate-500">{formatCFA(p.amount)}</span>
@@ -658,11 +675,11 @@ export default function ExpenseTracker({
 
       {/* Bouton planifier si aucune planification */}
       {pendingPlanned.length === 0 && executedPlanned.length === 0 && (
-        <div className="mt-5">
+        <div className="mt-6">
           <button onClick={() => setShowPlanModal(true)}
-            className="w-full glass rounded-xl p-4 text-center hover:bg-white/[0.04] transition-colors group">
-            <CalendarClock size={24} className="mx-auto mb-2 text-slate-600 group-hover:text-emerald-400 transition-colors" />
-            <p className="text-xs text-slate-500 group-hover:text-slate-400">Planifier une dépense à venir</p>
+            className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-6 text-center hover:bg-white/[0.04] transition-colors group">
+            <CalendarClock size={28} className="mx-auto mb-2 text-neutral-500 group-hover:text-emerald-400 transition-colors" />
+            <p className="text-sm text-neutral-500 group-hover:text-neutral-400">Planifier une dépense à venir</p>
           </button>
         </div>
       )}
@@ -672,9 +689,9 @@ export default function ExpenseTracker({
 
       {/* Modal — Planifier / Modifier une dépense */}
       {showPlanModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
           onClick={closePlanModal}>
-          <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
@@ -684,22 +701,22 @@ export default function ExpenseTracker({
                   <><CalendarClock size={18} className="text-emerald-400" /> Planifier une dépense</>
                 )}
               </h2>
-              <button onClick={closePlanModal} className="text-slate-400 p-1"><X size={20} /></button>
+              <button onClick={closePlanModal} className="text-neutral-400 hover:text-white p-1 transition-colors"><X size={20} /></button>
             </div>
             <div className="grid gap-4">
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Date d&apos;échéance</label>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Date d&apos;échéance</label>
                 <input type="date" className="input-field" value={planForm.due_date}
                   onChange={(e) => setPlanForm({ ...planForm, due_date: e.target.value })} />
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Description</label>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Description</label>
                 <input className="input-field" placeholder="Ex: Renouveler abonnement, Achat prévu..."
                   value={planForm.description} onChange={(e) => setPlanForm({ ...planForm, description: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Catégorie</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Catégorie</label>
                   <select className="input-field" value={planForm.category}
                     onChange={(e) => setPlanForm({ ...planForm, category: e.target.value })}>
                     {config.categories.map((c: Category) => (
@@ -708,20 +725,20 @@ export default function ExpenseTracker({
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Montant (FCFA)</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Montant (FCFA)</label>
                   <input type="number" className="input-field font-mono" placeholder="0"
                     value={planForm.amount} onChange={(e) => setPlanForm({ ...planForm, amount: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Notes (optionnel)</label>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Notes (optionnel)</label>
                 <input className="input-field" placeholder="Détails..."
                   value={planForm.notes} onChange={(e) => setPlanForm({ ...planForm, notes: e.target.value })} />
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={closePlanModal} className="flex-1 min-h-[44px] py-3 rounded-xl border border-white/10 text-slate-400 text-sm touch-manipulation">Annuler</button>
-              <button onClick={handleSavePlan} className="btn-primary flex-1 min-h-[44px] py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 touch-manipulation">
+              <button onClick={closePlanModal} className="flex-1 min-h-[44px] py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium transition-colors">Annuler</button>
+              <button onClick={handleSavePlan} className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
                 {editingPlanned ? <><Check size={16} /> Enregistrer</> : <><CalendarClock size={16} /> Planifier</>}
               </button>
             </div>
@@ -732,11 +749,11 @@ export default function ExpenseTracker({
       {/* Modal — Nouvelle dépense */}
       {showModal && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
           onClick={closeExpenseModal}
         >
           <div
-            className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+            className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-5">
@@ -754,21 +771,21 @@ export default function ExpenseTracker({
             <div className="grid gap-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Date</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Date</label>
                   <input type="date" className="input-field" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Heure</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Heure</label>
                   <input type="time" className="input-field" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Description</label>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Description</label>
                 <input className="input-field" placeholder="Ex: Courses marché..." value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Catégorie</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Catégorie</label>
                   <select className="input-field" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
                     {config.categories.map((c: Category) => (
                       <option key={c.id} value={c.id}>{c.label}</option>
@@ -776,20 +793,20 @@ export default function ExpenseTracker({
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Montant (FCFA)</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Montant (FCFA)</label>
                   <input type="number" className="input-field font-mono" placeholder="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Notes (optionnel)</label>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Notes (optionnel)</label>
                 <input className="input-field" placeholder="Notes..." value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={closeExpenseModal} className="flex-1 min-h-[44px] py-3 rounded-xl border border-white/10 text-slate-400 text-sm touch-manipulation">
+              <button onClick={closeExpenseModal} className="flex-1 min-h-[44px] py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium transition-colors">
                 Annuler
               </button>
-              <button onClick={handleSubmit} className="btn-primary flex-1 min-h-[44px] py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 touch-manipulation">
+              <button onClick={handleSubmit} className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
                 <Check size={16} /> {editingExpense ? "Enregistrer" : "Enregistrer"}
               </button>
             </div>
@@ -917,12 +934,12 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
     <div className="mt-5 lg:mt-6">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full glass-strong rounded-xl p-4 flex items-center justify-between hover:bg-white/[0.04] transition-colors"
+        className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-4 flex items-center justify-between hover:bg-white/[0.04] transition-colors"
       >
         <span className="text-sm font-bold flex items-center gap-2">
           <History size={16} className="text-emerald-400" /> Historique des dépenses
         </span>
-        <ChevronRight size={16} className={`text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
+        <ChevronRight size={16} className={`text-neutral-500 transition-transform ${expanded ? "rotate-90" : ""}`} />
       </button>
 
       {expanded && (
@@ -933,7 +950,7 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
                 key={p}
                 onClick={() => handlePeriodChange(p)}
                 className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
-                  period === p ? "bg-emerald-500/30 text-emerald-300 ring-1 ring-emerald-500/50" : "bg-white/5 text-slate-400 hover:bg-white/10"
+                  period === p ? "bg-emerald-500/30 text-emerald-300 ring-1 ring-emerald-500/50" : "bg-white/5 text-neutral-500 hover:bg-white/10"
                 }`}
               >
                 {PERIOD_LABELS[p]}
@@ -941,9 +958,9 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
             ))}
           </div>
 
-          <div className="flex items-center justify-between glass rounded-xl p-3">
+          <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] p-3">
             <button onClick={navigatePrev} disabled={!canPrev}
-              className="p-1.5 rounded-lg hover:bg-white/5 text-slate-400 disabled:opacity-30 transition-colors">
+              className="p-1.5 rounded-lg hover:bg-white/5 text-neutral-500 disabled:opacity-30 transition-colors">
               <ChevronLeft size={16} />
             </button>
             <div className="text-center">
@@ -951,31 +968,31 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
                 <input type="date" className="input-field text-xs text-center" value={dayDate}
                   onChange={(e) => setDayDate(e.target.value)} />
               ) : (
-                <span className="text-xs font-semibold text-slate-300">{range.label}</span>
+                <span className="text-xs font-semibold text-neutral-300">{range.label}</span>
               )}
             </div>
             <button onClick={navigateNext} disabled={!canNext}
-              className="p-1.5 rounded-lg hover:bg-white/5 text-slate-400 disabled:opacity-30 transition-colors">
+              className="p-1.5 rounded-lg hover:bg-white/5 text-neutral-500 disabled:opacity-30 transition-colors">
               <ChevronRight size={16} />
             </button>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <div className="glass rounded-xl p-3 text-center">
-              <div className="text-[10px] text-slate-500">Total période</div>
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-center">
+              <div className="text-[10px] text-neutral-500">Total période</div>
               <div className="font-mono text-sm font-bold text-red-400 mt-0.5">{formatCFA(totalHistory)}</div>
             </div>
-            <div className="glass rounded-xl p-3 text-center">
-              <div className="text-[10px] text-slate-500">Moyenne / jour</div>
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-center">
+              <div className="text-[10px] text-neutral-500">Moyenne / jour</div>
               <div className="font-mono text-sm font-bold text-amber-400 mt-0.5">{formatCFA(avgDaily)}</div>
             </div>
           </div>
 
           {loadingHistory ? (
-            <div className="text-center py-6 text-slate-500 text-xs">Chargement...</div>
+            <div className="text-center py-6 text-neutral-500 text-xs">Chargement...</div>
           ) : historyData.length === 0 ? (
-            <div className="glass rounded-xl py-8 text-center text-slate-500">
-              <Calendar size={28} className="mx-auto mb-2 text-slate-600" />
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] py-8 text-center text-neutral-500">
+              <Calendar size={28} className="mx-auto mb-2 text-neutral-600" />
               <p className="text-xs">Aucune dépense sur cette période</p>
             </div>
           ) : (
@@ -983,9 +1000,9 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
               {groupedByDate.map(([date, items]) => {
                 const dayTotal = items.reduce((s, e) => s + e.amount, 0);
                 return (
-                  <div key={date} className="glass-strong rounded-xl overflow-hidden">
+                  <div key={date} className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
                     <div className="flex justify-between items-center px-3.5 py-2 bg-white/[0.03] border-b border-white/5">
-                      <span className="text-[11px] font-semibold text-slate-400">
+                      <span className="text-[11px] font-semibold text-neutral-500">
                         {new Date(date).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short", year: period === "year" ? "numeric" : undefined })}
                       </span>
                       <span className="font-mono text-[11px] font-bold text-red-400">-{formatCFA(dayTotal)}</span>
@@ -1003,7 +1020,7 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
                           <div className="flex-1 min-w-0">
                             <div className="text-xs truncate">{e.description}</div>
                             {e.time && e.time !== "00:00" && (
-                              <div className="text-[9px] text-slate-500">{e.time}</div>
+                              <div className="text-[9px] text-neutral-500">{e.time}</div>
                             )}
                           </div>
                           <span className="font-mono text-xs font-semibold text-red-300 shrink-0">-{formatCFA(e.amount)}</span>
@@ -1016,7 +1033,7 @@ function HistoryByPeriod({ config, selectedYear }: { config: BudgetConfig; selec
             </div>
           )}
 
-          <div className="text-center text-[10px] text-slate-500 pt-1">
+          <div className="text-center text-[10px] text-neutral-500 pt-1">
             {historyData.length} transaction{historyData.length > 1 ? "s" : ""} · {groupedByDate.length} jour{groupedByDate.length > 1 ? "s" : ""}
           </div>
         </div>

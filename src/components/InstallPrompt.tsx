@@ -49,7 +49,7 @@ export default function InstallPrompt() {
 
   return (
     <div className="fixed bottom-20 left-4 right-4 z-50 sm:bottom-4 sm:left-auto sm:right-4 sm:max-w-sm animate-[slideUp_0.4s_ease_forwards]">
-      <div className="rounded-xl bg-slate-800/95 backdrop-blur border border-white/10 shadow-xl p-4">
+      <div className="rounded-xl popup-panel shadow-xl p-4">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center shrink-0">
             <Download className="w-5 h-5 text-emerald-400" />

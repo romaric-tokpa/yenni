@@ -51,16 +51,19 @@ function renderLabel(props: any) {
 
 export default function BudgetPieChart({
   categories,
+  effectiveBudgets,
 }: {
   categories: Category[];
+  /** Budgets effectifs par catégorie (ex. par mois). Si absent, utilise category.budget */
+  effectiveBudgets?: Record<string, number>;
 }) {
   const data = categories
-    .filter((c) => c.budget > 0)
     .map((c) => ({
       name: c.label,
-      value: c.budget,
+      value: effectiveBudgets ? (effectiveBudgets[c.id] ?? c.budget) : c.budget,
       color: c.color,
-    }));
+    }))
+    .filter((d) => d.value > 0);
 
   const total = data.reduce((s, d) => s + d.value, 0);
 

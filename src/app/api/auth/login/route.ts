@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getUserByEmail } from "@/lib/db";
 import { createSession, COOKIE_NAME, getCookieOptions, getAvatarUrl } from "@/lib/auth";
+import { apiErrorResponse } from "@/lib/apiError";
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,6 +46,6 @@ export async function POST(req: NextRequest) {
     return response;
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

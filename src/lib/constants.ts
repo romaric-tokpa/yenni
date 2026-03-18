@@ -19,6 +19,14 @@ export const DEFAULT_CONFIG: BudgetConfig = {
   savingsGoal: 0,
 };
 
+/** Années disponibles dans les sélecteurs (année courante - 3 jusqu'à 2055) */
+export function getSelectableYears(): number[] {
+  const current = new Date().getFullYear();
+  const min = current - 3;
+  const max = 2055;
+  return Array.from({ length: max - min + 1 }, (_, i) => min + i);
+}
+
 export const MONTHS_FR = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 export const MONTHS_FULL = MONTHS_FR;
 export const MONTHS_SHORT = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"];

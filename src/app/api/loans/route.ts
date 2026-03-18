@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiErrorResponse } from "@/lib/apiError";
 import { getLoans, addLoan, updateLoan, deleteLoan } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
@@ -7,7 +8,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(await getLoans(status));
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(loan, { status: 201 });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -36,7 +37,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json(loan);
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -49,6 +50,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

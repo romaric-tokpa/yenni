@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiErrorResponse } from "@/lib/apiError";
 import { getSessionFromCookies } from "@/lib/auth";
 import {
   getLoanSchedule,
@@ -31,10 +32,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(filtered);
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json(
-      { error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
-    );
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -71,10 +69,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json(
-      { error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
-    );
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -136,9 +131,6 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json(updated, { status: 200 });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json(
-      { error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
-    );
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

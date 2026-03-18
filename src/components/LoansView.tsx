@@ -571,7 +571,7 @@ export default function LoansView({
         return (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
             onClick={() => setShowPayModal(null)}>
-            <div className="glass-strong w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+            <div className="popup-panel w-full sm:w-[480px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-5">
                 <h2 className="text-base font-bold flex items-center gap-2">
@@ -657,7 +657,7 @@ export default function LoansView({
         return (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
             onClick={() => setEditingPayment(null)}>
-            <div className="glass-strong w-full sm:w-[420px] rounded-t-2xl sm:rounded-2xl p-6 animate-slide-up"
+            <div className="popup-panel w-full sm:w-[420px] rounded-t-2xl sm:rounded-2xl p-6 animate-slide-up"
               onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-base font-bold flex items-center gap-2">

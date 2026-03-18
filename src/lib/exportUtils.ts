@@ -19,6 +19,8 @@ export interface BilanData {
   totalProjectSaved: number;
   catSpending: Record<string, number>;
   categories: Category[];
+  /** Budgets effectifs par catégorie (ex. par mois). Si absent, utilise category.budget */
+  effectiveBudgets?: Record<string, number>;
   fixedChargesLabel?: string;
 }
 
@@ -103,11 +105,12 @@ export function createBilanHTML(data: BilanData): string {
   let catRows = "";
   data.categories.forEach((cat) => {
     const spent = data.catSpending[cat.id] || 0;
-    if (cat.budget > 0) {
+    const budget = data.effectiveBudgets ? (data.effectiveBudgets[cat.id] ?? cat.budget) : cat.budget;
+    if (budget > 0) {
       catRows += `
         <tr>
           <td style="padding:5px 10px;border-bottom:1px solid #334155;color:#94a3b8;">${cat.label}</td>
-          <td style="padding:5px 10px;border-bottom:1px solid #334155;text-align:right;color:#e2e8f0;">${formatCFA(cat.budget)}</td>
+          <td style="padding:5px 10px;border-bottom:1px solid #334155;text-align:right;color:#e2e8f0;">${formatCFA(budget)}</td>
           <td style="padding:5px 10px;border-bottom:1px solid #334155;text-align:right;color:#f59e0b;">${formatCFA(spent)}</td>
         </tr>`;
     }

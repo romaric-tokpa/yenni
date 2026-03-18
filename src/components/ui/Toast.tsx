@@ -1,33 +1,67 @@
 "use client";
-import { CheckCircle, XCircle, Info } from "lucide-react";
+import { useState, useEffect } from "react";
+import { CheckCircle, XCircle, Info, X } from "lucide-react";
 
 export default function Toast({
   message,
   type,
+  onDismiss,
+  duration = 3500,
 }: {
   message: string;
   type: string;
+  onDismiss?: () => void;
+  duration?: number;
 }) {
+  const [exiting, setExiting] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setExiting(true);
+    }, duration);
+    return () => clearTimeout(t);
+  }, [duration]);
+
+  useEffect(() => {
+    if (!exiting) return;
+    const t = setTimeout(() => onDismiss?.(), 200);
+    return () => clearTimeout(t);
+  }, [exiting, onDismiss]);
+
+  const handleDismiss = () => {
+    if (!exiting) setExiting(true);
+  };
+
+  const bgStyle =
+    type === "success"
+      ? "linear-gradient(135deg,#059669,#10b981)"
+      : type === "error"
+        ? "linear-gradient(135deg,#dc2626,#ef4444)"
+        : "linear-gradient(135deg,#6366f1,#8b5cf6)";
+
   return (
     <div
-      className="toast-animate fixed top-5 right-5 z-50 px-6 py-3 rounded-xl font-medium text-sm text-white shadow-2xl flex items-center gap-2"
-      style={{
-        background:
-          type === "success"
-            ? "linear-gradient(135deg,#059669,#10b981)"
-            : type === "error"
-              ? "linear-gradient(135deg,#dc2626,#ef4444)"
-              : "linear-gradient(135deg,#6366f1,#8b5cf6)",
-      }}
+      className={`fixed top-4 right-4 left-4 sm:left-auto sm:max-w-sm z-[100] px-4 py-3 rounded-xl font-medium text-sm text-white shadow-2xl flex items-center gap-3 ${
+        exiting ? "toast-animate-out" : "toast-animate-in"
+      }`}
+      style={{ background: bgStyle }}
+      role="alert"
     >
       {type === "success" ? (
-        <CheckCircle size={16} />
+        <CheckCircle size={18} className="shrink-0" />
       ) : type === "error" ? (
-        <XCircle size={16} />
+        <XCircle size={18} className="shrink-0" />
       ) : (
-        <Info size={16} />
-      )}{" "}
-      {message}
+        <Info size={18} className="shrink-0" />
+      )}
+      <span className="flex-1 min-w-0">{message}</span>
+      <button
+        onClick={handleDismiss}
+        className="shrink-0 p-1 rounded-lg hover:bg-white/20 transition-colors"
+        aria-label="Fermer"
+      >
+        <X size={16} />
+      </button>
     </div>
   );
 }

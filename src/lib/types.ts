@@ -89,7 +89,9 @@ export interface BudgetConfig {
   fixedCharges: FixedCharge[];
   categories: Category[];
   savingsGoal: number;
-  /** Date cible pour le fonds d'urgence (YYYY-MM-DD). Si défini, permet le calcul de l'épargne mensuelle suggérée. */
+  /** Date de début de la période d'épargne (YYYY-MM-DD). Définit le cadre temporel. */
+  savingsGoalStartDate?: string;
+  /** Date cible pour le fonds d'urgence (YYYY-MM-DD). Fin de la période d'épargne. */
   savingsGoalDeadline?: string;
 }
 

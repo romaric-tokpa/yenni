@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromCookies } from "@/lib/auth";
 import { getExpenses, getExpensesByDateRange, addExpense, updateExpense, deleteExpense } from "@/lib/db";
+import { apiErrorResponse } from "@/lib/apiError";
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(expenses);
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(expense, { status: 201 });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -80,7 +81,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json(expense);
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -96,6 +97,6 @@ export async function DELETE(req: NextRequest) {
       : NextResponse.json({ error: "Non trouvé" }, { status: 404 });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

@@ -338,40 +338,51 @@ export default function ProjectsView({
   const otherProjects = pausedProjects;
   const totalProjectSaved = projects.reduce((s: number, p: Project) => s + p.saved_amount, 0);
   const totalProjectTarget = projects.reduce((s: number, p: Project) => s + p.target_amount, 0);
+  const globalProgress = totalProjectTarget > 0 ? (totalProjectSaved / totalProjectTarget) * 100 : 0;
+
+  type TabFilter = "active" | "paused" | "completed";
+  const [activeTab, setActiveTab] = useState<TabFilter>("active");
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-    >
-      <div className="flex justify-between items-start mb-5 lg:mb-6">
+>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-xl lg:text-2xl font-bold">Mes Projets</h1>
-          <p className="text-slate-500 text-xs lg:text-sm mt-0.5">
-            {activeProjects.length} actifs — {formatCFA(totalProjectSaved)} / {formatCFA(totalProjectTarget)} FCFA
-            {typeof monthProjectFunds === "number" && monthProjectFunds > 0 && (
-              <span className="ml-2 text-amber-400/90">· {formatCFA(monthProjectFunds)} prélevés ce mois</span>
-            )}
+          <h1 className="text-xl lg:text-2xl font-bold tracking-tight">Mes Projets</h1>
+          <p className="text-neutral-500 text-xs lg:text-sm mt-1">
+            {activeProjects.length} actif{activeProjects.length !== 1 ? "s" : ""}
+            {pausedProjects.length > 0 && ` · ${pausedProjects.length} en pause`}
+            {completedProjects.length > 0 && ` · ${completedProjects.length} terminé${completedProjects.length !== 1 ? "s" : ""}`}
           </p>
         </div>
-        <button onClick={() => setShowModal(true)}
-          className="btn-primary px-4 py-2.5 rounded-xl text-xs lg:text-sm font-semibold flex items-center gap-1.5 shrink-0">
-          <Plus size={16} /> <span className="hidden sm:inline">Nouveau</span> Projet
+        <button
+          onClick={() => setShowModal(true)}
+          className="btn-primary px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 shrink-0 w-full sm:w-auto justify-center"
+        >
+          <Plus size={18} strokeWidth={2.5} />
+          Nouveau projet
         </button>
       </div>
 
       {projects.length === 0 ? (
-        <div className="glass-strong rounded-2xl p-10 lg:p-16 text-center">
-          <div className="mb-4 flex justify-center">
-            <Target size={48} className="text-emerald-400" />
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-12 lg:p-16 text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-emerald-500/10 mb-5">
+            <Target size={32} className="text-emerald-400" />
           </div>
-          <div className="text-base lg:text-lg font-semibold mb-2">Aucun projet</div>
-          <div className="text-slate-500 text-xs lg:text-sm mb-5">
-            Crée ton premier projet d&apos;épargne
-          </div>
-          <button onClick={() => setShowModal(true)} className="btn-primary px-5 py-2.5 rounded-xl text-sm font-semibold">
-            Créer un projet
+          <h2 className="text-lg font-semibold mb-2">Aucun projet</h2>
+          <p className="text-neutral-500 text-sm max-w-sm mx-auto mb-6">
+            Crée des projets d&apos;épargne pour atteindre tes objectifs : voyage, achat, fonds d&apos;urgence…
+          </p>
+          <button
+            onClick={() => setShowModal(true)}
+            className="btn-primary px-6 py-3 rounded-lg text-sm font-medium inline-flex items-center gap-2"
+          >
+            <Plus size={18} />
+            Créer mon premier projet
           </button>
         </div>
       ) : (
@@ -380,7 +391,57 @@ export default function ProjectsView({
           animate={{ opacity: 1 }}
           transition={{ duration: 0.25 }}
         >
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 lg:gap-4 mb-5 lg:mb-6">
+          {/* Stats bar */}
+          <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-baseline gap-3">
+                <span className="font-mono text-xl font-bold text-emerald-400">{formatCFA(totalProjectSaved)}</span>
+                <span className="text-neutral-500 text-sm">/ {formatCFA(totalProjectTarget)}</span>
+              </div>
+              {typeof monthProjectFunds === "number" && monthProjectFunds > 0 && (
+                <span className="text-amber-400/90 text-xs font-medium">
+                  {formatCFA(monthProjectFunds)} prélevés ce mois
+                </span>
+              )}
+            </div>
+            <div className="mt-3 h-1.5 rounded-full bg-white/5 overflow-hidden">
+              <motion.div
+                className="h-full rounded-full bg-emerald-500/80"
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(100, globalProgress)}%` }}
+                transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
+              />
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-1 p-1 rounded-lg bg-white/[0.03] border border-white/5 w-fit mb-6">
+            {[
+              { id: "active" as TabFilter, label: "Actifs", count: activeProjects.length },
+              { id: "paused" as TabFilter, label: "En pause", count: pausedProjects.length },
+              { id: "completed" as TabFilter, label: "Terminés", count: completedProjects.length },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === tab.id
+                    ? "bg-white/10 text-white"
+                    : "text-neutral-500 hover:text-neutral-300"
+                }`}
+              >
+                {tab.label}
+                {tab.count > 0 && (
+                  <span className={`ml-1.5 ${activeTab === tab.id ? "text-emerald-400" : "text-neutral-600"}`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === "active" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
             {activeProjects.map((p: Project) => {
               const pct = p.target_amount > 0 ? (p.saved_amount / p.target_amount) * 100 : 0;
               const remaining = p.target_amount - p.saved_amount;
@@ -392,7 +453,7 @@ export default function ProjectsView({
               return (
                 <motion.div
                   key={p.id}
-                  className="glass-strong kpi-card rounded-2xl p-4 lg:p-6"
+                  className="rounded-xl border border-white/5 bg-white/[0.03] p-4 lg:p-5"
                   style={{ borderLeft: `4px solid ${p.color}` }}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -448,34 +509,49 @@ export default function ProjectsView({
                     )}
                   </div>
                   {addingTo === p.id ? (
-                    <div className="space-y-2">
-                      <p className="text-[10px] text-slate-500">
-                        Prélevé du solde disponible (comme l&apos;épargne).
-                      </p>
-                      <div className="flex gap-2">
-                        <input type="number" className="input-field font-mono text-base py-3 min-w-[140px] flex-1" placeholder="Montant"
-                          value={addAmount} onChange={(e) => setAddAmount(e.target.value)} autoFocus />
-                        <input type="date" className="input-field text-sm py-2 w-32"
-                          value={addFundDate} onChange={(e) => setAddFundDate(e.target.value)} />
+                    <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3 space-y-3">
+                      <div className="flex gap-2 flex-wrap">
+                        <input
+                          type="number"
+                          className="input-field font-mono text-sm py-2.5 flex-1 min-w-[120px]"
+                          placeholder="Montant (FCFA)"
+                          value={addAmount}
+                          onChange={(e) => setAddAmount(e.target.value)}
+                          autoFocus
+                        />
+                        <input
+                          type="date"
+                          className="input-field text-sm py-2.5 w-36"
+                          value={addFundDate}
+                          onChange={(e) => setAddFundDate(e.target.value)}
+                        />
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={() => handleAddFunds(p)} className="btn-primary px-4 py-2 rounded-lg text-xs font-semibold">OK</button>
-                        <button onClick={() => { setAddingTo(null); setAddAmount(""); }}
-                          className="px-3 py-2 rounded-lg border border-white/10 text-xs text-slate-400">
-                          <X size={14} />
+                        <button onClick={() => handleAddFunds(p)} className="btn-primary px-4 py-2 rounded-lg text-sm font-medium flex-1">
+                          Valider
+                        </button>
+                        <button
+                          onClick={() => { setAddingTo(null); setAddAmount(""); }}
+                          className="px-3 py-2 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm"
+                        >
+                          Annuler
                         </button>
                       </div>
                     </div>
                   ) : (
                     <div className="flex flex-col sm:flex-row gap-2">
-                      <button onClick={() => openRealizeModal(p)}
-                        className="w-full py-3 rounded-xl text-sm font-semibold bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-300 border-2 border-emerald-500/50 flex items-center justify-center gap-2 transition-colors min-h-[44px]">
-                        <Receipt size={18} /> Projet réalisé — Enregistrer en dépense
+                      <button
+                        onClick={() => setAddingTo(p.id)}
+                        className="w-full sm:flex-1 py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                        style={{ background: p.color + "20", color: p.color, border: `1px solid ${p.color}40` }}
+                      >
+                        <Plus size={16} /> Ajouter des fonds
                       </button>
-                      <button onClick={() => setAddingTo(p.id)}
-                        className="w-full sm:flex-1 py-2.5 rounded-xl text-xs font-semibold border border-dashed transition-colors flex items-center justify-center gap-1.5"
-                        style={{ borderColor: p.color + "66", color: p.color }}>
-                        <Plus size={14} /> Ajouter des fonds
+                      <button
+                        onClick={() => openRealizeModal(p)}
+                        className="w-full sm:flex-1 py-2.5 rounded-lg text-xs font-medium border border-dashed border-emerald-500/40 text-emerald-400/90 hover:bg-emerald-500/10 flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Receipt size={14} /> Projet réalisé
                       </button>
                     </div>
                   )}
@@ -526,20 +602,90 @@ export default function ProjectsView({
               );
             })}
           </div>
+          )}
 
-          {completedProjects.length > 0 && (
-            <div className="mb-5 lg:mb-6">
-              <h3 className="text-sm lg:text-base font-semibold text-emerald-400/90 mb-3 lg:mb-4 flex items-center gap-2">
-                <ShoppingCart size={18} /> Suivi de réalisation — Projets terminés
-              </h3>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 lg:gap-4">
+          {activeTab === "paused" && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            {pausedProjects.map((p: Project) => {
+              const pct = p.target_amount > 0 ? (p.saved_amount / p.target_amount) * 100 : 0;
+              return (
+                <motion.div
+                  key={p.id}
+                  className="rounded-xl border border-white/5 bg-white/[0.03] p-4 opacity-90"
+                  style={{ borderLeft: `4px solid ${p.color}` }}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-medium truncate flex items-center gap-2">
+                      <Icon name={p.icon} size={16} style={{ color: p.color }} />
+                      {p.name}
+                    </span>
+                    <div className="flex gap-1 shrink-0">
+                      <button onClick={() => openEditModal(p)} title="Modifier" className="p-1.5 rounded-lg text-neutral-500 hover:text-emerald-400 transition-colors">
+                        <Pencil size={12} />
+                      </button>
+                      <button onClick={() => updateProject(p.id, { status: "active" })} title="Reprendre" className="p-1.5 rounded-lg text-neutral-500 hover:text-emerald-400 transition-colors">
+                        <Play size={12} />
+                      </button>
+                      <button onClick={() => removeProject(p.id)} title="Supprimer" className="p-1.5 rounded-lg text-neutral-500 hover:text-red-400 transition-colors">
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="font-mono text-base font-bold" style={{ color: p.color }}>{formatCFA(p.saved_amount)} / {formatCFA(p.target_amount)}</div>
+                  <div className="mt-2">
+                    <AnimatedProgressBar value={p.saved_amount} max={p.target_amount} gradient={`linear-gradient(90deg,${p.color},${p.color}cc)`} duration={0.6} />
+                  </div>
+                  <div className="text-[10px] text-neutral-500 mt-1.5 flex items-center gap-1">
+                    <Pause size={10} className="text-amber-400" /> En pause — {pct.toFixed(0)}%
+                  </div>
+                  {(projectFunds[p.id]?.length ?? 0) > 0 && (
+                    <button onClick={() => toggleFunds(p.id)} className="mt-2 w-full text-left text-[10px] text-neutral-500 hover:text-neutral-400 flex items-center gap-1">
+                      <History size={10} /> {projectFunds[p.id]?.length} fonds
+                      {expandedFunds.has(p.id) ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                    </button>
+                  )}
+                  {expandedFunds.has(p.id) && (projectFunds[p.id]?.length ?? 0) > 0 && (
+                    <div className="mt-2 space-y-1 max-h-24 overflow-y-auto">
+                      {(projectFunds[p.id] || []).map((f) => (
+                        <div key={f.id} className="flex items-center gap-2 py-1 px-2 rounded-lg bg-white/[0.03] text-[9px]">
+                          {editingFund?.id === f.id ? (
+                            <>
+                              <input type="number" className="input-field font-mono py-0.5 px-1 w-16 text-[9px]" value={editFundAmount} onChange={(e) => setEditFundAmount(e.target.value)} />
+                              <input type="date" className="input-field py-0.5 px-1 flex-1 text-[9px]" value={editFundDate} onChange={(e) => setEditFundDate(e.target.value)} />
+                              <button onClick={async () => { const ok = await updateProjectFundAmount(f, Number(editFundAmount), editFundDate); if (ok) { showToast("Montant modifié"); await fetchProjects(); } }} className="text-emerald-400 p-0.5"><Check size={10} /></button>
+                              <button onClick={() => setEditingFund(null)} className="text-neutral-400 p-0.5"><X size={10} /></button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-mono font-semibold flex-1" style={{ color: p.color }}>{formatCFA(f.amount)}</span>
+                              <span className="text-neutral-600">{new Date(f.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                              <button onClick={() => { setEditingFund(f); setEditFundAmount(String(f.amount)); setEditFundDate(f.date); }} className="text-neutral-500 hover:text-emerald-400 p-0.5"><Pencil size={10} /></button>
+                              <button onClick={async () => { await removeProjectFund(f); showToast("Fond supprimé"); await fetchProjects(); }} className="text-neutral-500 hover:text-red-400 p-0.5"><Trash2 size={10} /></button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
+              );
+            })}
+          </div>
+          )}
+
+          {activeTab === "completed" && completedProjects.length > 0 && (
+            <div className="mb-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {completedProjects.map((p: Project) => {
                   const purchases = projectPurchases[p.id] || [];
                   const totalSpent = purchases.reduce((s, x) => s + x.amount, 0);
                   const totalFunds = p.saved_amount + totalSpent;
                   const remaining = p.saved_amount;
                   return (
-                    <div key={p.id} className="glass-strong rounded-xl p-4 lg:p-5 border border-emerald-500/20">
+                    <div key={p.id} className="rounded-xl border border-white/5 bg-white/[0.03] p-4 lg:p-5" style={{ borderLeft: `4px solid ${p.color}` }}>
                       <div className="flex justify-between items-center mb-3">
                         <div className="flex items-center gap-2">
                           <Icon name={p.icon} size={18} style={{ color: p.color }} />
@@ -608,75 +754,17 @@ export default function ProjectsView({
             </div>
           )}
 
-          {otherProjects.length > 0 && (
-            <div>
-              <h3 className="text-xs lg:text-sm font-semibold text-slate-400 mb-2 lg:mb-3">En pause</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 lg:gap-3">
-                {otherProjects.map((p: Project) => {
-                  const pct = p.target_amount > 0 ? (p.saved_amount / p.target_amount) * 100 : 0;
-                  return (
-                    <div key={p.id} className="glass rounded-xl p-3 lg:p-4 opacity-60">
-                      <div className="flex justify-between items-center mb-1.5">
-                        <span className="text-xs lg:text-sm truncate flex items-center gap-1.5">
-                          <Icon name={p.icon} size={14} style={{ color: p.color }} />
-                          {p.name}
-                        </span>
-                        <div className="flex gap-0.5 shrink-0">
-                          <button onClick={() => openEditModal(p)} title="Modifier"
-                            className="text-slate-500 hover:text-emerald-400 active:text-emerald-400 p-1 transition-colors"><Pencil size={12} /></button>
-                          {p.status === "paused" && (
-                            <button onClick={() => updateProject(p.id, { status: "active" })} title="Reprendre"
-                              className="text-slate-500 hover:text-emerald-400 active:text-emerald-400 p-1 transition-colors"><Play size={12} /></button>
-                          )}
-                          <button onClick={() => removeProject(p.id)} title="Supprimer"
-                            className="text-slate-500 hover:text-red-400 active:text-red-400 p-1 transition-colors"><Trash2 size={12} /></button>
-                        </div>
-                      </div>
-                      <div className="font-mono text-xs lg:text-sm font-bold">{formatCFA(p.saved_amount)} / {formatCFA(p.target_amount)}</div>
-                      <div className="mt-1.5">
-                        <AnimatedProgressBar value={p.saved_amount} max={p.target_amount} gradient={`linear-gradient(90deg,${p.color},${p.color}cc)`} duration={0.6} />
-                      </div>
-                      <div className="text-[9px] lg:text-[10px] text-slate-500 mt-0.5 flex items-center gap-1">
-                        <><Pause size={10} className="text-amber-400" /> En pause</> — {pct.toFixed(0)}%
-                      </div>
-                      {(projectFunds[p.id]?.length ?? 0) > 0 && (
-                        <button onClick={() => toggleFunds(p.id)} className="mt-1.5 w-full text-left text-[9px] text-slate-500 hover:text-slate-400 flex items-center gap-1">
-                          <History size={10} /> {projectFunds[p.id]?.length} fonds
-                          {expandedFunds.has(p.id) ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-                        </button>
-                      )}
-                      {expandedFunds.has(p.id) && (projectFunds[p.id]?.length ?? 0) > 0 && (
-                        <div className="mt-1.5 space-y-1 max-h-24 overflow-y-auto">
-                          {(projectFunds[p.id] || []).map((f) => (
-                            <div key={f.id} className="flex items-center gap-2 py-1 px-2 rounded bg-white/[0.03] text-[9px]">
-                              {editingFund?.id === f.id ? (
-                                <>
-                                  <input type="number" className="input-field font-mono py-0.5 px-1 w-16 text-[9px]"
-                                    value={editFundAmount} onChange={(e) => setEditFundAmount(e.target.value)} />
-                                  <input type="date" className="input-field py-0.5 px-1 flex-1 text-[9px]"
-                                    value={editFundDate} onChange={(e) => setEditFundDate(e.target.value)} />
-                                  <button onClick={async () => {
-                                    const ok = await updateProjectFundAmount(f, Number(editFundAmount), editFundDate);
-                                    if (ok) { showToast("Montant modifié"); await fetchProjects(); }
-                                  }} className="text-emerald-400 p-0.5"><Check size={10} /></button>
-                                  <button onClick={() => setEditingFund(null)} className="text-slate-400 p-0.5"><X size={10} /></button>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="font-mono font-semibold flex-1" style={{ color: p.color }}>{formatCFA(f.amount)}</span>
-                                  <span className="text-slate-600">{new Date(f.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
-                                  <button onClick={() => { setEditingFund(f); setEditFundAmount(String(f.amount)); setEditFundDate(f.date); }} className="text-slate-500 hover:text-emerald-400 p-0.5"><Pencil size={10} /></button>
-                                  <button onClick={async () => { await removeProjectFund(f); showToast("Fond supprimé"); await fetchProjects(); }} className="text-slate-500 hover:text-red-400 p-0.5"><Trash2 size={10} /></button>
-                                </>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+          {/* Empty state for paused or completed tab */}
+          {activeTab === "paused" && pausedProjects.length === 0 && (
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-10 text-center">
+              <Pause size={32} className="text-amber-400/60 mx-auto mb-3" />
+              <p className="text-neutral-500 text-sm">Aucun projet en pause</p>
+            </div>
+          )}
+          {activeTab === "completed" && completedProjects.length === 0 && (
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-10 text-center">
+              <CheckCircle size={32} className="text-emerald-400/60 mx-auto mb-3" />
+              <p className="text-neutral-500 text-sm">Aucun projet terminé</p>
             </div>
           )}
         </motion.div>
@@ -684,9 +772,9 @@ export default function ProjectsView({
 
       {/* Modal — Créer / Modifier un projet */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
           onClick={closeModal}>
-          <div className="glass-strong w-full sm:w-[500px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base lg:text-lg font-bold flex items-center gap-2">
@@ -700,26 +788,26 @@ export default function ProjectsView({
             </div>
             <div className="grid gap-4">
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Nom du projet</label>
-                <input className="input-field" placeholder="Ex: Achat terrain..." value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                <label className="text-xs text-neutral-500 mb-1.5 block">Nom du projet</label>
+                <input className="input-field" placeholder="Ex: Achat terrain, voyage..." value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Description</label>
-                <input className="input-field" placeholder="Détails..." value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                <label className="text-xs text-neutral-500 mb-1.5 block">Description (optionnel)</label>
+                <input className="input-field" placeholder="Détails du projet..." value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Montant cible (FCFA)</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Montant cible (FCFA)</label>
                   <input type="number" className="input-field font-mono" placeholder="0" value={form.target_amount}
                     onChange={(e) => setForm({ ...form, target_amount: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Échéance</label>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Échéance</label>
                   <input type="date" className="input-field" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-2 block">Icône</label>
+                <label className="text-xs text-neutral-500 mb-2 block">Icône</label>
                 <div className="flex gap-2 flex-wrap">
                   {PROJECT_ICON_NAMES.map((iconName) => (
                     <button key={iconName} onClick={() => setForm({ ...form, icon: iconName })}
@@ -731,7 +819,7 @@ export default function ProjectsView({
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-2 block">Couleur</label>
+                <label className="text-xs text-neutral-500 mb-2 block">Couleur</label>
                 <div className="flex gap-2">
                   {PROJECT_COLORS.map((color) => (
                     <button key={color} onClick={() => setForm({ ...form, color })}
@@ -742,8 +830,8 @@ export default function ProjectsView({
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={closeModal} className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm">Annuler</button>
-              <button onClick={handleSave} className="btn-primary flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5">
+              <button onClick={closeModal} className="flex-1 py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium transition-colors">Annuler</button>
+              <button onClick={handleSave} className="btn-primary flex-1 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
                 {editingProject ? <><Check size={16} /> Enregistrer</> : "Créer"}
               </button>
             </div>
@@ -753,9 +841,9 @@ export default function ProjectsView({
 
       {/* Modal — Projet réalisé (sans dépense, suivi des achats au fur et à mesure) */}
       {realizingProject && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
           onClick={() => setRealizingProject(null)}>
-          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
@@ -763,12 +851,12 @@ export default function ProjectsView({
               </h2>
               <button onClick={() => setRealizingProject(null)} className="text-slate-400 p-1"><X size={20} /></button>
             </div>
-            <p className="text-xs text-slate-400 mb-4">
+            <p className="text-xs text-neutral-500 mb-4">
               Marquer &quot;{realizingProject.name}&quot; comme réalisé. Tu pourras suivre les achats au fur et à mesure — chaque achat sera prélevé du solde épargné ({formatCFA(realizingProject.saved_amount)} FCFA), sans créer de dépense supplémentaire.
             </p>
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setRealizingProject(null)} className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 text-sm">Annuler</button>
-              <button onClick={handleRealizeProject} className="btn-primary flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5">
+              <button onClick={() => setRealizingProject(null)} className="flex-1 py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium transition-colors">Annuler</button>
+              <button onClick={handleRealizeProject} className="btn-primary flex-1 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
                 <Receipt size={16} /> Marquer comme réalisé
               </button>
             </div>

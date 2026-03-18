@@ -1,10 +1,24 @@
 import { NextResponse } from "next/server";
+import { apiErrorResponse } from "@/lib/apiError";
 import { getSessionFromCookies } from "@/lib/auth";
-import { getLoans, getPlannedExpenses, getOverdueSchedules, getUpcomingSchedules, refreshScheduleStatuses } from "@/lib/db";
+import { getLoans, getPlannedExpenses, getOverdueSchedules, getSchedulesForPeriod, refreshScheduleStatuses } from "@/lib/db";
 import type { NotificationTodo } from "@/lib/types";
 
 function getTodayStr(): string {
   return new Date().toISOString().split("T")[0];
+}
+
+function getEndOfMonthStr(): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() + 1);
+  d.setDate(0);
+  return d.toISOString().split("T")[0];
+}
+
+function isInCurrentMonth(dateStr: string): boolean {
+  const today = getTodayStr();
+  const endOfMonth = getEndOfMonthStr();
+  return dateStr >= today && dateStr <= endOfMonth;
 }
 
 function daysBetween(dateStr: string): number {
@@ -55,7 +69,8 @@ export async function GET() {
         });
       });
 
-      const upcoming = await getUpcomingSchedules(session.userId, 7);
+      const endOfMonth = getEndOfMonthStr();
+      const upcoming = await getSchedulesForPeriod(session.userId, today, endOfMonth);
       upcoming.forEach((s) => {
         const days = daysBetween(s.due_date);
         todos.push({
@@ -87,21 +102,20 @@ export async function GET() {
     for (const loan of activeLoans) {
       if (scheduleLoanIds.has(loan.id)) continue;
       const days = daysBetween(loan.next_due_date);
-      if (days <= 7) {
-        todos.push({
-          id: `loan-${loan.id}`,
-          type: "todo",
-          source_type: "loan_due",
-          source_id: loan.id,
-          title: "Mensualité prêt",
-          message: loan.label,
-          amount: loan.monthly_payment,
-          due_date: loan.next_due_date,
-          link: `/loans?pay=${loan.id}`,
-          is_overdue: days < 0,
-          days_left: days,
-        });
-      }
+      if (days > 0 && !isInCurrentMonth(loan.next_due_date)) continue;
+      todos.push({
+        id: `loan-${loan.id}`,
+        type: "todo",
+        source_type: "loan_due",
+        source_id: loan.id,
+        title: "Mensualité prêt",
+        message: loan.label,
+        amount: loan.monthly_payment,
+        due_date: loan.next_due_date,
+        link: `/loans?pay=${loan.id}`,
+        is_overdue: days < 0,
+        days_left: days,
+      });
     }
 
     // Toutes les dépenses planifiées en attente
@@ -133,6 +147,6 @@ export async function GET() {
     return NextResponse.json(todos);
   } catch (err) {
     console.error("[API ERROR] GET /api/notifications", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

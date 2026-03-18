@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiErrorResponse } from "@/lib/apiError";
 import { readFile } from "fs/promises";
 import path from "path";
 import { getAvatarFilePath } from "@/lib/paths";
@@ -44,6 +45,6 @@ export async function GET(
       });
     }
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

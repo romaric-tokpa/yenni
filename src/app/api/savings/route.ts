@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSavings, setSaving, getTotalSavingsCumulative } from "@/lib/db";
+import { apiErrorResponse } from "@/lib/apiError";
+import { getSavings, setSaving, getTotalSavingsCumulative, getSavingsInPeriod } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {
@@ -7,13 +8,18 @@ export async function GET(req: NextRequest) {
     if (searchParams.get("cumulative") === "true") {
       return NextResponse.json(await getTotalSavingsCumulative());
     }
+    const startDate = searchParams.get("startDate");
+    const endDate = searchParams.get("endDate");
+    if (startDate && endDate) {
+      return NextResponse.json(await getSavingsInPeriod(startDate, endDate));
+    }
     const year = parseInt(
       searchParams.get("year") || String(new Date().getFullYear())
     );
     return NextResponse.json(await getSavings(year));
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
 
@@ -27,6 +33,6 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

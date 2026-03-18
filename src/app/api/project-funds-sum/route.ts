@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiErrorResponse } from "@/lib/apiError";
 import { getProjectFundsSumForMonth } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
@@ -13,6 +14,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ sum });
   } catch (err) {
     console.error("[API ERROR]", err);
-    return NextResponse.json({ error: "Erreur serveur", details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

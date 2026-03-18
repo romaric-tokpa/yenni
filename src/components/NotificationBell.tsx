@@ -1,33 +1,27 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import useSWR from "swr";
 import { useBudgetContext } from "@/contexts/BudgetContext";
-import { Bell, Check, HandCoins, Receipt, X } from "lucide-react";
+import { Bell, Check, HandCoins, Receipt, RefreshCw, X } from "lucide-react";
 import { formatCFA } from "@/lib/constants";
 import type { NotificationTodo } from "@/lib/types";
 
+const fetcher = (url: string) => fetch(url).then((r) => (r.ok ? r.json() : []));
+
 export default function NotificationBell({ showToast }: { showToast: (m: string, t?: string) => void }) {
   const { executePlannedExpense } = useBudgetContext();
-  const [todos, setTodos] = useState<NotificationTodo[]>([]);
+  const { data: todos = [], mutate } = useSWR<NotificationTodo[]>("/api/notifications", fetcher, {
+    refreshInterval: 60 * 1000,
+    revalidateOnFocus: true,
+    dedupingInterval: 10000,
+  });
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  const fetchTodos = async () => {
-    try {
-      const r = await fetch("/api/notifications");
-      if (r.ok) setTodos(await r.json());
-    } catch {
-      setTodos([]);
-    }
-  };
-
-  useEffect(() => {
-    fetchTodos();
-    const interval = setInterval(fetchTodos, 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
+  const refreshTodos = useCallback(() => mutate(), [mutate]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -37,6 +31,16 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    if (open) {
+      document.addEventListener("keydown", handleEscape);
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+  }, [open]);
+
   const handleValidatePlanned = async (id: number) => {
     setLoading(true);
     try {
@@ -44,7 +48,7 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
       if (ok) {
         showToast("Dépense planifiée validée !");
         setOpen(false);
-        await fetchTodos();
+        await refreshTodos();
       } else {
         showToast("Erreur ou déjà exécutée", "error");
       }
@@ -70,7 +74,7 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
       if (r.ok) {
         showToast("Échéance marquée comme payée !");
         setOpen(false);
-        await fetchTodos();
+        await refreshTodos();
       } else {
         const data = await r.json().catch(() => ({}));
         showToast(data.error || "Erreur", "error");
@@ -96,6 +100,105 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
   const formatDate = (d: string) =>
     new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
 
+  const overdueLoans = todos.filter((t) => t.is_overdue && (t.source_type === "loan_due" || t.source_type === "loan_overdue"));
+  const plannedOverdue = todos.filter((t) => t.source_type === "planned_expense" && t.is_overdue);
+  const loanTodos = todos.filter((t) => (t.source_type === "loan_due" || t.source_type === "loan_upcoming") && !t.is_overdue);
+  const plannedTodos = todos.filter((t) => t.source_type === "planned_expense" && !t.is_overdue);
+
+  const renderTodoItem = (t: NotificationTodo) => {
+    const dl = dueLabel(t);
+    const goTo = () => {
+      setOpen(false);
+      router.push(t.link);
+    };
+    const iconClass =
+      t.source_type === "loan_overdue"
+        ? "bg-red-500/20 text-red-400"
+        : t.source_type === "loan_upcoming"
+          ? "bg-amber-500/20 text-amber-400"
+          : t.source_type === "loan_due"
+            ? "bg-teal-500/20 text-teal-400"
+            : "bg-amber-500/20 text-amber-400";
+    const actionBtn =
+      t.source_type === "loan_overdue" && t.loan_id != null && t.schedule_number != null ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handlePaySchedule(t.loan_id!, t.schedule_number!);
+          }}
+          disabled={loading}
+          className="px-2.5 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-[11px] font-semibold transition-colors"
+        >
+          {loading ? "..." : "Payer maintenant"}
+        </button>
+      ) : t.source_type === "loan_upcoming" && t.loan_id != null ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleViewLoan(t.loan_id!);
+          }}
+          className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-semibold transition-colors"
+        >
+          Voir
+        </button>
+      ) : t.source_type === "planned_expense" ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleValidatePlanned(t.source_id);
+          }}
+          disabled={loading}
+          className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[11px] font-semibold transition-colors"
+        >
+          {loading ? "..." : "Valider"}
+        </button>
+      ) : (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handlePayLoan(t.source_id);
+          }}
+          className="px-2.5 py-1.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 text-[11px] font-semibold transition-colors"
+        >
+          Payer
+        </button>
+      );
+    return (
+      <li key={t.id} className="p-3 hover:bg-white/[0.03] transition-colors">
+        <div className="flex gap-3">
+          <button type="button" onClick={goTo} className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${iconClass} hover:opacity-80 transition-opacity`}>
+            {t.source_type === "loan_due" || t.source_type === "loan_overdue" || t.source_type === "loan_upcoming" ? (
+              <HandCoins size={18} />
+            ) : (
+              <Receipt size={18} />
+            )}
+          </button>
+          <button type="button" onClick={goTo} className="flex-1 min-w-0 text-left cursor-pointer">
+            <p className="text-xs font-medium text-slate-300 truncate">{t.title}</p>
+            <p className="text-sm font-semibold text-slate-100 truncate">{t.message}</p>
+            {t.amount != null && (
+              <p className="text-xs font-mono text-emerald-400 mt-0.5">
+                {formatCFA(t.amount)} FCFA
+              </p>
+            )}
+            <p className={`text-[10px] mt-1 ${dl.cls}`}>
+              {dl.text} · {formatDate(t.due_date)}
+            </p>
+          </button>
+          <div className="flex flex-col gap-1 shrink-0">{actionBtn}</div>
+        </div>
+      </li>
+    );
+  };
+
+  const Section = ({ title, items, accent }: { title: string; items: NotificationTodo[]; accent: string }) =>
+    items.length > 0 ? (
+      <div className="py-2 first:pt-0">
+        <p className={`px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${accent}`}>{title}</p>
+        <ul className="divide-y divide-white/5">{items.map(renderTodoItem)}</ul>
+      </div>
+    ) : null;
+
   return (
     <div className="relative" ref={panelRef}>
       <button
@@ -116,111 +219,43 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-[min(340px,calc(100vw-2rem))] glass-strong rounded-2xl border border-white/10 shadow-xl z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-[min(340px,calc(100vw-2rem))] popup-panel rounded-2xl shadow-xl z-50 overflow-hidden">
           <div className="p-3 border-b border-white/5 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
               <Bell size={16} className="text-emerald-400" />
               À faire
             </h3>
-            <button onClick={() => setOpen(false)} className="p-1 rounded-lg hover:bg-white/5 text-slate-500">
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => refreshTodos()}
+                className="p-1.5 rounded-lg hover:bg-white/5 text-slate-500 hover:text-slate-300 transition-colors"
+                title="Actualiser"
+                aria-label="Actualiser les notifications"
+              >
+                <RefreshCw size={14} />
+              </button>
+              <button onClick={() => setOpen(false)} className="p-1.5 rounded-lg hover:bg-white/5 text-slate-500" aria-label="Fermer">
+                <X size={16} />
+              </button>
+            </div>
           </div>
 
-          <div className="max-h-[min(360px,60vh)] overflow-y-auto">
+          <div className="max-h-[min(400px,65vh)] overflow-y-auto">
             {todos.length === 0 ? (
-              <div className="p-6 text-center text-slate-500 text-sm">
-                <Check size={32} className="mx-auto mb-2 text-emerald-500/50" />
-                Aucune action en attente
+              <div className="p-8 text-center text-slate-500 text-sm">
+                <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
+                  <Check size={24} className="text-emerald-500/60" />
+                </div>
+                <p className="font-medium text-slate-400">Tout est à jour</p>
+                <p className="text-xs mt-1">Aucune action en attente</p>
               </div>
             ) : (
-              <ul className="divide-y divide-white/5">
-                {todos.map((t) => {
-                  const dl = dueLabel(t);
-                  const goTo = () => {
-                    setOpen(false);
-                    router.push(t.link);
-                  };
-                  const iconClass =
-                    t.source_type === "loan_overdue"
-                      ? "bg-red-500/20 text-red-400"
-                      : t.source_type === "loan_upcoming"
-                        ? "bg-amber-500/20 text-amber-400"
-                        : t.source_type === "loan_due"
-                          ? "bg-teal-500/20 text-teal-400"
-                          : "bg-amber-500/20 text-amber-400";
-                  const actionBtn =
-                    t.source_type === "loan_overdue" && t.loan_id != null && t.schedule_number != null ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handlePaySchedule(t.loan_id!, t.schedule_number!);
-                        }}
-                        disabled={loading}
-                        className="px-2.5 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-[11px] font-semibold transition-colors"
-                      >
-                        {loading ? "..." : "Payer maintenant"}
-                      </button>
-                    ) : t.source_type === "loan_upcoming" && t.loan_id != null ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleViewLoan(t.loan_id!);
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-semibold transition-colors"
-                      >
-                        Voir
-                      </button>
-                    ) : t.source_type === "planned_expense" ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleValidatePlanned(t.source_id);
-                        }}
-                        disabled={loading}
-                        className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[11px] font-semibold transition-colors"
-                      >
-                        {loading ? "..." : "Valider"}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handlePayLoan(t.source_id);
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 text-[11px] font-semibold transition-colors"
-                      >
-                        Payer
-                      </button>
-                    );
-                  return (
-                    <li key={t.id} className="p-3 hover:bg-white/[0.03] transition-colors">
-                      <div className="flex gap-3">
-                        <button type="button" onClick={goTo} className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${iconClass} hover:opacity-80 transition-opacity`}>
-                          {t.source_type === "loan_due" || t.source_type === "loan_overdue" || t.source_type === "loan_upcoming" ? (
-                            <HandCoins size={18} />
-                          ) : (
-                            <Receipt size={18} />
-                          )}
-                        </button>
-                        <button type="button" onClick={goTo} className="flex-1 min-w-0 text-left cursor-pointer">
-                          <p className="text-xs font-medium text-slate-300 truncate">{t.title}</p>
-                          <p className="text-sm font-semibold text-slate-100 truncate">{t.message}</p>
-                          {t.amount != null && (
-                            <p className="text-xs font-mono text-emerald-400 mt-0.5">
-                              {formatCFA(t.amount)} FCFA
-                            </p>
-                          )}
-                          <p className={`text-[10px] mt-1 ${dl.cls}`}>
-                            {dl.text} · {formatDate(t.due_date)}
-                          </p>
-                        </button>
-                        <div className="flex flex-col gap-1 shrink-0">{actionBtn}</div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="p-2">
+                <Section title="En retard" items={overdueLoans} accent="text-red-400" />
+                <Section title="Dépenses planifiées en retard" items={plannedOverdue} accent="text-amber-400" />
+                <Section title="Prêts à venir" items={loanTodos} accent="text-teal-400" />
+                <Section title="Dépenses planifiées" items={plannedTodos} accent="text-emerald-400" />
+              </div>
             )}
           </div>
         </div>

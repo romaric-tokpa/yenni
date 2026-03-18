@@ -29,6 +29,15 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Variables d'environnement
+
+Copiez `.env.example` en `.env.local` et configurez :
+
+- **JWT_SECRET** (obligatoire en production) : secret pour les sessions. Minimum 32 caractères.
+  - Générer : `openssl rand -base64 32`
+- **TURSO_DATABASE_URL** et **TURSO_AUTH_TOKEN** : pour Turso (optionnel)
+- **SECURE_COOKIE=true** : si l'app est servie en HTTPS (Docker derrière reverse proxy)
+
 ## Base de données : Turso (production) ou SQLite locale (développement)
 
 L'application utilise **Turso** (SQLite hébergé) pour la production sur Vercel, et **SQLite locale** (`data/budget.db`) en développement.
@@ -62,6 +71,9 @@ Sur Vercel, les données sont stockées dans Turso et persistent entre les dépl
 Démarrer l'application avec Docker :
 
 ```bash
+# Définir JWT_SECRET (obligatoire en production)
+export JWT_SECRET=$(openssl rand -base64 32)
+
 # Build et lancement
 docker compose up -d
 

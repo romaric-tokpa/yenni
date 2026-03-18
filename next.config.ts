@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactCompiler: true,
   output: "standalone",
+  experimental: {
+    serverActions: { bodySizeLimit: "5mb" },
+  },
   serverExternalPackages: ["@libsql/client"],
   turbopack: {},
   productionBrowserSourceMaps: false,

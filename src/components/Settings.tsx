@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { formatCFA, AVAILABLE_ICONS, CATEGORY_COLORS, MONTHS_SHORT } from "@/lib/constants";
 import { BudgetConfig, FixedCharge, FixedChargePayment, Category } from "@/lib/types";
 import Icon from "./ui/Icon";
@@ -10,6 +10,8 @@ interface BudgetData {
   updateConfig: (c: BudgetConfig) => Promise<void>;
   salaries: number[];
   updateSalary: (month: number, amount: number) => Promise<void>;
+  otherIncomes: number[];
+  updateOtherIncome: (month: number, amount: number) => Promise<void>;
   fixedPayments: FixedChargePayment[];
   addFixedPayment: (p: Omit<FixedChargePayment, "id" | "created_at">) => Promise<boolean>;
   removeFixedPayment: (id: number) => Promise<void>;
@@ -32,14 +34,11 @@ function SalarySection({
   const totalAnnual = salaries.reduce((a, b) => a + b, 0);
 
   return (
-    <div className="glass-strong rounded-2xl p-4 lg:p-6 mb-4 lg:mb-5">
-      <h3 className="text-xs lg:text-sm font-semibold mb-3 lg:mb-4 flex items-center gap-2">
-        <Banknote size={16} className="text-emerald-400" /> Salaire Net Mensuel
+    <div className="rounded-lg border border-white/5 p-4 mb-4">
+      <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+        <Banknote size={14} className="text-green-500" /> Salaire
       </h3>
-      <p className="text-[10px] lg:text-xs text-slate-500 mb-3">
-        Saisis ton salaire net perçu chaque mois. Le montant peut varier.
-      </p>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 lg:gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
         {MONTHS_SHORT.map((m, i) => (
           <div
             key={i}
@@ -66,11 +65,61 @@ function SalarySection({
         ))}
       </div>
       {totalAnnual > 0 && (
-        <div className="flex justify-between mt-3 px-3 py-2 rounded-xl bg-emerald-500/10">
-          <span className="text-xs font-semibold">Total annuel</span>
-          <span className="font-mono font-bold text-emerald-400 text-xs lg:text-sm">
-            {formatCFA(totalAnnual)} FCFA
-          </span>
+        <div className="flex justify-between mt-2 px-2.5 py-1.5 rounded-lg bg-white/4 text-xs">
+          <span className="text-neutral-500">Total annuel</span>
+          <span className="font-mono font-semibold text-green-500">{formatCFA(totalAnnual)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OtherIncomeSection({
+  otherIncomes,
+  selectedMonth,
+  updateOtherIncome,
+}: {
+  otherIncomes: number[];
+  selectedMonth: number;
+  updateOtherIncome: (month: number, amount: number) => Promise<void>;
+}) {
+  const totalAnnual = otherIncomes.reduce((a, b) => a + b, 0);
+
+  return (
+    <div className="rounded-lg border border-white/5 p-4 mb-4">
+      <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+        <Coins size={14} className="text-amber-500" /> Autres revenus
+      </h3>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+        {MONTHS_SHORT.map((m, i) => (
+          <div
+            key={i}
+            className={`flex items-center gap-2 p-2 rounded-xl transition-all ${
+              i === selectedMonth
+                ? "bg-amber-500/15 ring-1 ring-amber-500/40"
+                : otherIncomes[i] > 0
+                ? "bg-white/[0.03]"
+                : "bg-white/[0.02]"
+            }`}
+          >
+            <span className={`text-[10px] lg:text-xs font-medium w-8 ${i === selectedMonth ? "text-amber-300" : "text-slate-500"}`}>
+              {m}
+            </span>
+            <input
+              type="number"
+              className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 flex-1 min-w-0"
+              placeholder="0"
+              defaultValue={otherIncomes[i] || ""}
+              key={`oth-${i}`}
+              onChange={(e) => updateOtherIncome(i, Number(e.target.value) || 0)}
+            />
+          </div>
+        ))}
+      </div>
+      {totalAnnual > 0 && (
+        <div className="flex justify-between mt-2 px-2.5 py-1.5 rounded-lg bg-white/4 text-xs">
+          <span className="text-neutral-500">Total annuel</span>
+          <span className="font-mono font-semibold text-amber-500">{formatCFA(totalAnnual)}</span>
         </div>
       )}
     </div>
@@ -84,7 +133,7 @@ export default function Settings({
   budget: BudgetData;
   showToast: (m: string, t?: string) => void;
 }) {
-  const { config, updateConfig, salaries, updateSalary, fixedPayments, addFixedPayment, removeFixedPayment, selectedMonth, selectedYear, totalFixed, resteAVivre, totalBudgetVar } = budget;
+  const { config, updateConfig, salaries, updateSalary, otherIncomes, updateOtherIncome, fixedPayments, addFixedPayment, removeFixedPayment, selectedMonth, selectedYear, totalFixed, resteAVivre, totalBudgetVar } = budget;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [showAddCharge, setShowAddCharge] = useState(false);
@@ -185,35 +234,40 @@ export default function Settings({
 
   return (
     <div className="animate-slide-up">
-      <h1 className="text-xl lg:text-2xl font-bold mb-5 lg:mb-6">Paramètres</h1>
+      <h1 className="text-lg font-semibold mb-4">Paramètres</h1>
 
-      {/* Salaire mensuel — pliant */}
       <SalarySection
         salaries={salaries}
         selectedMonth={selectedMonth}
         updateSalary={updateSalary}
       />
 
-      {/* Autres revenus + Charges fixes */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-5 mb-4 lg:mb-5">
-        {/* Autres revenus & objectifs */}
-        <div className="glass-strong rounded-2xl p-4 lg:p-6">
-          <h3 className="text-xs lg:text-sm font-semibold mb-3 lg:mb-4 flex items-center gap-2">
-            <Coins size={16} className="text-emerald-400" /> Autres Revenus &amp; Objectifs
+      {/* Autres revenus par mois */}
+      <OtherIncomeSection
+        otherIncomes={otherIncomes}
+        selectedMonth={selectedMonth}
+        updateOtherIncome={updateOtherIncome}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+        <div className="rounded-lg border border-white/5 p-4">
+          <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+            <Coins size={14} className="text-green-500" /> Fonds d&apos;urgence
           </h3>
-          <div className="grid gap-3 lg:gap-4">
+          <div className="grid gap-2">
             <div>
-              <label className="text-[10px] lg:text-xs text-slate-400 mb-1 block">Autres Revenus Fixes (FCFA)</label>
-              <input type="number" className="input-field font-mono" placeholder="Ex: 50 000"
-                defaultValue={config.otherIncome || ""} onChange={(e) => updateField("otherIncome", Number(e.target.value))} />
-            </div>
-            <div>
-              <label className="text-[10px] lg:text-xs text-slate-400 mb-1 block">Objectif Fonds d&apos;Urgence (FCFA)</label>
+              <label className="text-[10px] text-neutral-500 mb-0.5 block">Objectif (FCFA)</label>
               <input type="number" className="input-field font-mono" placeholder="Ex: 2 000 000"
                 defaultValue={config.savingsGoal || ""} onChange={(e) => updateField("savingsGoal", Number(e.target.value))} />
             </div>
             <div>
-              <label className="text-[10px] lg:text-xs text-slate-400 mb-1 block">Date cible fonds d&apos;urgence (optionnel)</label>
+              <label className="text-[10px] text-neutral-500 mb-0.5 block">Début période</label>
+              <input type="date" className="input-field"
+                defaultValue={config.savingsGoalStartDate || ""}
+                onChange={(e) => save({ ...config, savingsGoalStartDate: e.target.value || undefined })} />
+            </div>
+            <div>
+              <label className="text-[10px] text-neutral-500 mb-0.5 block">Date cible</label>
               <input type="date" className="input-field"
                 defaultValue={config.savingsGoalDeadline || ""}
                 onChange={(e) => save({ ...config, savingsGoalDeadline: e.target.value || undefined })} />
@@ -221,11 +275,10 @@ export default function Settings({
           </div>
         </div>
 
-        {/* Charges Fixes — Modèles */}
-        <div className="glass-strong rounded-2xl p-4 lg:p-6">
-          <div className="flex justify-between items-center mb-3 lg:mb-4">
-            <h3 className="text-xs lg:text-sm font-semibold flex items-center gap-2">
-              <ClipboardList size={16} className="text-red-400" /> Charges Fixes
+        <div className="rounded-lg border border-white/5 p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              <ClipboardList size={14} className="text-red-500" /> Charges fixes
             </h3>
             <button onClick={() => setShowAddCharge(true)}
               className="text-emerald-400 text-[10px] lg:text-xs font-medium flex items-center gap-1 hover:text-emerald-300 transition-colors">
@@ -368,7 +421,7 @@ export default function Settings({
       {showAddCharge && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={() => setShowAddCharge(false)}>
-          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+          <div className="popup-panel w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
@@ -412,7 +465,7 @@ export default function Settings({
       {showAddCategory && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={() => setShowAddCategory(false)}>
-          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+          <div className="popup-panel w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
@@ -466,7 +519,7 @@ export default function Settings({
       {showPayCharge && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50"
           onClick={() => setShowPayCharge(null)}>
-          <div className="glass-strong w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
+          <div className="popup-panel w-full sm:w-[440px] rounded-t-2xl sm:rounded-2xl p-6 lg:p-8 animate-slide-up min-h-[85dvh] sm:min-h-0 max-h-[95dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
