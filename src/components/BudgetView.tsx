@@ -236,7 +236,7 @@ export default function BudgetView({ budget }: { budget: BudgetData }) {
           <button onClick={handleExportPDF} disabled={exportingPdf} className="flex items-center gap-1 px-2.5 py-2 rounded-lg bg-white/5 text-neutral-400 text-xs">
             <FileDown size={12} />{exportingPdf ? "..." : "PDF"}
           </button>
-          <Link href="/settings" className="flex items-center gap-1 px-2.5 py-2 rounded-lg bg-white/5 text-neutral-400 text-xs">
+          <Link href="/settings" prefetch={false} className="flex items-center gap-1 px-2.5 py-2 rounded-lg bg-white/5 text-neutral-400 text-xs">
             <Settings size={12} />Réglages
           </Link>
         </div>
@@ -324,7 +324,7 @@ export default function BudgetView({ budget }: { budget: BudgetData }) {
           <h3 className="text-sm font-medium flex items-center gap-2">
             <FolderOpen size={14} className="text-green-500" /> Budget par catégorie — {MONTHS_FULL[selectedMonth]} {selectedYear}
           </h3>
-          <Link href="/settings" className="text-green-500 text-[10px]">Modifier catégories</Link>
+          <Link href="/settings" prefetch={false} className="text-green-500 text-[10px]">Modifier catégories</Link>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           {config.categories.map((cat: Category) => {

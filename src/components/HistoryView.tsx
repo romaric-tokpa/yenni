@@ -4,18 +4,18 @@ import useSWR, { useSWRConfig } from "swr";
 import { formatCFA, MONTHS_FULL, MONTHS_SHORT, getSelectableYears } from "@/lib/constants";
 
 const fetcher = (url: string) => fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : Promise.reject(new Error("Fetch failed"))));
-import { Expense, Income, FixedChargePayment, LoanPayment, Loan, Project, PlannedExpense } from "@/lib/types";
+import { Expense, Income, FixedChargePayment, LoanPayment, Loan, Project, PlannedExpense, WishListItem, ShoppingListItem } from "@/lib/types";
 import {
   History, ChevronLeft, ChevronRight, Calendar, RefreshCw,
   TrendingDown, TrendingUp, Landmark, HandCoins,
   Filter, ArrowDownCircle, ArrowUpCircle, Minus,
   PiggyBank, FolderOpen, CalendarClock, Banknote,
-  FileDown, FileSpreadsheet,
+  FileDown, FileSpreadsheet, Heart, ShoppingCart,
 } from "lucide-react";
 import { exportHistoryCSV, exportHistoryPDF } from "@/lib/exportUtils";
 
 type PeriodType = "day" | "month" | "quarter" | "semester" | "year";
-type TxType = "all" | "expense" | "income" | "fixed" | "loan" | "saving" | "project" | "planned";
+type TxType = "all" | "expense" | "income" | "fixed" | "loan" | "saving" | "project" | "planned" | "wish" | "shopping";
 
 interface UnifiedTx {
   id: string;
@@ -41,6 +41,8 @@ const TX_FILTERS: { key: TxType; label: string }[] = [
   { key: "saving", label: "Épargne" },
   { key: "project", label: "Projets" },
   { key: "planned", label: "Planifiées" },
+  { key: "wish", label: "Envies" },
+  { key: "shopping", label: "Courses" },
 ];
 
 const QUARTER_LABELS = ["T1 (Jan–Mar)", "T2 (Avr–Jun)", "T3 (Jul–Sep)", "T4 (Oct–Déc)"];
@@ -79,6 +81,8 @@ function txIcon(type: TxType) {
     case "saving": return <PiggyBank size={14} className="text-amber-400" />;
     case "project": return <FolderOpen size={14} className="text-emerald-400" />;
     case "planned": return <CalendarClock size={14} className="text-emerald-400" />;
+    case "wish": return <Heart size={14} className="text-pink-400" />;
+    case "shopping": return <ShoppingCart size={14} className="text-amber-400" />;
     default: return <Minus size={14} className="text-slate-400" />;
   }
 }
@@ -100,6 +104,8 @@ function txLabel(type: TxType) {
     case "saving": return "Épargne";
     case "project": return "Projet";
     case "planned": return "Planifiée";
+    case "wish": return "Envie achetée";
+    case "shopping": return "Course";
     default: return "";
   }
 }
@@ -155,6 +161,8 @@ export default function HistoryView() {
   const otherIncomes: number[] = data?.otherIncomes ?? [];
   const projects: Project[] = data?.projects ?? [];
   const plannedExpenses: PlannedExpense[] = data?.plannedExpenses ?? [];
+  const purchasedWishItems: WishListItem[] = data?.purchasedWishItems ?? [];
+  const purchasedShoppingItems: ShoppingListItem[] = data?.purchasedShoppingItems ?? [];
 
   const loansById = useMemo(() => {
     const map: Record<number, Loan> = {};
@@ -277,12 +285,44 @@ export default function HistoryView() {
         }
       });
 
+    purchasedWishItems.forEach((w) => {
+      const dateTime = w.purchased_at ? w.purchased_at.split("T") : [w.target_date, "00:00"];
+      const date = dateTime[0] || w.target_date;
+      const time = dateTime[1]?.slice(0, 5) || "00:00";
+      items.push({
+        id: `wish-${w.id}`,
+        date,
+        time,
+        description: `Envie achetée — ${w.name}`,
+        amount: w.actual_amount ?? w.estimated_amount,
+        type: "wish",
+        detail: w.category,
+        sign: "out",
+      });
+    });
+
+    purchasedShoppingItems.forEach((s) => {
+      const dateTime = s.purchased_at ? s.purchased_at.split("T") : [range.start, "00:00"];
+      const date = dateTime[0] || range.start;
+      const time = dateTime[1]?.slice(0, 5) || "00:00";
+      items.push({
+        id: `shop-${s.id}`,
+        date,
+        time,
+        description: `Course — ${s.name}`,
+        amount: s.actual_amount ?? s.estimated_amount,
+        type: "shopping",
+        detail: s.category,
+        sign: "out",
+      });
+    });
+
     items.sort((a, b) => {
       const cmp = b.date.localeCompare(a.date);
       return cmp !== 0 ? cmp : b.time.localeCompare(a.time);
     });
     return items;
-  }, [expenses, incomes, fixedPayments, loanPayments, loansById, savings, salaries, otherIncomes, loans, projects, plannedExpenses, period, relevantMonths, year, range.start, range.end]);
+  }, [expenses, incomes, fixedPayments, loanPayments, loansById, savings, salaries, otherIncomes, loans, projects, plannedExpenses, purchasedWishItems, purchasedShoppingItems, period, relevantMonths, year, range.start, range.end]);
 
   const filteredTx = useMemo(
     () => txFilter === "all" ? allTx : allTx.filter((t) => t.type === txFilter),
@@ -330,10 +370,19 @@ export default function HistoryView() {
   };
 
   const txCounts = useMemo(() => {
-    const counts: Record<TxType, number> = { all: allTx.length, expense: 0, income: 0, fixed: 0, loan: 0, saving: 0, project: 0, planned: 0 };
+    const counts: Record<TxType, number> = { all: allTx.length, expense: 0, income: 0, fixed: 0, loan: 0, saving: 0, project: 0, planned: 0, wish: 0, shopping: 0 };
     allTx.forEach((t) => { if (t.type !== "all") counts[t.type]++; });
     return counts;
   }, [allTx]);
+
+  const wishTotal = useMemo(
+    () => purchasedWishItems.reduce((s, w) => s + (w.actual_amount ?? w.estimated_amount), 0),
+    [purchasedWishItems]
+  );
+  const shoppingTotal = useMemo(
+    () => purchasedShoppingItems.reduce((s, s2) => s + (s2.actual_amount ?? s2.estimated_amount), 0),
+    [purchasedShoppingItems]
+  );
 
   return (
     <div className="animate-slide-up">
@@ -414,7 +463,7 @@ export default function HistoryView() {
         <div className="text-[11px] font-semibold text-emerald-400/90 mb-3 flex items-center gap-1.5">
           <TrendingUp size={14} /> Indicateurs de la période
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3">
           <div className="glass rounded-xl p-3 text-center">
             <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><TrendingUp size={10} /> Entrées</div>
             <div className="font-mono text-sm font-bold text-emerald-400 mt-0.5">{formatCFA(totalIn)}</div>
@@ -438,6 +487,14 @@ export default function HistoryView() {
           <div className="glass rounded-xl p-3 text-center">
             <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><FolderOpen size={10} /> Projets</div>
             <div className="font-mono text-sm font-bold text-emerald-400 mt-0.5">{formatCFA(projectsTotal)}</div>
+          </div>
+          <div className="glass rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><Heart size={10} /> Envies</div>
+            <div className="font-mono text-sm font-bold text-pink-400 mt-0.5">{formatCFA(wishTotal)}</div>
+          </div>
+          <div className="glass rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1"><ShoppingCart size={10} /> Courses</div>
+            <div className="font-mono text-sm font-bold text-amber-400 mt-0.5">{formatCFA(shoppingTotal)}</div>
           </div>
         </div>
       </div>

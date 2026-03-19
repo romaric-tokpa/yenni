@@ -177,7 +177,10 @@ export interface LoanScheduleRow {
   paid_at: string | null;
   payment_note: string;
   expense_id?: number | null;
+  paid_amount?: number | null;
 }
+
+export type ScheduleRowUpdate = Partial<Pick<LoanScheduleRow, "due_date" | "principal" | "interest" | "insurance" | "tax_interest" | "tax_insurance" | "fees" | "total_payment" | "remaining_balance" | "paid_amount">>;
 
 export interface LoanScheduleInput {
   number: number;
@@ -191,6 +194,9 @@ export interface LoanScheduleInput {
   total_payment: number;
   remaining_balance: number;
   status: "paid" | "pending";
+  paid_at?: string | null;
+  paid_amount?: number | null;
+  expense_id?: number | null;
 }
 
 export interface LoanStats {
@@ -258,6 +264,7 @@ export interface PlannedExpense {
   created_at: string;
 }
 
+/** @deprecated Utiliser WishList + WishListItem */
 export interface Wish {
   id: number;
   name: string;
@@ -268,6 +275,58 @@ export interface Wish {
   subcategory?: string | null;
   notes: string;
   status: "pending" | "purchased";
+  expense_id: number | null;
+  created_at: string;
+}
+
+/** Liste d'envies (ex: envies vêtements, envies électronique) */
+export interface WishList {
+  id: number;
+  name: string;
+  scheduled_date: string;
+  created_at: string;
+}
+
+/** Article d'une liste d'envies */
+export interface WishListItem {
+  id: number;
+  list_id: number;
+  name: string;
+  target_date: string;
+  estimated_amount: number;
+  actual_amount: number | null;
+  category: string;
+  subcategory?: string | null;
+  notes: string;
+  status: "pending" | "purchased";
+  purchased_at: string | null;
+  expense_id: number | null;
+  shop_name: string | null;
+  shop_phone: string | null;
+  shop_address: string | null;
+  shop_lat: number | null;
+  shop_lng: number | null;
+  created_at: string;
+}
+
+/** Liste de courses (ex: course nourriture, course maison) */
+export interface ShoppingList {
+  id: number;
+  name: string;
+  scheduled_date: string;
+  created_at: string;
+}
+
+/** Article d'une liste de courses */
+export interface ShoppingListItem {
+  id: number;
+  list_id: number;
+  name: string;
+  category: string;
+  estimated_amount: number;
+  actual_amount: number | null;
+  status: "pending" | "purchased";
+  purchased_at: string | null;
   expense_id: number | null;
   created_at: string;
 }
@@ -284,7 +343,7 @@ export interface CalendarEvent {
   icon?: string;
 }
 
-export type NotificationSourceType = "loan_due" | "loan_overdue" | "loan_upcoming" | "planned_expense" | "wish" | "reminder";
+export type NotificationSourceType = "loan_due" | "loan_overdue" | "loan_upcoming" | "planned_expense" | "wish" | "shopping" | "reminder";
 
 export interface NotificationTodo {
   id: string;

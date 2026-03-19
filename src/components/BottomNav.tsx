@@ -19,6 +19,7 @@ import {
   X,
   LogOut,
   Heart,
+  ShoppingCart,
 } from "lucide-react";
 
 const mainTabs = [
@@ -31,6 +32,7 @@ const mainTabs = [
 const moreTabs = [
   { href: "/savings", label: "Épargne", Icon: Landmark },
   { href: "/wishes", label: "Envies", Icon: Heart },
+  { href: "/shopping-lists", label: "Courses", Icon: ShoppingCart },
   { href: "/loans", label: "Prêts", Icon: HandCoins },
   { href: "/projects", label: "Projets", Icon: FolderKanban },
   { href: "/history", label: "Historique", Icon: History },

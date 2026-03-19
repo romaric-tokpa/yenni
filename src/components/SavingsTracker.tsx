@@ -234,6 +234,7 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
         ) : (
           <Link
             href="/settings"
+            prefetch={false}
             className="flex items-center gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs lg:text-sm hover:bg-amber-500/15 transition-colors"
           >
             <Settings size={16} />
@@ -362,6 +363,7 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
             </h3>
             <Link
               href="/projects"
+              prefetch={false}
               className="text-[10px] lg:text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
             >
               <Plus size={12} /> Voir tout
@@ -447,6 +449,7 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
           </p>
           <Link
             href="/projects"
+            prefetch={false}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/20 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/30 transition-colors"
           >
             <Plus size={14} /> Créer un projet

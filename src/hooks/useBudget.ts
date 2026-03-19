@@ -443,6 +443,16 @@ export function useBudget() {
     }
   }, [fetchLoans]);
 
+  const regenerateLoanSchedule = useCallback(async (loanId: number): Promise<boolean> => {
+    const r = await fetch(`/api/loans/${loanId}/regenerate-schedule`, { method: "POST" });
+    if (r.ok) {
+      await fetchLoans();
+      invalidateHistoryCache();
+      return true;
+    }
+    return false;
+  }, [fetchLoans]);
+
   const removeLoan = useCallback(async (id: number) => {
     const r = await fetch(`/api/loans?id=${id}`, { method: "DELETE" });
     if (r.ok) {
@@ -486,11 +496,11 @@ export function useBudget() {
   }, []);
 
   const markSchedulePaid = useCallback(
-    async (loanId: number, number: number, note?: string): Promise<boolean> => {
+    async (loanId: number, number: number, note?: string, amount?: number): Promise<boolean> => {
       const r = await fetch("/api/loan-schedule", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ loan_id: loanId, number, action: "pay", note }),
+        body: JSON.stringify({ loan_id: loanId, number, action: "pay", note, amount }),
       });
       if (r.ok) {
         await Promise.all([fetchLoans(), fetchLoanPayments(), fetchExpenses()]);
@@ -517,6 +527,27 @@ export function useBudget() {
       return false;
     },
     [fetchLoans, fetchLoanPayments, fetchExpenses]
+  );
+
+  const updateScheduleRow = useCallback(
+    async (
+      loanId: number,
+      number: number,
+      updates: { due_date?: string; principal?: number; interest?: number; insurance?: number; tax_interest?: number; tax_insurance?: number; fees?: number; total_payment?: number; remaining_balance?: number; paid_amount?: number }
+    ): Promise<LoanScheduleRow | null> => {
+      const r = await fetch("/api/loan-schedule", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loan_id: loanId, number, action: "update", updates }),
+      });
+      if (r.ok) {
+        await Promise.all([fetchLoans(), fetchExpenses()]);
+        invalidateHistoryCache();
+        return r.json();
+      }
+      return null;
+    },
+    [fetchLoans, fetchExpenses]
   );
 
   const addPlannedExpense = useCallback(async (p: Omit<PlannedExpense, "id" | "created_at" | "expense_id">) => {
@@ -783,6 +814,7 @@ export function useBudget() {
     removeFixedPayment,
     addLoan,
     updateLoan,
+    regenerateLoanSchedule,
     removeLoan,
     addLoanPayment,
     updateLoanPayment,
@@ -790,6 +822,7 @@ export function useBudget() {
     fetchSchedule,
     markSchedulePaid,
     markScheduleUnpaid,
+    updateScheduleRow,
     updateConfig,
     fetchConfig,
     updateSaving,

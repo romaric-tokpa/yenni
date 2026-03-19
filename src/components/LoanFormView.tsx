@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { formatCFA } from "@/lib/constants";
 import { generateAmortizationSchedule } from "@/lib/loan-calculator";
@@ -47,16 +47,21 @@ const LOAN_TYPES = [
 
 interface BudgetData {
   addLoan: (l: Omit<Loan, "id" | "created_at">, isExisting?: boolean, monthsPaid?: number, schedule?: import("@/lib/types").LoanScheduleInput[]) => Promise<Loan | false>;
+  updateLoan?: (id: number, u: Partial<Loan>) => Promise<void>;
+  regenerateLoanSchedule?: (loanId: number) => Promise<boolean>;
 }
 
 export default function LoanFormView({
   budget,
   showToast,
+  loan: initialLoan,
 }: {
   budget: BudgetData;
   showToast: (m: string, t?: string) => void;
+  loan?: Loan;
 }) {
-  const { addLoan } = budget;
+  const { addLoan, updateLoan, regenerateLoanSchedule } = budget;
+  const isEdit = !!initialLoan;
   const router = useRouter();
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -91,6 +96,35 @@ export default function LoanFormView({
   const isLent = type === "personal_lent";
   const typeInfo = LOAN_TYPES.find((t) => t.id === type) || LOAN_TYPES[0];
 
+  useEffect(() => {
+    if (initialLoan) {
+      setType(initialLoan.type);
+      setForm({
+        label: initialLoan.label,
+        lender_borrower: initialLoan.lender_borrower || "",
+        bank_name: initialLoan.bank_name || "",
+        agency: initialLoan.agency || "",
+        loan_number: initialLoan.loan_number || "",
+        total_amount: String(initialLoan.total_amount),
+        interest_rate: String(initialLoan.interest_rate ?? ""),
+        insurance_rate: String(initialLoan.insurance_rate ?? ""),
+        tax_rate: String(initialLoan.tax_rate ?? ""),
+        fees_amount: String(initialLoan.fees_amount ?? ""),
+        fees: String(initialLoan.fees ?? ""),
+        monthly_payment: String(initialLoan.monthly_payment ?? ""),
+        total_payments: String(initialLoan.total_payments ?? ""),
+        start_date: initialLoan.start_date || todayStr,
+        end_date: initialLoan.end_date || "",
+        next_due_date: initialLoan.next_due_date || "",
+        first_payment_date: initialLoan.first_payment_date || initialLoan.start_date || todayStr,
+        payment_day: String(initialLoan.payment_day ?? 25),
+        notes: initialLoan.notes || "",
+        isExisting: false,
+        months_paid: "",
+      });
+    }
+  }, [initialLoan]);
+
   const estimatedMonthly =
     Number(form.total_amount) > 0 &&
     Number(form.interest_rate) >= 0 &&
@@ -111,6 +145,48 @@ export default function LoanFormView({
       showToast("Remplis les champs obligatoires", "error");
       return;
     }
+
+    if (isEdit && initialLoan && updateLoan) {
+      const amt = Number(form.total_amount);
+      const payment = Number(form.monthly_payment) || 0;
+      const totalPayments = Number(form.total_payments) || 0;
+      const updates: Partial<Loan> = {
+        label: effectiveLabel,
+        lender_borrower: isBank ? (form.bank_name || form.lender_borrower) : form.lender_borrower,
+        total_amount: amt,
+        interest_rate: Number(form.interest_rate) || 0,
+        fees: Number(form.fees) || 0,
+        monthly_payment: payment,
+        start_date: form.start_date,
+        end_date: form.end_date,
+        next_due_date: form.next_due_date,
+        notes: form.notes,
+      };
+      if (isBank) {
+        updates.bank_name = form.bank_name;
+        updates.agency = form.agency;
+        updates.loan_number = form.loan_number;
+        updates.first_payment_date = form.first_payment_date;
+        updates.payment_day = Number(form.payment_day) || 25;
+        updates.total_payments = totalPayments;
+        updates.insurance_rate = Number(form.insurance_rate) || 0;
+        updates.tax_rate = Number(form.tax_rate) || 0;
+        updates.fees_amount = Number(form.fees_amount) || 0;
+      }
+      setSubmitting(true);
+      await updateLoan(initialLoan.id, updates);
+      if (isBank && regenerateLoanSchedule && (updates.total_amount != null || updates.interest_rate != null || updates.total_payments != null || updates.start_date != null || updates.first_payment_date != null || updates.payment_day != null || updates.insurance_rate != null || updates.tax_rate != null || updates.fees_amount != null)) {
+        const ok = await regenerateLoanSchedule(initialLoan.id);
+        if (ok) showToast("Prêt et tableau d'amortissement mis à jour");
+        else showToast("Prêt modifié (tableau inchangé)", "info");
+      } else {
+        showToast("Prêt modifié");
+      }
+      setSubmitting(false);
+      router.push(`/loans?view=${initialLoan.id}`);
+      return;
+    }
+
     const monthsPaid = form.isExisting ? Math.max(0, Number(form.months_paid) || 0) : 0;
     const payment = Number(form.monthly_payment) || 0;
     const totalPayments = Number(form.total_payments) || 0;
@@ -125,6 +201,7 @@ export default function LoanFormView({
     if (isBank && totalPayments > 0 && form.first_payment_date) {
       const firstDate = form.first_payment_date || form.start_date;
       const paymentDay = Math.min(31, Math.max(1, Number(form.payment_day) || 25));
+      const feesAmt = Number(form.fees_amount) || 0;
       schedule = generateAmortizationSchedule({
         totalAmount: amt,
         annualRate: Number(form.interest_rate) || 0,
@@ -134,10 +211,14 @@ export default function LoanFormView({
         paymentDay,
         insuranceRate: Number(form.insurance_rate) || 0,
         taxRate: Number(form.tax_rate) || 0,
-        feesAmount: Number(form.fees_amount) || 0,
-        alreadyPaid: monthsPaid,
+        feesAmount: feesAmt,
+        alreadyPaid: monthsPaid + (feesAmt > 0 ? 1 : 0),
       });
     }
+
+    const monthlyFromSchedule = schedule
+      ? (schedule.find((r) => r.principal > 0)?.total_payment ?? schedule[0]?.total_payment ?? 0)
+      : 0;
 
     const loanData: Omit<Loan, "id" | "created_at"> = {
       type,
@@ -147,7 +228,7 @@ export default function LoanFormView({
       remaining_amount: amt,
       interest_rate: Number(form.interest_rate) || 0,
       fees: Number(form.fees) || 0,
-      monthly_payment: payment || (schedule?.[0]?.total_payment ?? 0),
+      monthly_payment: payment || monthlyFromSchedule,
       start_date: form.start_date,
       end_date: form.end_date,
       next_due_date: form.next_due_date,
@@ -237,15 +318,17 @@ export default function LoanFormView({
           <ArrowLeft size={20} />
         </button>
         <div>
-          <h1 className="text-xl font-bold">Nouveau prêt</h1>
-          <p className="text-xs text-slate-500">Ajoute un prêt bancaire ou personnel</p>
+          <h1 className="text-xl font-bold">{isEdit ? "Modifier le prêt" : "Nouveau prêt"}</h1>
+          <p className="text-xs text-slate-500">
+            {isEdit ? "Modifie les informations du prêt" : "Ajoute un prêt bancaire ou personnel"}
+          </p>
         </div>
       </header>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Type de prêt */}
         <Section title="Type de prêt" icon={Banknote}>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3 ${isEdit ? "opacity-60 pointer-events-none" : ""}`}>
             {LOAN_TYPES.map((t) => {
               const sel = type === t.id;
               return (
@@ -404,6 +487,9 @@ export default function LoanFormView({
                     value={form.fees_amount}
                     onChange={(e) => setForm((f) => ({ ...f, fees_amount: e.target.value }))}
                   />
+                  <span className="text-[10px] text-slate-500 mt-0.5 block">
+                    Payés à la date de mise en place (1ère échéance séparée, modèle SGBCI)
+                  </span>
                 </Field>
               </>
             ) : (
@@ -485,7 +571,7 @@ export default function LoanFormView({
         </Section>
 
         {/* Import prêt en cours */}
-        {form.isExisting ? (
+        {!isEdit && form.isExisting ? (
           <Section title="Import d'un prêt en cours" icon={ChevronRight}>
             <div className="space-y-4">
               <label className="flex items-center gap-3 cursor-pointer">
@@ -528,7 +614,7 @@ export default function LoanFormView({
               </div>
             </div>
           </Section>
-        ) : (isBank && Number(form.total_payments) > 0) || (!isBank && Number(form.total_amount) > 0) ? (
+        ) : !isEdit && ((isBank && Number(form.total_payments) > 0) || (!isBank && Number(form.total_amount) > 0)) ? (
           <button
             type="button"
             onClick={() => setForm((f) => ({ ...f, isExisting: true }))}

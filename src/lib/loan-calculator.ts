@@ -23,6 +23,11 @@ export function generatePaymentDates(firstDate: string, count: number, paymentDa
   return dates;
 }
 
+/**
+ * Modèle SGBCI / PDF bancaire :
+ * - Échéance 001 : date de mise en place — frais de dossier uniquement (pas de capital)
+ * - Échéances 002 à N+1 : mensualités régulières (capital + intérêts + taxes + assurances)
+ */
 export function generateAmortizationSchedule(params: {
   totalAmount: number;
   annualRate: number;
@@ -40,6 +45,7 @@ export function generateAmortizationSchedule(params: {
     totalAmount,
     annualRate,
     months,
+    startDate,
     firstPaymentDate,
     paymentDay,
     insuranceRate = 0,
@@ -56,10 +62,31 @@ export function generateAmortizationSchedule(params: {
     : totalAmount / n;
   const monthlyInsurance = (totalAmount * (insuranceRate / 100)) / 12;
 
-  const dates = generatePaymentDates(firstPaymentDate, n, paymentDay);
+  const regularDates = generatePaymentDates(firstPaymentDate, n, paymentDay);
   const rows: LoanScheduleInput[] = [];
   let balance = totalAmount;
+  let rowNumber = 1;
 
+  // Échéance 001 : frais de dossier à la date de mise en place (comme PDF SGBCI)
+  if (feesAmount > 0) {
+    const fees = Math.round(feesAmount * (1 + feeTaxRate / 100));
+    const num = rowNumber++;
+    rows.push({
+      number: num,
+      due_date: startDate,
+      principal: 0,
+      interest: 0,
+      insurance: 0,
+      tax_interest: 0,
+      tax_insurance: 0,
+      fees,
+      total_payment: fees,
+      remaining_balance: totalAmount,
+      status: num <= alreadyPaid ? "paid" : "pending",
+    });
+  }
+
+  // Échéances régulières (capital + intérêts + taxes + assurances)
   for (let i = 0; i < n; i++) {
     const interest = Math.round(balance * r);
     let principal = Math.round(monthlyPrincipalInterest - balance * r);
@@ -68,22 +95,22 @@ export function generateAmortizationSchedule(params: {
     const insurance = Math.round(monthlyInsurance);
     const taxInterest = Math.round(interest * (taxRate / 100));
     const taxInsurance = Math.round(insurance * (taxRate / 100));
-    const fees = i === 0 && feesAmount > 0 ? Math.round(feesAmount * (1 + feeTaxRate / 100)) : 0;
-    const totalPayment = principal + interest + insurance + taxInterest + taxInsurance + fees;
+    const totalPayment = principal + interest + insurance + taxInterest + taxInsurance;
     balance = Math.max(0, balance - principal);
 
+    const num = rowNumber++;
     rows.push({
-      number: i + 1,
-      due_date: dates[i],
+      number: num,
+      due_date: regularDates[i],
       principal,
       interest,
       insurance,
       tax_interest: taxInterest,
       tax_insurance: taxInsurance,
-      fees,
+      fees: 0,
       total_payment: totalPayment,
       remaining_balance: balance,
-      status: i < alreadyPaid ? "paid" : "pending",
+      status: num <= alreadyPaid ? "paid" : "pending",
     });
   }
 
@@ -91,7 +118,7 @@ export function generateAmortizationSchedule(params: {
 }
 
 export function calculateLoanStats(
-  schedule: { total_payment: number; principal: number; interest: number; insurance: number; tax_interest: number; tax_insurance: number; fees: number; remaining_balance: number; due_date: string; status: string }[],
+  schedule: { total_payment: number; paid_amount?: number | null; principal: number; interest: number; insurance: number; tax_interest: number; tax_insurance: number; fees: number; remaining_balance: number; due_date: string; status: string }[],
   loan: { total_amount: number; monthly_payment: number },
   salary: number
 ): {
@@ -124,7 +151,7 @@ export function calculateLoanStats(
   const totalInsurance = schedule.reduce((s, r) => s + r.insurance, 0);
   const totalTaxes = schedule.reduce((s, r) => s + r.tax_interest + r.tax_insurance, 0);
   const totalFees = schedule.reduce((s, r) => s + r.fees, 0);
-  const totalRepaid = paid.reduce((s, r) => s + r.total_payment, 0);
+  const totalRepaid = paid.reduce((s, r) => s + (r.paid_amount ?? r.total_payment), 0);
   const lastPaid = paid.length > 0 ? paid[paid.length - 1] : null;
   const remainingBalance = lastPaid ? lastPaid.remaining_balance : loan.total_amount;
   const lastRow = schedule[schedule.length - 1];

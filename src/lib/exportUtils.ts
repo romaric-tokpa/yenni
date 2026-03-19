@@ -222,6 +222,8 @@ const TX_TYPE_LABELS: Record<string, string> = {
   saving: "Épargne",
   project: "Projet",
   planned: "Planifiée",
+  wish: "Envie achetée",
+  shopping: "Course",
 };
 
 export function exportHistoryCSV(

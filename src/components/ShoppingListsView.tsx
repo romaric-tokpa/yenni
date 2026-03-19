@@ -1,12 +1,11 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import Link from "next/link";
-import { formatCFA, MONTHS_FULL, getSelectableYears } from "@/lib/constants";
-import { Plus, Trash2, X, Heart, Check, Pencil, ChevronDown, ChevronRight, ChevronLeft, MapPin, Phone, Store } from "lucide-react";
+import { formatCFA } from "@/lib/constants";
+import { Plus, Trash2, X, ShoppingCart, Check, Pencil, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react";
 import Icon from "./ui/Icon";
-import type { WishList, WishListItem } from "@/lib/types";
-import type { BudgetConfig, Category, WishCategory, WishSubcategory } from "@/lib/types";
+import type { ShoppingList, ShoppingListItem } from "@/lib/types";
+import { MONTHS_FULL, getSelectableYears } from "@/lib/constants";
+import type { BudgetConfig, Category } from "@/lib/types";
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -20,75 +19,42 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
-function getMapsUrl(item: WishListItem): string | null {
-  if (item.shop_lat != null && item.shop_lng != null) {
-    return `https://www.google.com/maps?q=${item.shop_lat},${item.shop_lng}`;
-  }
-  if (item.shop_address) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.shop_address)}`;
-  }
-  return null;
-}
-
-export default function WishesView({
+export default function ShoppingListsView({
   config,
   showToast,
-  updateConfig,
   onPurchaseComplete,
 }: {
   config: BudgetConfig;
   showToast: (m: string, t?: string) => void;
-  updateConfig?: (c: BudgetConfig) => Promise<void>;
   onPurchaseComplete?: () => void;
 }) {
-  const [lists, setLists] = useState<WishList[]>([]);
-  const [itemsByList, setItemsByList] = useState<Record<number, WishListItem[]>>({});
+  const categories = config.categories ?? [];
+  const defaultCategory = categories[0]?.id || "food";
+  const [lists, setLists] = useState<ShoppingList[]>([]);
+  const [itemsByList, setItemsByList] = useState<Record<number, ShoppingListItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [showAddListModal, setShowAddListModal] = useState(false);
-  const [editingList, setEditingList] = useState<WishList | null>(null);
-  const [showAddItemModal, setShowAddItemModal] = useState<WishList | null>(null);
-  const [showPurchaseModal, setShowPurchaseModal] = useState<WishListItem | null>(null);
-  const [editingItem, setEditingItem] = useState<WishListItem | null>(null);
+  const [editingList, setEditingList] = useState<ShoppingList | null>(null);
+  const [showAddItemModal, setShowAddItemModal] = useState<ShoppingList | null>(null);
+  const [showPurchaseModal, setShowPurchaseModal] = useState<ShoppingListItem | null>(null);
+  const [editingItem, setEditingItem] = useState<ShoppingListItem | null>(null);
   const [purchaseAmount, setPurchaseAmount] = useState("");
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const [highlightedId, setHighlightedId] = useState<number | null>(null);
-
-  const wishCategoriesRaw = (config.wishCategories ?? []).length > 0
-    ? config.wishCategories!
-    : config.categories.map((c: Category) => ({ id: c.id, label: c.label, icon: c.icon, color: c.color, subcategories: [] }));
-  const wishCategories = wishCategoriesRaw.length > 0
-    ? wishCategoriesRaw
-    : [{ id: "misc", label: "Divers", icon: "heart", color: "#EC4899", subcategories: [] }];
-  const defaultCategory = wishCategories[0]?.id || "misc";
 
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [listForm, setListForm] = useState({ name: "", scheduled_date: "" });
-  const [itemForm, setItemForm] = useState({
-    name: "",
-    target_date: "",
-    estimated_amount: "",
-    category: defaultCategory,
-    subcategory: "" as string | null,
-    notes: "",
-    shop_name: "",
-    shop_phone: "",
-    shop_address: "",
-    shop_lat: "" as string | number,
-    shop_lng: "" as string | number,
-  });
+  const [itemForm, setItemForm] = useState({ name: "", estimated_amount: "", category: defaultCategory });
 
   const fetchLists = useCallback(async () => {
     try {
-      const r = await fetch(`/api/wish-lists?month=${selectedMonth}&year=${selectedYear}`);
+      const r = await fetch(`/api/shopping-lists?month=${selectedMonth}&year=${selectedYear}`);
       if (r.ok) {
         const data = await r.json();
         setLists(data);
         for (const list of data) {
-          const ir = await fetch(`/api/wish-lists/${list.id}/items`);
+          const ir = await fetch(`/api/shopping-lists/${list.id}/items`);
           if (ir.ok) {
             const items = await ir.json();
             setItemsByList((prev) => ({ ...prev, [list.id]: items }));
@@ -106,28 +72,8 @@ export default function WishesView({
     fetchLists();
   }, [fetchLists]);
 
-  const defaultScheduledDate = `${selectedYear}-${String(selectedMonth + 1).padStart(2, "0")}-15`;
-
-  useEffect(() => {
-    const id = searchParams.get("highlight");
-    if (id && lists.length > 0) {
-      const numId = parseInt(id, 10);
-      for (const list of lists) {
-        const items = itemsByList[list.id] ?? [];
-        const found = items.find((x) => x.id === numId);
-        if (found) {
-          setExpandedIds((prev) => new Set([...prev, list.id]));
-          setHighlightedId(numId);
-          router.replace("/wishes", { scroll: false });
-          const t = setTimeout(() => setHighlightedId(null), 3000);
-          return () => clearTimeout(t);
-        }
-      }
-    }
-  }, [searchParams, lists, itemsByList, router]);
-
   const fetchItems = useCallback(async (listId: number) => {
-    const r = await fetch(`/api/wish-lists/${listId}/items`);
+    const r = await fetch(`/api/shopping-lists/${listId}/items`);
     if (r.ok) {
       const items = await r.json();
       setItemsByList((prev) => ({ ...prev, [listId]: items }));
@@ -143,32 +89,7 @@ export default function WishesView({
     });
   };
 
-  const getDueLabel = (dateStr: string) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const due = new Date(dateStr);
-    due.setHours(0, 0, 0, 0);
-    const diff = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    if (diff < 0) return { text: "En retard", cls: "text-red-400" };
-    if (diff === 0) return { text: "Aujourd'hui", cls: "text-amber-400" };
-    if (diff === 1) return { text: "Demain", cls: "text-amber-300" };
-    if (diff <= 7) return { text: `Dans ${diff}j`, cls: "text-blue-400" };
-    return { text: `Dans ${diff}j`, cls: "text-slate-400" };
-  };
-
-  const resetItemForm = () => ({
-    name: "",
-    target_date: "",
-    estimated_amount: "",
-    category: defaultCategory,
-    subcategory: null as string | null,
-    notes: "",
-    shop_name: "",
-    shop_phone: "",
-    shop_address: "",
-    shop_lat: "" as string | number,
-    shop_lng: "" as string | number,
-  });
+  const defaultScheduledDate = `${selectedYear}-${String(selectedMonth + 1).padStart(2, "0")}-15`;
 
   const handleAddList = async () => {
     if (!listForm.name || !listForm.scheduled_date) {
@@ -176,7 +97,7 @@ export default function WishesView({
       return;
     }
     try {
-      const r = await fetch("/api/wish-lists", {
+      const r = await fetch("/api/shopping-lists", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(listForm),
@@ -197,31 +118,23 @@ export default function WishesView({
 
   const handleAddItem = async () => {
     if (!showAddItemModal) return;
-    if (!itemForm.name || !itemForm.target_date || itemForm.estimated_amount === "" || Number(itemForm.estimated_amount) < 0) {
-      showToast("Nom, date prévue et budget requis", "error");
+    if (!itemForm.name || itemForm.estimated_amount === "" || Number(itemForm.estimated_amount) < 0) {
+      showToast("Nom et budget requis", "error");
       return;
     }
     try {
-      const r = await fetch(`/api/wish-lists/${showAddItemModal.id}/items`, {
+      const r = await fetch(`/api/shopping-lists/${showAddItemModal.id}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: itemForm.name,
-          target_date: itemForm.target_date,
           estimated_amount: Number(itemForm.estimated_amount),
           category: itemForm.category,
-          subcategory: itemForm.subcategory || null,
-          notes: itemForm.notes,
-          shop_name: itemForm.shop_name || null,
-          shop_phone: itemForm.shop_phone || null,
-          shop_address: itemForm.shop_address || null,
-          shop_lat: itemForm.shop_lat !== "" ? Number(itemForm.shop_lat) : null,
-          shop_lng: itemForm.shop_lng !== "" ? Number(itemForm.shop_lng) : null,
         }),
       });
       if (r.ok) {
-        showToast("Envie ajoutée !");
-        setItemForm(resetItemForm());
+        showToast("Article ajouté !");
+        setItemForm({ name: "", estimated_amount: "", category: defaultCategory });
         setShowAddItemModal(null);
         await fetchItems(showAddItemModal.id);
       } else {
@@ -240,7 +153,7 @@ export default function WishesView({
       return;
     }
     try {
-      const r = await fetch(`/api/wish-lists/${showPurchaseModal.list_id}/items/${showPurchaseModal.id}`, {
+      const r = await fetch(`/api/shopping-lists/${showPurchaseModal.list_id}/items/${showPurchaseModal.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "purchase", actual_amount: amount }),
@@ -259,9 +172,9 @@ export default function WishesView({
     }
   };
 
-  const handleUpdateItem = async (listId: number, itemId: number, updates: Partial<WishListItem>) => {
+  const handleUpdateItem = async (listId: number, itemId: number, updates: Partial<ShoppingListItem>) => {
     try {
-      const r = await fetch(`/api/wish-lists/${listId}/items/${itemId}`, {
+      const r = await fetch(`/api/shopping-lists/${listId}/items/${itemId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -278,9 +191,9 @@ export default function WishesView({
     }
   };
 
-  const handleUpdateList = async (id: number, updates: Partial<WishList>) => {
+  const handleUpdateList = async (id: number, updates: Partial<ShoppingList>) => {
     try {
-      const r = await fetch(`/api/wish-lists/${id}`, {
+      const r = await fetch(`/api/shopping-lists/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -298,26 +211,15 @@ export default function WishesView({
   };
 
   const handleDeleteList = async (id: number) => {
-    await fetch(`/api/wish-lists/${id}`, { method: "DELETE" });
+    await fetch(`/api/shopping-lists/${id}`, { method: "DELETE" });
     showToast("Liste supprimée", "info");
     await fetchLists();
   };
 
   const handleDeleteItem = async (listId: number, itemId: number) => {
-    await fetch(`/api/wish-lists/${listId}/items/${itemId}`, { method: "DELETE" });
+    await fetch(`/api/shopping-lists/${listId}/items/${itemId}`, { method: "DELETE" });
     showToast("Article supprimé", "info");
     await fetchItems(listId);
-  };
-
-  const captureGeolocation = (callback: (lat: number, lng: number) => void) => {
-    if (!navigator.geolocation) {
-      showToast("Géolocalisation non supportée", "error");
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => callback(pos.coords.latitude, pos.coords.longitude),
-      () => showToast("Impossible d'obtenir la position", "error")
-    );
   };
 
   if (loading) {
@@ -328,28 +230,18 @@ export default function WishesView({
     );
   }
 
-  const totalPending = lists.reduce((s, l) => s + (itemsByList[l.id] ?? []).filter((i) => i.status === "pending").length, 0);
-  const totalPurchased = lists.reduce((s, l) => s + (itemsByList[l.id] ?? []).filter((i) => i.status === "purchased").length, 0);
-
   return (
     <div className="animate-slide-up">
       <div className="flex flex-col gap-4 mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-xl lg:text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Heart size={24} className="text-pink-400" />
-              Liste des envies
+              <ShoppingCart size={24} className="text-amber-400" />
+              Listes de courses
             </h1>
             <p className="text-neutral-500 text-xs lg:text-sm mt-1">
-              {lists.length} liste{lists.length !== 1 ? "s" : ""} · {totalPending} en attente · {totalPurchased} achetées — {MONTHS_FULL[selectedMonth]} {selectedYear}
+              {lists.length} liste{lists.length !== 1 ? "s" : ""} — {MONTHS_FULL[selectedMonth]} {selectedYear}
             </p>
-            {(config.wishCategories ?? []).length === 0 && (
-              <p className="text-[10px] text-slate-500 mt-1">
-                <Link href="/settings" prefetch={false} className="text-pink-400/80 hover:text-pink-400 underline">
-                  Définir des catégories d&apos;envies personnalisées
-                </Link>
-              </p>
-            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5">
@@ -387,11 +279,12 @@ export default function WishesView({
         </button>
           </div>
         </div>
+      </div>
 
       {lists.length === 0 ? (
         <div className="glass-strong rounded-2xl py-16 text-center text-slate-500">
-          <Heart size={48} className="mx-auto mb-3 opacity-80" />
-          <p className="text-sm">Aucune liste d&apos;envies</p>
+          <ShoppingCart size={48} className="mx-auto mb-3 opacity-80" />
+          <p className="text-sm">Aucune liste de courses</p>
           <button
             onClick={() => { setShowAddListModal(true); setListForm({ name: "", scheduled_date: defaultScheduledDate }); }}
             className="mt-4 btn-primary px-5 py-2.5 rounded-lg text-sm font-medium inline-flex items-center gap-2"
@@ -429,8 +322,8 @@ export default function WishesView({
                   </div>
                   <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={(e) => { e.stopPropagation(); setShowAddItemModal(list); setItemForm(resetItemForm()); }}
-                      className="px-3 py-1.5 rounded-lg bg-pink-500/20 text-pink-300 text-xs font-medium flex items-center gap-1"
+                      onClick={(e) => { e.stopPropagation(); setShowAddItemModal(list); setItemForm({ name: "", estimated_amount: "", category: defaultCategory }); }}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 text-xs font-medium flex items-center gap-1"
                     >
                       <Plus size={14} />
                       Article
@@ -446,71 +339,50 @@ export default function WishesView({
 
                 {isExpanded && (
                   <div className="border-t border-white/5 p-4 space-y-4">
+                    {/* Articles à acheter */}
                     {pending.length > 0 && (
                       <div>
                         <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide mb-2">À acheter</p>
                         <div className="space-y-2">
                           {pending.map((item) => {
-                            const cat = wishCategories.find((c) => c.id === (item.category || "misc")) ?? { label: item.category || "Divers", icon: "heart", color: "#EC4899" };
-                            const dl = getDueLabel(item.target_date);
-                            const isHighlighted = highlightedId === item.id;
-                            const mapsUrl = getMapsUrl(item);
+                            const cat = categories.find((c) => c.id === (item.category || "food")) ?? { label: item.category || "Alimentation", icon: "utensils", color: "#f59e0b" };
                             return (
-                              <div
-                                key={item.id}
-                                className={`rounded-lg p-3 glass border border-white/5 flex flex-col sm:flex-row sm:items-center gap-3 transition-colors ${
-                                  isHighlighted ? "ring-2 ring-pink-500/50 bg-pink-500/20" : ""
-                                }`}
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <p className="font-medium text-slate-400 truncate">{item.name}</p>
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ backgroundColor: `${cat.color}20`, color: cat.color }}>
-                                      <Icon name={cat.icon} size={10} />
-                                      {cat.label}
-                                    </span>
-                                  </div>
-                                  <p className="text-[10px] text-slate-500 mt-0.5">
-                                    Budget : <span className="font-mono text-pink-400">{formatCFA(item.estimated_amount)}</span>
-                                    {" · "}
-                                    {new Date(item.target_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}
-                                    {" · "}
-                                    <span className={dl.cls}>{dl.text}</span>
-                                  </p>
-                                  {(item.shop_name || item.shop_phone || item.shop_address) && (
-                                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px] text-slate-500">
-                                      {item.shop_name && <span className="flex items-center gap-1"><Store size={10} />{item.shop_name}</span>}
-                                      {item.shop_phone && <a href={`tel:${item.shop_phone}`} className="flex items-center gap-1 hover:text-pink-400"><Phone size={10} />{item.shop_phone}</a>}
-                                      {mapsUrl && (
-                                        <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-pink-400 hover:underline">
-                                          <MapPin size={10} /> Voir sur la carte
-                                        </a>
-                                      )}
-                                    </div>
-                                  )}
+                            <div key={item.id} className="rounded-lg p-3 glass border border-white/5 flex flex-col sm:flex-row sm:items-center gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="font-medium text-slate-400 truncate">{item.name}</p>
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ backgroundColor: `${cat.color}20`, color: cat.color }}>
+                                    <Icon name={cat.icon} size={10} />
+                                    {cat.label}
+                                  </span>
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <button
-                                    onClick={() => { setShowPurchaseModal(item); setPurchaseAmount(""); }}
-                                    className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-1"
-                                  >
-                                    <Check size={14} />
-                                    Acheté
-                                  </button>
-                                  <button onClick={() => setEditingItem(item)} className="p-2 rounded-lg hover:bg-white/5 text-slate-500">
-                                    <Pencil size={16} />
-                                  </button>
-                                  <button onClick={() => handleDeleteItem(list.id, item.id)} className="p-2 rounded-lg hover:bg-red-500/10 text-slate-500 hover:text-red-400">
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
+                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                  Budget : <span className="font-mono text-amber-400">{formatCFA(item.estimated_amount)}</span>
+                                  {" · "}Ajouté le {formatDateTime(item.created_at)}
+                                </p>
                               </div>
-                            );
-                          })}
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  onClick={() => { setShowPurchaseModal(item); setPurchaseAmount(""); }}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-1"
+                                >
+                                  <Check size={14} />
+                                  Acheté
+                                </button>
+                                <button onClick={() => setEditingItem(item)} className="p-2 rounded-lg hover:bg-white/5 text-slate-500">
+                                  <Pencil size={16} />
+                                </button>
+                                <button onClick={() => handleDeleteItem(list.id, item.id)} className="p-2 rounded-lg hover:bg-red-500/10 text-slate-500 hover:text-red-400">
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          );})}
                         </div>
                       </div>
                     )}
 
+                    {/* Articles achetés */}
                     {purchased.length > 0 && (
                       <div>
                         <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide mb-2">Achetés</p>
@@ -520,7 +392,7 @@ export default function WishesView({
                             const diff = actual - item.estimated_amount;
                             const diffCls = diff > 0 ? "text-red-400" : diff < 0 ? "text-emerald-400" : "text-slate-500";
                             const diffLabel = diff > 0 ? `+${formatCFA(diff)}` : diff < 0 ? formatCFA(diff) : "0";
-                            const cat = wishCategories.find((c) => c.id === (item.category || "misc")) ?? { label: item.category || "Divers", icon: "heart", color: "#EC4899" };
+                            const cat = categories.find((c) => c.id === (item.category || "food")) ?? { label: item.category || "Alimentation", icon: "utensils", color: "#f59e0b" };
                             return (
                               <div key={item.id} className="rounded-lg p-3 glass border border-white/5 opacity-90">
                                 <div className="flex justify-between items-start">
@@ -552,7 +424,7 @@ export default function WishesView({
 
                     {items.length === 0 && (
                       <p className="text-center text-slate-500 text-sm py-4">
-                        Aucun article. <button onClick={() => { setShowAddItemModal(list); setItemForm(resetItemForm()); }} className="text-pink-400 hover:underline">Ajouter</button>
+                        Aucun article. <button onClick={() => { setShowAddItemModal(list); setItemForm({ name: "", estimated_amount: "", category: defaultCategory }); }} className="text-amber-400 hover:underline">Ajouter</button>
                       </p>
                     )}
 
@@ -578,15 +450,15 @@ export default function WishesView({
           <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
-                <Heart size={18} className="text-pink-400" />
-                Nouvelle liste d&apos;envies
+                <ShoppingCart size={18} className="text-amber-400" />
+                Nouvelle liste
               </h2>
               <button onClick={() => setShowAddListModal(false)} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
             </div>
             <div className="grid gap-4">
               <div>
                 <label className="text-xs text-neutral-500 mb-1.5 block">Nom de la liste *</label>
-                <input className="input-field" placeholder="Ex: Vêtements, Électronique" value={listForm.name} onChange={(e) => setListForm({ ...listForm, name: e.target.value })} />
+                <input className="input-field" placeholder="Ex: Course nourriture, Course maison" value={listForm.name} onChange={(e) => setListForm({ ...listForm, name: e.target.value })} />
               </div>
               <div>
                 <label className="text-xs text-neutral-500 mb-1.5 block">Date prévue *</label>
@@ -609,24 +481,20 @@ export default function WishesView({
           <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="text-base font-bold flex items-center gap-2">
-                <Plus size={18} className="text-pink-400" />
-                Ajouter une envie — {showAddItemModal.name}
+                <Plus size={18} className="text-amber-400" />
+                Ajouter un article — {showAddItemModal.name}
               </h2>
               <button onClick={() => setShowAddItemModal(null)} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
             </div>
             <div className="grid gap-4">
               <div>
                 <label className="text-xs text-neutral-500 mb-1.5 block">Article *</label>
-                <input className="input-field" placeholder="Ex: T-shirt, Casque" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Date prévisionnelle d&apos;achat *</label>
-                <input type="date" className="input-field" value={itemForm.target_date} onChange={(e) => setItemForm({ ...itemForm, target_date: e.target.value })} />
+                <input className="input-field" placeholder="Ex: Riz, Lait, Pain" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} />
               </div>
               <div>
                 <label className="text-xs text-neutral-500 mb-1.5 block">Catégorie *</label>
                 <select className="input-field" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })}>
-                  {wishCategories.map((c) => (
+                  {categories.length === 0 ? <option value="food">Alimentation</option> : categories.map((c) => (
                     <option key={c.id} value={c.id}>{c.label}</option>
                   ))}
                 </select>
@@ -634,44 +502,6 @@ export default function WishesView({
               <div>
                 <label className="text-xs text-neutral-500 mb-1.5 block">Budget prévu (FCFA) *</label>
                 <input type="number" className="input-field font-mono" placeholder="0" value={itemForm.estimated_amount} onChange={(e) => setItemForm({ ...itemForm, estimated_amount: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Notes</label>
-                <input className="input-field" placeholder="Optionnel" value={itemForm.notes} onChange={(e) => setItemForm({ ...itemForm, notes: e.target.value })} />
-              </div>
-              <div className="border-t border-white/10 pt-4 mt-2">
-                <p className="text-xs font-medium text-slate-400 mb-3">Boutique cible</p>
-                <div className="grid gap-3">
-                  <div>
-                    <label className="text-[10px] text-neutral-500 mb-1 block">Nom de la boutique</label>
-                    <input className="input-field" placeholder="Ex: Zara, Apple Store" value={itemForm.shop_name} onChange={(e) => setItemForm({ ...itemForm, shop_name: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-neutral-500 mb-1 block">Téléphone</label>
-                    <input type="tel" className="input-field" placeholder="+225 07 00 00 00 00" value={itemForm.shop_phone} onChange={(e) => setItemForm({ ...itemForm, shop_phone: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-neutral-500 mb-1 block">Adresse</label>
-                    <input className="input-field" placeholder="Adresse ou lieu" value={itemForm.shop_address} onChange={(e) => setItemForm({ ...itemForm, shop_address: e.target.value })} />
-                  </div>
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <label className="text-[10px] text-neutral-500 mb-1 block">Latitude</label>
-                      <input type="number" step="any" className="input-field font-mono" placeholder="5.123" value={itemForm.shop_lat} onChange={(e) => setItemForm({ ...itemForm, shop_lat: e.target.value })} />
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-[10px] text-neutral-500 mb-1 block">Longitude</label>
-                      <input type="number" step="any" className="input-field font-mono" placeholder="-4.456" value={itemForm.shop_lng} onChange={(e) => setItemForm({ ...itemForm, shop_lng: e.target.value })} />
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => captureGeolocation((lat, lng) => setItemForm((f) => ({ ...f, shop_lat: lat, shop_lng: lng })))}
-                    className="text-xs text-pink-400 hover:text-pink-300 flex items-center gap-1"
-                  >
-                    <MapPin size={12} /> Utiliser ma position actuelle
-                  </button>
-                </div>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -723,15 +553,13 @@ export default function WishesView({
 
       {/* Modal Modifier article */}
       {editingItem && (
-        <EditWishItemModal
+        <EditItemModal
           item={editingItem}
-          wishCategories={wishCategories}
+          categories={categories}
           onSave={(updates) => handleUpdateItem(editingItem.list_id, editingItem.id, updates)}
           onCancel={() => setEditingItem(null)}
-          onCaptureGeolocation={captureGeolocation}
         />
       )}
-      </div>
     </div>
   );
 }
@@ -741,8 +569,8 @@ function EditListModal({
   onSave,
   onCancel,
 }: {
-  list: WishList;
-  onSave: (updates: Partial<WishList>) => void;
+  list: ShoppingList;
+  onSave: (updates: Partial<ShoppingList>) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(list.name);
@@ -753,7 +581,7 @@ function EditListModal({
       <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-base font-bold flex items-center gap-2">
-            <Pencil size={18} className="text-pink-400" />
+            <Pencil size={18} className="text-amber-400" />
             Modifier la liste
           </h2>
           <button onClick={onCancel} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
@@ -779,36 +607,27 @@ function EditListModal({
   );
 }
 
-function EditWishItemModal({
+function EditItemModal({
   item,
-  wishCategories,
+  categories,
   onSave,
   onCancel,
-  onCaptureGeolocation,
 }: {
-  item: WishListItem;
-  wishCategories: WishCategory[];
-  onSave: (updates: Partial<WishListItem>) => void;
+  item: ShoppingListItem;
+  categories: Category[];
+  onSave: (updates: Partial<ShoppingListItem>) => void;
   onCancel: () => void;
-  onCaptureGeolocation: (cb: (lat: number, lng: number) => void) => void;
 }) {
   const [name, setName] = useState(item.name);
-  const [target_date, setTargetDate] = useState(item.target_date);
-  const [category, setCategory] = useState(item.category || "misc");
+  const [category, setCategory] = useState(item.category || "food");
   const [estimated_amount, setEstimatedAmount] = useState(String(item.estimated_amount));
-  const [notes, setNotes] = useState(item.notes || "");
-  const [shop_name, setShopName] = useState(item.shop_name || "");
-  const [shop_phone, setShopPhone] = useState(item.shop_phone || "");
-  const [shop_address, setShopAddress] = useState(item.shop_address || "");
-  const [shop_lat, setShopLat] = useState(item.shop_lat != null ? String(item.shop_lat) : "");
-  const [shop_lng, setShopLng] = useState(item.shop_lng != null ? String(item.shop_lng) : "");
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={onCancel}>
       <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-base font-bold flex items-center gap-2">
-            <Pencil size={18} className="text-pink-400" />
+            <Pencil size={18} className="text-amber-400" />
             Modifier l&apos;article
           </h2>
           <button onClick={onCancel} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
@@ -819,13 +638,9 @@ function EditWishItemModal({
             <input className="input-field" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <label className="text-xs text-neutral-500 mb-1.5 block">Date prévisionnelle d&apos;achat *</label>
-            <input type="date" className="input-field" value={target_date} onChange={(e) => setTargetDate(e.target.value)} />
-          </div>
-          <div>
             <label className="text-xs text-neutral-500 mb-1.5 block">Catégorie *</label>
             <select className="input-field" value={category} onChange={(e) => setCategory(e.target.value)}>
-              {wishCategories.map((c) => (
+              {categories.length === 0 ? <option value="food">Alimentation</option> : categories.map((c) => (
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
@@ -834,64 +649,10 @@ function EditWishItemModal({
             <label className="text-xs text-neutral-500 mb-1.5 block">Budget prévu (FCFA) *</label>
             <input type="number" className="input-field font-mono" value={estimated_amount} onChange={(e) => setEstimatedAmount(e.target.value)} />
           </div>
-          <div>
-            <label className="text-xs text-neutral-500 mb-1.5 block">Notes</label>
-            <input className="input-field" value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-          <div className="border-t border-white/10 pt-4 mt-2">
-            <p className="text-xs font-medium text-slate-400 mb-3">Boutique cible</p>
-            <div className="grid gap-3">
-              <div>
-                <label className="text-[10px] text-neutral-500 mb-1 block">Nom de la boutique</label>
-                <input className="input-field" value={shop_name} onChange={(e) => setShopName(e.target.value)} />
-              </div>
-              <div>
-                <label className="text-[10px] text-neutral-500 mb-1 block">Téléphone</label>
-                <input type="tel" className="input-field" value={shop_phone} onChange={(e) => setShopPhone(e.target.value)} />
-              </div>
-              <div>
-                <label className="text-[10px] text-neutral-500 mb-1 block">Adresse</label>
-                <input className="input-field" value={shop_address} onChange={(e) => setShopAddress(e.target.value)} />
-              </div>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="text-[10px] text-neutral-500 mb-1 block">Latitude</label>
-                  <input type="number" step="any" className="input-field font-mono" value={shop_lat} onChange={(e) => setShopLat(e.target.value)} />
-                </div>
-                <div className="flex-1">
-                  <label className="text-[10px] text-neutral-500 mb-1 block">Longitude</label>
-                  <input type="number" step="any" className="input-field font-mono" value={shop_lng} onChange={(e) => setShopLng(e.target.value)} />
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onCaptureGeolocation((lat, lng) => { setShopLat(String(lat)); setShopLng(String(lng)); })}
-                className="text-xs text-pink-400 hover:text-pink-300 flex items-center gap-1"
-              >
-                <MapPin size={12} /> Utiliser ma position actuelle
-              </button>
-            </div>
-          </div>
         </div>
         <div className="flex gap-3 mt-6">
           <button onClick={onCancel} className="flex-1 min-h-[44px] py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium">Annuler</button>
-          <button
-            onClick={() =>
-              onSave({
-                name,
-                target_date,
-                category,
-                estimated_amount: Number(estimated_amount) || 0,
-                notes,
-                shop_name: shop_name || null,
-                shop_phone: shop_phone || null,
-                shop_address: shop_address || null,
-                shop_lat: shop_lat ? Number(shop_lat) : null,
-                shop_lng: shop_lng ? Number(shop_lng) : null,
-              })
-            }
-            className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5"
-          >
+          <button onClick={() => onSave({ name, category, estimated_amount: Number(estimated_amount) || 0 })} className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
             <Check size={16} /> Enregistrer
           </button>
         </div>

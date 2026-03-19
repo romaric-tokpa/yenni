@@ -58,8 +58,9 @@ interface BudgetData {
   updateLoanPayment: (id: number, u: Partial<Pick<LoanPayment, "amount" | "fees" | "date" | "time" | "notes">>) => Promise<boolean>;
   removeLoanPayment: (id: number) => Promise<void>;
   fetchSchedule: (loanId: number) => Promise<import("@/lib/types").LoanScheduleRow[]>;
-  markSchedulePaid: (loanId: number, number: number, note?: string) => Promise<boolean>;
+  markSchedulePaid: (loanId: number, number: number, note?: string, amount?: number) => Promise<boolean>;
   markScheduleUnpaid: (loanId: number, number: number) => Promise<boolean>;
+  updateScheduleRow: (loanId: number, number: number, updates: Record<string, unknown>) => Promise<import("@/lib/types").LoanScheduleRow | null>;
   monthLoanPayments: number;
   totalDebt: number;
   config: { salary?: number };
@@ -78,7 +79,7 @@ export default function LoansView({
   const {
     loans, loanPayments, addLoan, removeLoan,
     addLoanPayment, updateLoanPayment, removeLoanPayment,
-    fetchSchedule, markSchedulePaid, markScheduleUnpaid,
+    fetchSchedule, markSchedulePaid, markScheduleUnpaid, updateScheduleRow,
     monthLoanPayments, totalDebt, config, salaries, selectedMonth, selectedYear,
   } = budget;
 
@@ -89,6 +90,7 @@ export default function LoansView({
   const [analysisLoanId, setAnalysisLoanId] = useState<number | null>(null);
   const [analysisSchedule, setAnalysisSchedule] = useState<import("@/lib/types").LoanScheduleRow[]>([]);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisExpanded, setAnalysisExpanded] = useState(true);
   const analysisRef = useRef<HTMLDivElement>(null);
 
   const searchParams = useSearchParams();
@@ -105,6 +107,7 @@ export default function LoansView({
       const loan = loans.find((l) => l.id === id);
       if (loan && loan.type === "bank") {
         setAnalysisLoanId(id);
+        setAnalysisExpanded(true);
         router.replace("/loans", { scroll: false });
       }
     } else if (payId && loans.length > 0) {
@@ -113,6 +116,7 @@ export default function LoansView({
       if (loan) {
         if (loan.type === "bank" && payNumber) {
           setAnalysisLoanId(id);
+          setAnalysisExpanded(true);
           router.replace("/loans", { scroll: false });
         } else {
           setShowPayModal(loan);
@@ -160,8 +164,26 @@ export default function LoansView({
     notes: "",
   });
 
-  const activeLoans = useMemo(() => loans.filter((l) => l.status === "active"), [loans]);
-  const completedLoans = useMemo(() => loans.filter((l) => l.status === "completed"), [loans]);
+  const activeLoans = useMemo(
+    () =>
+      loans
+        .filter((l) => l.status === "active")
+        .sort((a, b) => {
+          const order = { personal_lent: 0, personal_borrowed: 1, bank: 2 };
+          return (order[a.type] ?? 2) - (order[b.type] ?? 2);
+        }),
+    [loans]
+  );
+  const completedLoans = useMemo(
+    () =>
+      loans
+        .filter((l) => l.status === "completed")
+        .sort((a, b) => {
+          const order = { personal_lent: 0, personal_borrowed: 1, bank: 2 };
+          return (order[a.type] ?? 2) - (order[b.type] ?? 2);
+        }),
+    [loans]
+  );
 
   const loanPaymentsMap = useMemo(() => {
     const map: Record<number, LoanPayment[]> = {};
@@ -364,9 +386,19 @@ export default function LoansView({
                   </div>
 
                   <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => router.push(`/loans/${loan.id}/edit`)}
+                      className="py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors bg-slate-500/20 text-slate-300 hover:bg-slate-500/30"
+                      title="Modifier"
+                    >
+                      <Pencil size={14} /> Modifier
+                    </button>
                     {loan.type === "bank" && (
                       <button
-                        onClick={() => setAnalysisLoanId(loan.id)}
+                        onClick={() => {
+                          setAnalysisLoanId(loan.id);
+                          setAnalysisExpanded(true);
+                        }}
                         className="py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30"
                       >
                         <BarChart3 size={14} /> Analyse
@@ -500,6 +532,13 @@ export default function LoansView({
                       <span className="text-xs flex-1 truncate">{loan.label}</span>
                       <span className="font-mono text-xs text-slate-500 line-through">{formatCFA(loan.total_amount)}</span>
                       <CircleCheck size={14} className="text-emerald-400" />
+                      <button
+                        onClick={() => router.push(`/loans/${loan.id}/edit`)}
+                        className="text-slate-500 hover:text-slate-300 transition-colors p-1"
+                        title="Modifier"
+                      >
+                        <Pencil size={12} />
+                      </button>
                       <button onClick={async () => { await removeLoan(loan.id); showToast("Supprimé", "info"); }}
                         className="text-slate-600 hover:text-red-400 transition-colors p-1">
                         <Trash2 size={12} />
@@ -511,12 +550,12 @@ export default function LoansView({
             </div>
           )}
 
-          {/* ── Analyse du prêt (en bas de page) ── */}
+          {/* ── Analyse du prêt (en bas de page, pliable) ── */}
           {analysisLoanId && (() => {
             const loan = loans.find((l) => l.id === analysisLoanId);
             if (!loan) return null;
-            const handleMarkPaid = async (num: number, note?: string) => {
-              const ok = await markSchedulePaid(loan.id, num, note);
+            const handleMarkPaid = async (num: number, note?: string, amount?: number) => {
+              const ok = await markSchedulePaid(loan.id, num, note, amount);
               if (ok) {
                 showToast("Échéance marquée comme payée !");
                 const s = await fetchSchedule(loan.id);
@@ -537,26 +576,53 @@ export default function LoansView({
             };
             return (
               <div ref={analysisRef} className="mt-8 pt-6 border-t border-white/10">
-                <h2 className="text-base font-semibold text-slate-200 mb-4 flex items-center gap-2">
-                  <BarChart3 size={18} className="text-indigo-400" />
-                  Analyse — {loan.label}
-                </h2>
-                {analysisLoading ? (
-                  <div className="glass rounded-2xl p-12 text-center text-slate-500">Chargement...</div>
-                ) : (
-                  <div className="glass rounded-2xl p-4 lg:p-6">
-                    <LoanAnalysis
-                      loan={loan}
-                      schedule={analysisSchedule}
-                      salary={salary}
-                      onMarkPaid={handleMarkPaid}
-                      onMarkUnpaid={handleMarkUnpaid}
-                      onClose={() => {
-                        setAnalysisLoanId(null);
-                        setAnalysisSchedule([]);
-                      }}
+                <button
+                  type="button"
+                  onClick={() => setAnalysisExpanded((e) => !e)}
+                  className="w-full flex items-center justify-between gap-2 text-left rounded-xl p-3 -m-3 hover:bg-white/5 transition-colors"
+                >
+                  <h2 className="text-base font-semibold text-slate-200 flex items-center gap-2">
+                    <BarChart3 size={18} className="text-indigo-400" />
+                    Analyse — {loan.label}
+                  </h2>
+                  <span className="text-slate-400 shrink-0">
+                    {analysisExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                  </span>
+                </button>
+                {analysisExpanded && (
+                  <>
+                    {analysisLoading ? (
+                      <div className="glass rounded-2xl p-12 text-center text-slate-500 mt-4">Chargement...</div>
+                    ) : (
+                      <div className="glass rounded-2xl p-4 lg:p-6 mt-4">
+                        <LoanAnalysis
+                          loan={loan}
+                          schedule={analysisSchedule}
+                          salary={salary}
+                          onMarkPaid={handleMarkPaid}
+                          onMarkUnpaid={handleMarkUnpaid}
+                          onUpdateRow={async (num, updates) => {
+                            const result = await updateScheduleRow(loan.id, num, updates);
+                            if (result) {
+                              const s = await fetchSchedule(loan.id);
+                              setAnalysisSchedule(s);
+                              return true;
+                            }
+                            return false;
+                          }}
+                          onScheduleUpdated={async () => {
+                            const s = await fetchSchedule(loan.id);
+                            setAnalysisSchedule(s);
+                          }}
+                          onClose={() => {
+                            setAnalysisLoanId(null);
+                            setAnalysisSchedule([]);
+                          }}
+                          onEdit={() => router.push(`/loans/${loan.id}/edit`)}
                     />
-                  </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             );

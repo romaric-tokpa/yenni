@@ -6,12 +6,14 @@ import {
   saveLoanSchedule,
   markSchedulePaid,
   markScheduleUnpaid,
+  updateScheduleRow,
   refreshScheduleStatuses,
   getLoan,
   updateLoan,
   addExpense,
   updateScheduleExpenseId,
 } from "@/lib/db";
+import type { ScheduleRowUpdate } from "@/lib/types";
 import type { LoanScheduleInput } from "@/lib/types";
 
 export async function GET(req: NextRequest) {
@@ -81,8 +83,9 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     const loanId = typeof body.loan_id === "number" ? body.loan_id : parseInt(body.loan_id, 10);
     const number = typeof body.number === "number" ? body.number : parseInt(body.number, 10);
-    const action = body.action as "pay" | "unpay" | undefined;
+    const action = body.action as "pay" | "unpay" | "update" | undefined;
     const note = typeof body.note === "string" ? body.note : undefined;
+    const amount = body.amount != null ? parseInt(String(body.amount), 10) : undefined;
 
     if (!body.loan_id || isNaN(loanId)) {
       return NextResponse.json({ error: "loan_id requis" }, { status: 400 });
@@ -90,8 +93,34 @@ export async function PUT(req: NextRequest) {
     if (!body.number || isNaN(number)) {
       return NextResponse.json({ error: "number requis" }, { status: 400 });
     }
-    if (action !== "pay" && action !== "unpay") {
-      return NextResponse.json({ error: "action doit être 'pay' ou 'unpay'" }, { status: 400 });
+    if (action !== "pay" && action !== "unpay" && action !== "update") {
+      return NextResponse.json({ error: "action doit être 'pay', 'unpay' ou 'update'" }, { status: 400 });
+    }
+
+    if (action === "update") {
+      const schedule = await getLoanSchedule(loanId);
+      const row = schedule.find((r) => r.number === number && r.user_id === session.userId);
+      if (!row) {
+        return NextResponse.json({ error: "Échéance non trouvée ou non autorisée" }, { status: 404 });
+      }
+      const updates = body.updates as Record<string, unknown> | undefined;
+      if (!updates || typeof updates !== "object") {
+        return NextResponse.json({ error: "updates requis pour action 'update'" }, { status: 400 });
+      }
+      const allowed: (keyof ScheduleRowUpdate)[] = ["due_date", "principal", "interest", "insurance", "tax_interest", "tax_insurance", "fees", "total_payment", "remaining_balance", "paid_amount"];
+      const filtered: ScheduleRowUpdate = {};
+      for (const k of allowed) {
+        const v = updates[k];
+        if (v !== undefined && v !== null) {
+          (filtered as Record<string, unknown>)[k] = k === "due_date" ? String(v) : Number(v);
+        }
+      }
+      if (Object.keys(filtered).length === 0) {
+        return NextResponse.json({ error: "Aucun champ à mettre à jour" }, { status: 400 });
+      }
+      const updated = await updateScheduleRow(loanId, number, filtered);
+      if (!updated) return NextResponse.json({ error: "Échéance non trouvée" }, { status: 404 });
+      return NextResponse.json(updated, { status: 200 });
     }
 
     const schedule = await getLoanSchedule(loanId);
@@ -102,7 +131,7 @@ export async function PUT(req: NextRequest) {
 
     const updated =
       action === "pay"
-        ? await markSchedulePaid(loanId, number, note)
+        ? await markSchedulePaid(loanId, number, note, amount)
         : await markScheduleUnpaid(loanId, number);
 
     if (!updated) {
@@ -114,13 +143,14 @@ export async function PUT(req: NextRequest) {
       const paidAt = updated.paid_at ? new Date(updated.paid_at) : new Date();
       const dateStr = paidAt.toISOString().split("T")[0];
       const timeStr = paidAt.toTimeString().slice(0, 5);
+      const expenseAmount = amount ?? updated.total_payment;
       const expense = await addExpense(
         {
           date: dateStr,
           time: timeStr,
           description: `Échéance #${number} - ${loan?.label ?? "Prêt"}`,
           category: "loan_repayment",
-          amount: updated.total_payment,
+          amount: expenseAmount,
           notes: note ?? "",
         },
         session.userId

@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   experimental: {
     serverActions: { bodySizeLimit: "5mb" },
-    // Réduit les warnings "preloaded but not used" pour layout.css en dev
+    // Réduit les warnings "preloaded but not used" pour layout.css en dev (bug connu Next.js)
     cssChunking: false,
   },
   serverExternalPackages: ["@libsql/client"],

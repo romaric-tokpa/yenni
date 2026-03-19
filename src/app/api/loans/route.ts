@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/apiError";
-import { getLoans, addLoan, updateLoan, deleteLoan } from "@/lib/db";
+import { getLoans, getLoan, addLoan, updateLoan, deleteLoan } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {
-    const status = new URL(req.url).searchParams.get("status") || undefined;
+    const { searchParams } = new URL(req.url);
+    const idParam = searchParams.get("id");
+    if (idParam) {
+      const id = parseInt(idParam, 10);
+      if (!isNaN(id)) {
+        const loan = await getLoan(id);
+        return loan ? NextResponse.json(loan) : NextResponse.json({ error: "Non trouvé" }, { status: 404 });
+      }
+    }
+    const status = searchParams.get("status") || undefined;
     return NextResponse.json(await getLoans(status));
   } catch (err) {
     console.error("[API ERROR]", err);

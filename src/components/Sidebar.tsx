@@ -18,6 +18,7 @@ import {
   ChevronRight,
   LogOut,
   Heart,
+  ShoppingCart,
 } from "lucide-react";
 
 const tabs = [
@@ -27,6 +28,7 @@ const tabs = [
   { href: "/budget", label: "Budget", Icon: PieChart },
   { href: "/savings", label: "Épargne", Icon: Landmark },
   { href: "/wishes", label: "Envies", Icon: Heart },
+  { href: "/shopping-lists", label: "Courses", Icon: ShoppingCart },
   { href: "/loans", label: "Prêts", Icon: HandCoins },
   { href: "/projects", label: "Projets", Icon: FolderKanban },
   { href: "/history", label: "Historique", Icon: History },

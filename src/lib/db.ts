@@ -2,7 +2,8 @@ import path from "path";
 import fs from "fs";
 import type { InStatement } from "@libsql/client";
 import { getDbClient, isTurso } from "./db/client";
-import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, MonthlySaving, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput, Wish } from "./types";
+import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, MonthlySaving, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput, Wish, ShoppingList, ShoppingListItem, WishList, WishListItem } from "./types";
+import type { ScheduleRowUpdate } from "./types";
 import { DEFAULT_CONFIG } from "./constants";
 
 // ── Helpers ──
@@ -23,7 +24,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -239,6 +240,8 @@ export async function deleteExpense(id: number): Promise<boolean> {
   }
   await db.execute({ sql: "UPDATE planned_expenses SET expense_id = NULL, status = 'cancelled' WHERE expense_id = ?", args: [id] });
   await db.execute({ sql: "UPDATE wishes SET expense_id = NULL WHERE expense_id = ?", args: [id] });
+  await db.execute({ sql: "UPDATE wish_list_items SET expense_id = NULL WHERE expense_id = ?", args: [id] });
+  await db.execute({ sql: "UPDATE shopping_list_items SET expense_id = NULL WHERE expense_id = ?", args: [id] });
   const rs = await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [id] });
   return (rs.rowsAffected ?? 0) > 0;
 }
@@ -519,7 +522,8 @@ export async function updateLoan(id: number, updates: Partial<Loan>): Promise<Lo
   const m = { ...current, ...updates };
   const paidPayments = m.paid_payments ?? (current as Loan).paid_payments ?? 0;
   await db.execute({
-    sql: `UPDATE loans SET type=?, label=?, lender_borrower=?, total_amount=?, remaining_amount=?, interest_rate=?, fees=?, monthly_payment=?, start_date=?, end_date=?, next_due_date=?, notes=?, status=?, paid_payments=? WHERE id=?`,
+    sql: `UPDATE loans SET type=?, label=?, lender_borrower=?, total_amount=?, remaining_amount=?, interest_rate=?, fees=?, monthly_payment=?, start_date=?, end_date=?, next_due_date=?, notes=?, status=?, paid_payments=?,
+      bank_name=?, agency=?, loan_number=?, first_payment_date=?, payment_day=?, total_payments=?, insurance_rate=?, tax_rate=?, fees_amount=?, effective_rate=? WHERE id=?`,
     args: [
       m.type,
       m.label,
@@ -535,6 +539,16 @@ export async function updateLoan(id: number, updates: Partial<Loan>): Promise<Lo
       m.notes,
       m.status,
       paidPayments,
+      m.bank_name ?? "",
+      m.agency ?? "",
+      m.loan_number ?? "",
+      m.first_payment_date ?? "",
+      m.payment_day ?? 25,
+      m.total_payments ?? 0,
+      m.insurance_rate ?? 0,
+      m.tax_rate ?? 0,
+      m.fees_amount ?? 0,
+      m.effective_rate ?? 0,
       id,
     ],
   });
@@ -566,9 +580,12 @@ export async function saveLoanSchedule(userId: number, loanId: number, rows: Loa
   try {
     await tx.execute({ sql: "DELETE FROM loan_schedule WHERE loan_id = ?", args: [loanId] });
     for (const r of rows) {
+      const paidAt = r.paid_at ?? null;
+      const paidAmount = r.paid_amount ?? null;
+      const expenseId = r.expense_id ?? null;
       await tx.execute({
-        sql: `INSERT INTO loan_schedule (user_id, loan_id, number, due_date, principal, interest, insurance, tax_interest, tax_insurance, fees, total_payment, remaining_balance, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sql: `INSERT INTO loan_schedule (user_id, loan_id, number, due_date, principal, interest, insurance, tax_interest, tax_insurance, fees, total_payment, remaining_balance, status, paid_at, paid_amount, expense_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           userId,
           loanId,
@@ -583,6 +600,9 @@ export async function saveLoanSchedule(userId: number, loanId: number, rows: Loa
           r.total_payment,
           r.remaining_balance,
           r.status,
+          paidAt,
+          paidAmount,
+          expenseId,
         ],
       });
     }
@@ -592,7 +612,7 @@ export async function saveLoanSchedule(userId: number, loanId: number, rows: Loa
   }
 }
 
-export async function markSchedulePaid(loanId: number, scheduleNumber: number, note?: string): Promise<LoanScheduleRow | null> {
+export async function markSchedulePaid(loanId: number, scheduleNumber: number, note?: string, paidAmount?: number): Promise<LoanScheduleRow | null> {
   await ensureMigrations();
   const db = getDbClient();
   const tx = await db.transaction("write");
@@ -608,9 +628,10 @@ export async function markSchedulePaid(loanId: number, scheduleNumber: number, n
       return row;
     }
     const now = new Date().toISOString();
+    const amountToStore = paidAmount ?? row.total_payment;
     await tx.execute({
-      sql: "UPDATE loan_schedule SET status = 'paid', paid_at = ?, payment_note = ? WHERE loan_id = ? AND number = ?",
-      args: [now, note ?? "", loanId, scheduleNumber],
+      sql: "UPDATE loan_schedule SET status = 'paid', paid_at = ?, payment_note = ?, paid_amount = ? WHERE loan_id = ? AND number = ?",
+      args: [now, note ?? "", amountToStore, loanId, scheduleNumber],
     });
     const loanRs = await tx.execute({ sql: "SELECT * FROM loans WHERE id = ?", args: [loanId] });
     if (loanRs.rows.length > 0) {
@@ -641,6 +662,49 @@ export async function updateScheduleExpenseId(loanId: number, scheduleNumber: nu
   });
 }
 
+export async function updateScheduleRow(loanId: number, scheduleNumber: number, updates: ScheduleRowUpdate): Promise<LoanScheduleRow | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const rs = await db.execute({
+    sql: "SELECT * FROM loan_schedule WHERE loan_id = ? AND number = ?",
+    args: [loanId, scheduleNumber],
+  });
+  if (rs.rows.length === 0) return null;
+  const row = rowToObj<LoanScheduleRow>(rs.rows[0] as Row, rs.columns);
+
+  const allowed = ["due_date", "principal", "interest", "insurance", "tax_interest", "tax_insurance", "fees", "total_payment", "remaining_balance", "paid_amount"] as const;
+  const setParts: string[] = [];
+  const args: (string | number)[] = [];
+  for (const k of allowed) {
+    const v = updates[k];
+    if (v !== undefined && v !== null) {
+      setParts.push(`${k} = ?`);
+      args.push(typeof v === "number" ? v : String(v));
+    }
+  }
+  if (setParts.length === 0) return row;
+
+  args.push(loanId, scheduleNumber);
+  await db.execute({
+    sql: `UPDATE loan_schedule SET ${setParts.join(", ")} WHERE loan_id = ? AND number = ?`,
+    args,
+  });
+
+  if (row.expense_id && (updates.total_payment !== undefined || updates.paid_amount !== undefined)) {
+    const newAmount = updates.paid_amount ?? updates.total_payment ?? row.total_payment;
+    await db.execute({
+      sql: "UPDATE expenses SET amount = ? WHERE id = ?",
+      args: [newAmount, row.expense_id],
+    });
+  }
+
+  const updatedRs = await db.execute({
+    sql: "SELECT * FROM loan_schedule WHERE loan_id = ? AND number = ?",
+    args: [loanId, scheduleNumber],
+  });
+  return rowToObj<LoanScheduleRow>(updatedRs.rows[0] as Row, updatedRs.columns);
+}
+
 export async function getScheduleByExpenseId(expenseId: number): Promise<{ loan_id: number; number: number } | null> {
   await ensureMigrations();
   const rs = await getDbClient().execute({
@@ -669,7 +733,7 @@ export async function markScheduleUnpaid(loanId: number, scheduleNumber: number)
     }
     const expenseId = row.expense_id ?? undefined;
     await tx.execute({
-      sql: "UPDATE loan_schedule SET status = 'pending', paid_at = NULL, payment_note = '', expense_id = NULL WHERE loan_id = ? AND number = ?",
+      sql: "UPDATE loan_schedule SET status = 'pending', paid_at = NULL, payment_note = '', expense_id = NULL, paid_amount = NULL WHERE loan_id = ? AND number = ?",
       args: [loanId, scheduleNumber],
     });
     if (typeof expenseId === "number" && expenseId > 0) {
@@ -1444,6 +1508,328 @@ export async function deleteWish(id: number): Promise<boolean> {
     await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [w.expense_id] });
   }
   const del = await db.execute({ sql: "DELETE FROM wishes WHERE id = ?", args: [id] });
+  return (del.rowsAffected ?? 0) > 0;
+}
+
+// ── Shopping lists (listes de courses) ──
+
+export async function getShoppingLists(month?: number, year?: number): Promise<ShoppingList[]> {
+  await ensureMigrations();
+  const db = getDbClient();
+  if (month != null && year != null) {
+    const m = month + 1;
+    const start = `${year}-${String(m).padStart(2, "0")}-01`;
+    const endDate = new Date(year, month + 1, 0);
+    const end = `${year}-${String(m).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
+    const rs = await db.execute({
+      sql: "SELECT * FROM shopping_lists WHERE scheduled_date >= ? AND scheduled_date <= ? ORDER BY scheduled_date ASC, created_at ASC",
+      args: [start, end],
+    });
+    return rowsToObjs<ShoppingList>(rs.rows as Row[], rs.columns);
+  }
+  const rs = await db.execute("SELECT * FROM shopping_lists ORDER BY scheduled_date ASC, created_at ASC");
+  return rowsToObjs<ShoppingList>(rs.rows as Row[], rs.columns);
+}
+
+export async function addShoppingList(list: Omit<ShoppingList, "id" | "created_at">): Promise<ShoppingList> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "INSERT INTO shopping_lists (name, scheduled_date) VALUES (?, ?) RETURNING *",
+    args: [list.name, list.scheduled_date],
+  });
+  return rowToObj<ShoppingList>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function updateShoppingList(id: number, updates: Partial<Pick<ShoppingList, "name" | "scheduled_date">>): Promise<ShoppingList | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const currentRs = await db.execute({ sql: "SELECT * FROM shopping_lists WHERE id = ?", args: [id] });
+  if (currentRs.rows.length === 0) return null;
+  const current = rowToObj<ShoppingList>(currentRs.rows[0] as Row, currentRs.columns);
+  const merged = { ...current, ...updates };
+  await db.execute({
+    sql: "UPDATE shopping_lists SET name=?, scheduled_date=? WHERE id=?",
+    args: [merged.name, merged.scheduled_date, id],
+  });
+  const rs = await db.execute({ sql: "SELECT * FROM shopping_lists WHERE id = ?", args: [id] });
+  return rowToObj<ShoppingList>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function deleteShoppingList(id: number): Promise<boolean> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const itemsRs = await db.execute({ sql: "SELECT * FROM shopping_list_items WHERE list_id = ? AND expense_id IS NOT NULL", args: [id] });
+  const items = rowsToObjs<ShoppingListItem>(itemsRs.rows as Row[], itemsRs.columns);
+  for (const item of items) {
+    if (item.expense_id) {
+      await db.execute({ sql: "UPDATE shopping_list_items SET expense_id = NULL WHERE id = ?", args: [item.id] });
+      await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [item.expense_id] });
+    }
+  }
+  const del = await db.execute({ sql: "DELETE FROM shopping_lists WHERE id = ?", args: [id] });
+  return (del.rowsAffected ?? 0) > 0;
+}
+
+export async function getPendingShoppingListItems(): Promise<Array<ShoppingListItem & { scheduled_date: string }>> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: `SELECT i.*, l.scheduled_date as scheduled_date
+      FROM shopping_list_items i
+      JOIN shopping_lists l ON i.list_id = l.id
+      WHERE i.status = 'pending'
+      ORDER BY l.scheduled_date ASC, i.created_at ASC`,
+    args: [],
+  });
+  return rowsToObjs<ShoppingListItem & { scheduled_date: string }>(rs.rows as Row[], rs.columns);
+}
+
+export async function getPurchasedShoppingListItemsByDateRange(start: string, end: string): Promise<ShoppingListItem[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: `SELECT * FROM shopping_list_items
+      WHERE status = 'purchased' AND purchased_at IS NOT NULL
+      AND date(purchased_at) >= ? AND date(purchased_at) <= ?
+      ORDER BY purchased_at ASC`,
+    args: [start, end],
+  });
+  return rowsToObjs<ShoppingListItem>(rs.rows as Row[], rs.columns);
+}
+
+export async function getShoppingListItems(listId: number): Promise<ShoppingListItem[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT * FROM shopping_list_items WHERE list_id = ? ORDER BY status ASC, created_at ASC",
+    args: [listId],
+  });
+  return rowsToObjs<ShoppingListItem>(rs.rows as Row[], rs.columns);
+}
+
+export async function addShoppingListItem(item: Omit<ShoppingListItem, "id" | "created_at">): Promise<ShoppingListItem> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "INSERT INTO shopping_list_items (list_id, name, category, estimated_amount, actual_amount, status, purchased_at, expense_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [item.list_id, item.name, item.category || "food", item.estimated_amount, item.actual_amount ?? null, item.status || "pending", item.purchased_at ?? null, item.expense_id ?? null],
+  });
+  return rowToObj<ShoppingListItem>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function updateShoppingListItem(id: number, updates: Partial<Pick<ShoppingListItem, "name" | "category" | "estimated_amount">>): Promise<ShoppingListItem | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const currentRs = await db.execute({ sql: "SELECT * FROM shopping_list_items WHERE id = ?", args: [id] });
+  if (currentRs.rows.length === 0) return null;
+  const current = rowToObj<ShoppingListItem>(currentRs.rows[0] as Row, currentRs.columns);
+  const merged = { ...current, ...updates };
+  await db.execute({
+    sql: "UPDATE shopping_list_items SET name=?, category=?, estimated_amount=? WHERE id=?",
+    args: [merged.name, merged.category || "food", merged.estimated_amount, id],
+  });
+  const rs = await db.execute({ sql: "SELECT * FROM shopping_list_items WHERE id = ?", args: [id] });
+  return rowToObj<ShoppingListItem>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function markShoppingItemPurchased(id: number, actualAmount: number, userId: number): Promise<Expense | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const itemRs = await db.execute({ sql: "SELECT * FROM shopping_list_items WHERE id = ? AND status = 'pending'", args: [id] });
+  if (itemRs.rows.length === 0) return null;
+  const item = rowToObj<ShoppingListItem>(itemRs.rows[0] as Row, itemRs.columns);
+  const now = new Date();
+  const date = now.toISOString().split("T")[0];
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const purchasedAt = now.toISOString();
+  const category = item.category || "food";
+  const ins = await db.execute({
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [userId, date, time, item.name, category, actualAmount, `[Liste de courses] ${item.name}`],
+  });
+  const expense = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
+  await db.execute({
+    sql: "UPDATE shopping_list_items SET status = 'purchased', actual_amount = ?, purchased_at = ?, expense_id = ? WHERE id = ?",
+    args: [actualAmount, purchasedAt, expense.id, id],
+  });
+  return expense;
+}
+
+export async function deleteShoppingListItem(id: number): Promise<boolean> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const itemRs = await db.execute({ sql: "SELECT * FROM shopping_list_items WHERE id = ?", args: [id] });
+  if (itemRs.rows.length === 0) return false;
+  const item = rowToObj<ShoppingListItem>(itemRs.rows[0] as Row, itemRs.columns);
+  if (item.status === "purchased" && item.expense_id) {
+    await db.execute({ sql: "UPDATE shopping_list_items SET expense_id = NULL WHERE id = ?", args: [id] });
+    await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [item.expense_id] });
+  }
+  const del = await db.execute({ sql: "DELETE FROM shopping_list_items WHERE id = ?", args: [id] });
+  return (del.rowsAffected ?? 0) > 0;
+}
+
+// ── Wish lists (listes d'envies) ──
+
+export async function getWishLists(month?: number, year?: number): Promise<WishList[]> {
+  await ensureMigrations();
+  const db = getDbClient();
+  if (month != null && year != null) {
+    const m = month + 1;
+    const start = `${year}-${String(m).padStart(2, "0")}-01`;
+    const endDate = new Date(year, month + 1, 0);
+    const end = `${year}-${String(m).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
+    const rs = await db.execute({
+      sql: "SELECT * FROM wish_lists WHERE scheduled_date >= ? AND scheduled_date <= ? ORDER BY scheduled_date ASC, created_at ASC",
+      args: [start, end],
+    });
+    return rowsToObjs<WishList>(rs.rows as Row[], rs.columns);
+  }
+  const rs = await db.execute("SELECT * FROM wish_lists ORDER BY scheduled_date ASC, created_at ASC");
+  return rowsToObjs<WishList>(rs.rows as Row[], rs.columns);
+}
+
+export async function addWishList(list: Omit<WishList, "id" | "created_at">): Promise<WishList> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "INSERT INTO wish_lists (name, scheduled_date) VALUES (?, ?) RETURNING *",
+    args: [list.name, list.scheduled_date],
+  });
+  return rowToObj<WishList>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function updateWishList(id: number, updates: Partial<Pick<WishList, "name" | "scheduled_date">>): Promise<WishList | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const currentRs = await db.execute({ sql: "SELECT * FROM wish_lists WHERE id = ?", args: [id] });
+  if (currentRs.rows.length === 0) return null;
+  const current = rowToObj<WishList>(currentRs.rows[0] as Row, currentRs.columns);
+  const merged = { ...current, ...updates };
+  await db.execute({
+    sql: "UPDATE wish_lists SET name=?, scheduled_date=? WHERE id=?",
+    args: [merged.name, merged.scheduled_date, id],
+  });
+  const rs = await db.execute({ sql: "SELECT * FROM wish_lists WHERE id = ?", args: [id] });
+  return rowToObj<WishList>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function deleteWishList(id: number): Promise<boolean> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const itemsRs = await db.execute({ sql: "SELECT * FROM wish_list_items WHERE list_id = ? AND expense_id IS NOT NULL", args: [id] });
+  const items = rowsToObjs<WishListItem>(itemsRs.rows as Row[], itemsRs.columns);
+  for (const item of items) {
+    if (item.expense_id) {
+      await db.execute({ sql: "UPDATE wish_list_items SET expense_id = NULL WHERE id = ?", args: [item.id] });
+      await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [item.expense_id] });
+    }
+  }
+  const del = await db.execute({ sql: "DELETE FROM wish_lists WHERE id = ?", args: [id] });
+  return (del.rowsAffected ?? 0) > 0;
+}
+
+export async function getPendingWishListItems(): Promise<WishListItem[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT * FROM wish_list_items WHERE status = 'pending' ORDER BY target_date ASC, created_at ASC",
+    args: [],
+  });
+  return rowsToObjs<WishListItem>(rs.rows as Row[], rs.columns);
+}
+
+export async function getPurchasedWishListItemsByDateRange(start: string, end: string): Promise<WishListItem[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: `SELECT * FROM wish_list_items
+      WHERE status = 'purchased' AND purchased_at IS NOT NULL
+      AND date(purchased_at) >= ? AND date(purchased_at) <= ?
+      ORDER BY purchased_at ASC`,
+    args: [start, end],
+  });
+  return rowsToObjs<WishListItem>(rs.rows as Row[], rs.columns);
+}
+
+export async function getWishListItems(listId: number): Promise<WishListItem[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT * FROM wish_list_items WHERE list_id = ? ORDER BY status ASC, target_date ASC, created_at ASC",
+    args: [listId],
+  });
+  return rowsToObjs<WishListItem>(rs.rows as Row[], rs.columns);
+}
+
+export async function addWishListItem(item: Omit<WishListItem, "id" | "created_at">): Promise<WishListItem> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "INSERT INTO wish_list_items (list_id, name, target_date, estimated_amount, actual_amount, category, subcategory, notes, status, purchased_at, expense_id, shop_name, shop_phone, shop_address, shop_lat, shop_lng) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [
+      item.list_id, item.name, item.target_date, item.estimated_amount, item.actual_amount ?? null,
+      item.category || "misc", item.subcategory ?? null, item.notes || "", item.status || "pending",
+      item.purchased_at ?? null, item.expense_id ?? null,
+      item.shop_name ?? null, item.shop_phone ?? null, item.shop_address ?? null,
+      item.shop_lat ?? null, item.shop_lng ?? null,
+    ],
+  });
+  return rowToObj<WishListItem>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function updateWishListItem(id: number, updates: Partial<Pick<WishListItem, "name" | "target_date" | "estimated_amount" | "actual_amount" | "category" | "subcategory" | "notes" | "shop_name" | "shop_phone" | "shop_address" | "shop_lat" | "shop_lng">>): Promise<WishListItem | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const currentRs = await db.execute({ sql: "SELECT * FROM wish_list_items WHERE id = ?", args: [id] });
+  if (currentRs.rows.length === 0) return null;
+  const current = rowToObj<WishListItem>(currentRs.rows[0] as Row, currentRs.columns);
+  const merged = { ...current, ...updates };
+  await db.execute({
+    sql: "UPDATE wish_list_items SET name=?, target_date=?, estimated_amount=?, actual_amount=?, category=?, subcategory=?, notes=?, shop_name=?, shop_phone=?, shop_address=?, shop_lat=?, shop_lng=? WHERE id=?",
+    args: [
+      merged.name, merged.target_date, merged.estimated_amount, merged.actual_amount ?? null,
+      merged.category || "misc", merged.subcategory ?? null, merged.notes || "",
+      merged.shop_name ?? null, merged.shop_phone ?? null, merged.shop_address ?? null,
+      merged.shop_lat ?? null, merged.shop_lng ?? null,
+      id,
+    ],
+  });
+  if (current.status === "purchased" && current.expense_id) {
+    const amount = merged.actual_amount ?? merged.estimated_amount;
+    await db.execute({
+      sql: "UPDATE expenses SET description=?, category=?, amount=?, notes=? WHERE id=?",
+      args: [merged.name, merged.category, amount, merged.notes ? `[Envie achetée] ${merged.notes}` : "[Envie achetée]", current.expense_id],
+    });
+  }
+  const rs = await db.execute({ sql: "SELECT * FROM wish_list_items WHERE id = ?", args: [id] });
+  return rowToObj<WishListItem>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function markWishItemPurchased(id: number, actualAmount: number, userId: number): Promise<Expense | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const itemRs = await db.execute({ sql: "SELECT * FROM wish_list_items WHERE id = ? AND status = 'pending'", args: [id] });
+  if (itemRs.rows.length === 0) return null;
+  const item = rowToObj<WishListItem>(itemRs.rows[0] as Row, itemRs.columns);
+  const now = new Date();
+  const date = now.toISOString().split("T")[0];
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const purchasedAt = now.toISOString();
+  const ins = await db.execute({
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [userId, date, time, item.name, item.category, actualAmount, item.notes ? `[Envie achetée] ${item.notes}` : "[Envie achetée]"],
+  });
+  const expense = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
+  await db.execute({
+    sql: "UPDATE wish_list_items SET status = 'purchased', actual_amount = ?, purchased_at = ?, expense_id = ? WHERE id = ?",
+    args: [actualAmount, purchasedAt, expense.id, id],
+  });
+  return expense;
+}
+
+export async function deleteWishListItem(id: number): Promise<boolean> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const itemRs = await db.execute({ sql: "SELECT * FROM wish_list_items WHERE id = ?", args: [id] });
+  if (itemRs.rows.length === 0) return false;
+  const item = rowToObj<WishListItem>(itemRs.rows[0] as Row, itemRs.columns);
+  if (item.status === "purchased" && item.expense_id) {
+    await db.execute({ sql: "UPDATE wish_list_items SET expense_id = NULL WHERE id = ?", args: [id] });
+    await db.execute({ sql: "DELETE FROM expenses WHERE id = ?", args: [item.expense_id] });
+  }
+  const del = await db.execute({ sql: "DELETE FROM wish_list_items WHERE id = ?", args: [id] });
   return (del.rowsAffected ?? 0) > 0;
 }
 

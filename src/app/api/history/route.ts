@@ -11,6 +11,8 @@ import {
   getOtherIncomes,
   getProjects,
   getPlannedExpenses,
+  getPurchasedWishListItemsByDateRange,
+  getPurchasedShoppingListItemsByDateRange,
 } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
@@ -26,7 +28,20 @@ export async function GET(req: NextRequest) {
 
     const y = year ? parseInt(year) : new Date().getFullYear();
 
-    const [expenses, incomes, fixedPayments, loanPayments, loans, savings, salaries, otherIncomes, projects, allPlanned] = await Promise.all([
+    const [
+      expenses,
+      incomes,
+      fixedPayments,
+      loanPayments,
+      loans,
+      savings,
+      salaries,
+      otherIncomes,
+      projects,
+      allPlanned,
+      purchasedWishItems,
+      purchasedShoppingItems,
+    ] = await Promise.all([
       getExpensesByDateRange(start, end),
       getIncomesByDateRange(start, end),
       getFixedChargePaymentsByDateRange(start, end),
@@ -37,12 +52,19 @@ export async function GET(req: NextRequest) {
       getOtherIncomes(y),
       getProjects(),
       getPlannedExpenses(),
+      getPurchasedWishListItemsByDateRange(start, end),
+      getPurchasedShoppingListItemsByDateRange(start, end),
     ]);
 
     const plannedExpenses = allPlanned.filter((p) => p.status !== "cancelled");
 
+    const expenseIdsFromWishShopping = new Set<number>();
+    purchasedWishItems.forEach((w) => w.expense_id && expenseIdsFromWishShopping.add(w.expense_id));
+    purchasedShoppingItems.forEach((s) => s.expense_id && expenseIdsFromWishShopping.add(s.expense_id));
+    const expensesFiltered = expenses.filter((e) => !expenseIdsFromWishShopping.has(e.id));
+
     return NextResponse.json({
-      expenses,
+      expenses: expensesFiltered,
       incomes,
       fixedPayments,
       loanPayments,
@@ -52,6 +74,8 @@ export async function GET(req: NextRequest) {
       otherIncomes,
       projects,
       plannedExpenses,
+      purchasedWishItems,
+      purchasedShoppingItems,
     });
   } catch (err) {
     console.error("[API ERROR]", err);

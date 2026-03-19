@@ -87,12 +87,14 @@ export default function Home() {
 
         <Link
           href="/register"
+          prefetch={false}
           className="btn-primary w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 mb-3"
         >
           Créer un compte <ArrowRight size={16} />
         </Link>
         <Link
           href="/login"
+          prefetch={false}
           className="w-full py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border border-white/10 text-slate-400 hover:bg-white/5 transition-colors"
         >
           Se connecter

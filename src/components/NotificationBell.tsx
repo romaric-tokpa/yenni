@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { useBudgetContext } from "@/contexts/BudgetContext";
-import { Bell, Check, HandCoins, Receipt, RefreshCw, X, Heart } from "lucide-react";
+import { Bell, Check, HandCoins, Receipt, RefreshCw, X, Heart, ShoppingCart } from "lucide-react";
 import { formatCFA } from "@/lib/constants";
 import type { NotificationTodo } from "@/lib/types";
 
@@ -18,6 +18,8 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
   });
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [payingSchedule, setPayingSchedule] = useState<{ loanId: number; number: number; defaultAmount: number } | null>(null);
+  const [payAmount, setPayAmount] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -63,17 +65,34 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
     router.push(`/loans?pay=${loanId}`);
   };
 
-  const handlePaySchedule = async (loanId: number, scheduleNumber: number) => {
+  const handlePaySchedule = async (loanId: number, scheduleNumber: number, defaultAmount: number) => {
+    setPayingSchedule({ loanId, number: scheduleNumber, defaultAmount });
+    setPayAmount(String(defaultAmount));
+  };
+
+  const handleConfirmPaySchedule = async () => {
+    if (!payingSchedule) return;
     setLoading(true);
     try {
+      const parsed = parseInt(payAmount.replace(/\s/g, ""), 10);
+      const amount = !isNaN(parsed) && parsed > 0 ? parsed : undefined;
+      const body: Record<string, unknown> = {
+        loan_id: payingSchedule.loanId,
+        number: payingSchedule.number,
+        action: "pay",
+      };
+      if (amount != null && !isNaN(amount) && amount > 0) body.amount = amount;
+
       const r = await fetch("/api/loan-schedule", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ loan_id: loanId, number: scheduleNumber, action: "pay" }),
+        body: JSON.stringify(body),
       });
       if (r.ok) {
         showToast("Échéance marquée comme payée !");
         setOpen(false);
+        setPayingSchedule(null);
+        setPayAmount("");
         await refreshTodos();
       } else {
         const data = await r.json().catch(() => ({}));
@@ -100,12 +119,8 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
   const formatDate = (d: string) =>
     new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
 
-  const overdueLoans = todos.filter((t) => t.is_overdue && (t.source_type === "loan_due" || t.source_type === "loan_overdue"));
-  const plannedOverdue = todos.filter((t) => t.source_type === "planned_expense" && t.is_overdue);
-  const wishOverdue = todos.filter((t) => t.source_type === "wish" && t.is_overdue);
-  const loanTodos = todos.filter((t) => (t.source_type === "loan_due" || t.source_type === "loan_upcoming") && !t.is_overdue);
-  const plannedTodos = todos.filter((t) => t.source_type === "planned_expense" && !t.is_overdue);
-  const wishTodos = todos.filter((t) => t.source_type === "wish" && !t.is_overdue);
+  const hasOverdue = todos.some((t) => t.is_overdue);
+  const hasUpcoming = todos.some((t) => (t.source_type === "loan_upcoming" || t.source_type === "loan_due") && !t.is_overdue);
 
   const renderTodoItem = (t: NotificationTodo) => {
     const dl = dueLabel(t);
@@ -122,9 +137,11 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
             ? "bg-teal-500/20 text-teal-400"
             : t.source_type === "wish"
               ? "bg-pink-500/20 text-pink-400"
-              : "bg-amber-500/20 text-amber-400";
+              : t.source_type === "shopping"
+                ? "bg-amber-500/20 text-amber-400"
+                : "bg-amber-500/20 text-amber-400";
     const actionBtn =
-      t.source_type === "wish" ? (
+      t.source_type === "wish" || t.source_type === "shopping" ? (
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -135,16 +152,51 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
           Voir
         </button>
       ) : t.source_type === "loan_overdue" && t.loan_id != null && t.schedule_number != null ? (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            handlePaySchedule(t.loan_id!, t.schedule_number!);
-          }}
-          disabled={loading}
-          className="px-2.5 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-[11px] font-semibold transition-colors"
-        >
-          {loading ? "..." : "Payer maintenant"}
-        </button>
+        payingSchedule?.loanId === t.loan_id && payingSchedule?.number === t.schedule_number ? (
+          <div className="flex flex-col gap-1.5 min-w-[120px]">
+            <input
+              type="number"
+              placeholder="Montant facturé (FCFA)"
+              value={payAmount}
+              onChange={(e) => setPayAmount(e.target.value)}
+              className="input-field !text-[10px] !py-1.5 !h-8 w-full font-mono"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <div className="flex gap-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleConfirmPaySchedule();
+                }}
+                disabled={loading}
+                className="flex-1 px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-semibold"
+              >
+                {loading ? "..." : "Confirmer"}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPayingSchedule(null);
+                  setPayAmount("");
+                }}
+                className="px-2 py-1 rounded-lg bg-slate-500/20 text-slate-400 text-[10px]"
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePaySchedule(t.loan_id!, t.schedule_number!, t.amount ?? 0);
+            }}
+            disabled={loading}
+            className="px-2.5 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-[11px] font-semibold transition-colors"
+          >
+            {loading ? "..." : "Payer maintenant"}
+          </button>
+        )
       ) : t.source_type === "loan_upcoming" && t.loan_id != null ? (
         <button
           onClick={(e) => {
@@ -185,6 +237,8 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
               <HandCoins size={18} />
             ) : t.source_type === "wish" ? (
               <Heart size={18} />
+            ) : t.source_type === "shopping" ? (
+              <ShoppingCart size={18} />
             ) : (
               <Receipt size={18} />
             )}
@@ -207,14 +261,6 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
     );
   };
 
-  const Section = ({ title, items, accent }: { title: string; items: NotificationTodo[]; accent: string }) =>
-    items.length > 0 ? (
-      <div className="py-2 first:pt-0">
-        <p className={`px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${accent}`}>{title}</p>
-        <ul className="divide-y divide-white/5">{items.map(renderTodoItem)}</ul>
-      </div>
-    ) : null;
-
   return (
     <div className="relative" ref={panelRef}>
       <button
@@ -226,7 +272,7 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
         {todos.length > 0 && (
           <span
             className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full text-white text-[10px] font-bold flex items-center justify-center px-1 ${
-              todos.some((t) => t.source_type === "loan_overdue") ? "bg-red-500" : todos.some((t) => t.source_type === "loan_upcoming") ? "bg-amber-500" : "bg-emerald-500"
+              hasOverdue ? "bg-red-500" : hasUpcoming ? "bg-amber-500" : "bg-emerald-500"
             }`}
           >
             {todos.length > 9 ? "9+" : todos.length}
@@ -267,12 +313,7 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
               </div>
             ) : (
               <div className="p-2">
-                <Section title="En retard" items={overdueLoans} accent="text-red-400" />
-                <Section title="Dépenses planifiées en retard" items={plannedOverdue} accent="text-amber-400" />
-                <Section title="Envies en retard" items={wishOverdue} accent="text-pink-400" />
-                <Section title="Prêts à venir" items={loanTodos} accent="text-teal-400" />
-                <Section title="Dépenses planifiées" items={plannedTodos} accent="text-emerald-400" />
-                <Section title="Liste des envies" items={wishTodos} accent="text-pink-400" />
+                <ul className="divide-y divide-white/5">{todos.map(renderTodoItem)}</ul>
               </div>
             )}
           </div>

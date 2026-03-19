@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/apiError";
 import { getSessionFromCookies } from "@/lib/auth";
-import { getLoans, getPlannedExpenses, getWishes, getOverdueSchedules, getSchedulesForPeriod, refreshScheduleStatuses } from "@/lib/db";
+import { getLoans, getPlannedExpenses, getPendingWishListItems, getPendingShoppingListItems, getOverdueSchedules, getSchedulesForPeriod, refreshScheduleStatuses } from "@/lib/db";
 import type { NotificationTodo } from "@/lib/types";
 
 function getTodayStr(): string {
@@ -134,12 +134,13 @@ export async function GET() {
         link: `/expenses?planned=${p.id}`,
         is_overdue: days < 0,
         days_left: days,
+        priority: days < 0 ? "high" : days <= 3 ? "medium" : "low",
       });
     }
 
     // Liste des envies (échéance à venir ou dépassée)
-    const wishes = await getWishes("pending");
-    for (const w of wishes) {
+    const wishItems = await getPendingWishListItems();
+    for (const w of wishItems) {
       const days = daysBetween(w.target_date);
       todos.push({
         id: `wish-${w.id}`,
@@ -153,14 +154,41 @@ export async function GET() {
         link: `/wishes?highlight=${w.id}`,
         is_overdue: days < 0,
         days_left: days,
+        priority: days < 0 ? "high" : days <= 3 ? "medium" : "low",
       });
     }
 
-    // Trier : en retard d'abord, puis par date d'échéance
+    // Listes de courses (articles en attente, date = scheduled_date de la liste)
+    const shoppingItems = await getPendingShoppingListItems();
+    for (const s of shoppingItems) {
+      const dueDate = s.scheduled_date;
+      const days = daysBetween(dueDate);
+      todos.push({
+        id: `shopping-${s.id}`,
+        type: "todo",
+        source_type: "shopping",
+        source_id: s.id,
+        title: "Liste de courses",
+        message: s.name,
+        amount: s.estimated_amount,
+        due_date: dueDate,
+        link: `/shopping-lists`,
+        is_overdue: days < 0,
+        days_left: days,
+        priority: days < 0 ? "high" : days <= 3 ? "medium" : "low",
+      });
+    }
+
+    // Trier par priorité : en retard d'abord, puis par date d'échéance, puis par priorité (high > medium > low)
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
     todos.sort((a, b) => {
       if (a.is_overdue && !b.is_overdue) return -1;
       if (!a.is_overdue && b.is_overdue) return 1;
-      return a.due_date.localeCompare(b.due_date);
+      const dateCmp = a.due_date.localeCompare(b.due_date);
+      if (dateCmp !== 0) return dateCmp;
+      const aP = a.priority ? (priorityOrder[a.priority as keyof typeof priorityOrder] ?? 2) : 2;
+      const bP = b.priority ? (priorityOrder[b.priority as keyof typeof priorityOrder] ?? 2) : 2;
+      return aP - bP;
     });
 
     return NextResponse.json(todos);

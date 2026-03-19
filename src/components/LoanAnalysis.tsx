@@ -8,16 +8,19 @@ import LoanBalanceChart from "./charts/LoanBalanceChart";
 import LoanNextPayment from "./LoanNextPayment";
 import LoanScheduleTable from "./LoanScheduleTable";
 import LoanScenarioSimulator from "./LoanScenarioSimulator";
-import { Building2, X, AlertTriangle, CheckCircle } from "lucide-react";
-import type { Loan, LoanScheduleRow, LoanStats } from "@/lib/types";
+import { Building2, X, Pencil, AlertTriangle, CheckCircle } from "lucide-react";
+import type { Loan, LoanScheduleRow, LoanStats, ScheduleRowUpdate } from "@/lib/types";
 
 interface LoanAnalysisProps {
   loan: Loan;
   schedule: LoanScheduleRow[];
   salary: number;
-  onMarkPaid: (number: number, note?: string) => Promise<void>;
+  onMarkPaid: (number: number, note?: string, amount?: number) => Promise<void>;
   onMarkUnpaid: (number: number) => Promise<void>;
+  onUpdateRow?: (number: number, updates: ScheduleRowUpdate) => Promise<boolean>;
+  onScheduleUpdated?: () => void;
   onClose: () => void;
+  onEdit?: () => void;
 }
 
 export default function LoanAnalysis({
@@ -26,7 +29,10 @@ export default function LoanAnalysis({
   salary,
   onMarkPaid,
   onMarkUnpaid,
+  onUpdateRow,
+  onScheduleUpdated,
   onClose,
+  onEdit,
 }: LoanAnalysisProps) {
   const stats: LoanStats = calculateLoanStats(schedule, loan, salary);
   const today = new Date().toISOString().split("T")[0];
@@ -38,8 +44,8 @@ export default function LoanAnalysis({
   const totalCount = schedule.length;
   const monthsLeft = totalCount - paidCount;
 
-  const handleMarkPaid = async () => {
-    if (nextDueNumber) await onMarkPaid(nextDueNumber);
+  const handleMarkPaid = async (amount?: number) => {
+    if (nextDueNumber) await onMarkPaid(nextDueNumber, undefined, amount);
   };
 
   return (
@@ -66,13 +72,25 @@ export default function LoanAnalysis({
             </span>
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 shrink-0"
-          aria-label="Replier l'analyse"
-        >
-          <X size={20} />
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          {onEdit && (
+            <button
+              onClick={onEdit}
+              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400"
+              aria-label="Modifier le prêt"
+              title="Modifier"
+            >
+              <Pencil size={18} />
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400"
+            aria-label="Replier l'analyse"
+          >
+            <X size={20} />
+          </button>
+        </div>
       </div>
 
           {/* KPIs principaux */}
@@ -227,6 +245,8 @@ export default function LoanAnalysis({
               nextDueNumber={nextDueNumber}
               onMarkPaid={onMarkPaid}
               onMarkUnpaid={onMarkUnpaid}
+              onUpdateRow={onUpdateRow ?? (async () => false)}
+              onScheduleUpdated={onScheduleUpdated}
             />
           </div>
 

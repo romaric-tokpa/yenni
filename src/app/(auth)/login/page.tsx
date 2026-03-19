@@ -85,7 +85,7 @@ export default function LoginPage() {
 
         <p className="text-center text-xs text-slate-500 mt-5">
           Pas encore de compte ?{" "}
-          <Link href="/register" className="text-emerald-400 hover:text-emerald-300 font-medium">
+          <Link href="/register" prefetch={false} className="text-emerald-400 hover:text-emerald-300 font-medium">
             Créer un compte
           </Link>
         </p>
