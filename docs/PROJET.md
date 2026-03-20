@@ -1,232 +1,388 @@
-# Yenni (MonBudget) — Documentation produit & technique
+# Yenni (MonBudget) — Guide complet du produit
 
-Ce document décrit **l’application**, sa **logique métier**, les **fonctionnalités**, les **parcours utilisateur** et des **user stories** représentatives. Il sert de référence pour l’équipe, les contributions et l’onboarding.
-
----
-
-## 1. Vision & positionnement
-
-**Yenni** est une application web de **gestion budgétaire personnelle** orientée :
-
-- **Franc CFA (FCFA)** et usage **mobile** (PWA possible).
-- **Budget par catégories** avec exercice **mois par mois**.
-- **Trésorerie multi-comptes** (espèces, mobile money, banques, coffres) avec **soldes calculés** à partir des opérations.
-- Modules complémentaires : **épargne**, **projets**, **prêts / dettes**, **envies & listes de courses**, **charges fixes**, **calendrier** et **historique**.
-
-L’objectif : permettre à un utilisateur de **voir où va son argent**, de **respecter un plan**, et de **suivre ses comptes réels** sans confondre « budget » et « solde bancaire ».
+Ce document décrit **tout ce que fait l’application** : pour **les utilisateurs** et les personnes **non techniques** (en langage clair), ainsi qu’une **annexe technique** pour les développeurs et l’onboarding.
 
 ---
 
-## 2. Stack technique
+## Sommaire
+
+1. [En bref](#1-en-bref)
+2. [Pour qui ? À quoi ça sert ?](#2-pour-qui--à-quoi-ça-sert-)
+3. [Lexique simple](#3-lexique-simple)
+4. [Toutes les fonctionnalités, écran par écran](#4-toutes-les-fonctionnalités-écran-par-écran)
+5. [Actions rapides et fenêtres « modales »](#5-actions-rapides-et-fenêtres-modales)
+6. [Indicateurs, rapports et exports](#6-indicateurs-rapports-et-exports)
+7. [Notifications et rappels](#7-notifications-et-rappels)
+8. [Sauvegardes de tes données](#8-sauvegardes-de-tes-données)
+9. [Application mobile & mode hors ligne](#9-application-mobile--mode-hors-ligne)
+10. [Parcours types (du premier jour au suivi mensuel)](#10-parcours-types)
+11. [Règles importantes (comptes, coffre, suppressions)](#11-règles-importantes)
+12. [Annexe technique (équipe produit / dev)](#12-annexe-technique-équipe-produit--dev)
+13. [Évolutions possibles](#13-évolutions-possibles)
+14. [Maintenance de ce document](#14-maintenance-de-ce-document)
+
+---
+
+## 1. En bref
+
+**Yenni** est une **application web de gestion d’argent personnel**. Elle est pensée pour l’**Afrique de l’Ouest** : les montants sont en **francs CFA (FCFA)**.
+
+Tu peux avec Yenni :
+
+- **Voir** combien tu gagnes, combien tu dépenses et **où** part ton argent (par catégorie).
+- **Suivre plusieurs comptes** réels : espèces, Mobile Money, banque, cartes, coffre… avec des **soldes calculés** automatiquement à partir de ce que tu enregistres.
+- **Planifier** : budget par catégorie, charges fixes du mois, épargne, projets (vacances, gros achat…), prêts et dettes.
+- **Noter** chaque dépense et chaque revenu, **transférer** de l’argent d’un compte à l’autre (sans le confondre avec une dépense « shopping »).
+- Consulter des **indicateurs** (graphiques, historique), exporter en **CSV** ou **PDF**, et **sauvegarder** ou **restaurer** toutes tes données.
+
+> **En une phrase** : Yenni t’aide à **ne pas confondre** « ce que je peux dépenser ce mois-ci » (budget) et « ce qu’il y a sur mon compte Wave » (trésorerie), tout en gardant **une seule vision** de tes finances.
+
+---
+
+## 2. Pour qui ? À quoi ça sert ?
+
+- **Particuliers** qui veulent maîtriser leur budget mensuel sans tableur compliqué.
+- Personnes avec **plusieurs moyens de paiement** (liquide + téléphone + banque).
+- Ceux qui ont des **charges fixes** (loyer, abonnements), des **objectifs d’épargne**, des **prêts** à rembourser ou des **projets** à financer.
+- Usage **sur téléphone** (navigation adaptée) ou **sur ordinateur** (menu latéral).
+
+Ce n’est **pas** un logiciel bancaire officiel : Yenni **ne se connecte pas** à ta banque automatiquement. **Toi**, tu saisis les mouvements ; l’app **recalcule** les soldes et les totaux.
+
+---
+
+## 3. Lexique simple
+
+| Terme | Explication simple |
+|--------|-------------------|
+| **Budget (par catégorie)** | Enveloppe d’argent que tu te fixes pour un type de dépense (nourriture, transport…) **pour un mois donné**. |
+| **Dépense variable** | Achat du quotidien que tu enregistres (restaurant, essence…) ; il diminue ton enveloppe et le solde du compte utilisé. |
+| **Charge fixe** | Dépense **récurrente** du mois (loyer, internet…) ; tu peux la payer depuis un compte précis. |
+| **Revenu** | Argent qui **entre** (salaire saisi à part, primes, dons…) et qui **crédite** le compte choisi. |
+| **Compte (trésorerie)** | Représente un **endroit où est ton argent** : poche espèces, Wave, compte banque, coffre, etc. Chaque compte a un **solde** recalculé par l’app. |
+| **Transfert entre comptes** | Tu déplaces de l’argent d’un compte vers un autre (ex. retrait banque → espèces). Ce n’est **pas** une dépense « consommation » : ça ne casse pas ton budget courses. |
+| **Coffre / verrou** | Type de compte où tu peux **bloquer les sorties** jusqu’à une date (épargne « forcée »). |
+| **Prêt / dette** | Emprunt ou argent prêté avec **échéancier** ; les paiements peuvent être liés à un compte. |
+| **Projet** | Objectif d’épargne **dédié** (avec éventuellement un compte lié et des versements). |
+| **Solde disponible (liquide)** | Souvent : **espèces + Mobile Money** — utilisé pour le **« budget par jour »** affiché dans le menu (jusqu’à la fin du mois). |
+| **Indicateurs** | Écran d’**analyse** : graphiques, filtres par période, vue d’ensemble de tout l’historique. |
+
+Couleurs courantes dans l’interface : **rouge** pour les dépenses / sorties d’argent, **vert** pour les revenus, **orange** pour les transferts entre comptes (pour les repérer vite).
+
+---
+
+## 4. Toutes les fonctionnalités, écran par écran
+
+L’application se compose de **zones de navigation** : sur grand écran, un **menu à gauche** ; sur téléphone, une **barre en bas** avec accès rapide aux principales pages.
+
+### 4.1 Page d’accueil du site (`/`)
+
+- Si tu es **déjà connecté** → redirection vers le **tableau de bord**.
+- Sinon → vers **Connexion**.
+- Si la connexion échoue, une **page d’accueil marketing** simple propose **Créer un compte** ou **Se connecter**, avec trois idées : revenus, charges fixes, budgets.
+
+### 4.2 Connexion & inscription (`/login`, `/register`)
+
+- Création de compte avec **email** et **mot de passe**.
+- Connexion ; déconnexion possible depuis le menu utilisateur.
+- **Profil** : nom, prénom, téléphone, **photo de profil** (avatar) modifiables.
+
+### 4.3 Accueil — Tableau de bord (`/dashboard`)
+
+Synthèse du mois (et de ta situation « à date ») :
+
+- **Salutation** et rappel du **mois budgétaire** sélectionné.
+- **Période pour la trésorerie** : tu peux afficher les soldes des comptes pour **le mois en cours**, un **trimestre**, une **année**, ou une **plage de dates** personnalisée (solde « comme à cette date »).
+- **Actions rapides** : liens pour **Dépense**, **Revenu**, **Transfert** (souvent sous forme de fenêtre dédiée, voir §5).
+- **Bloc salaire** : rappel du **salaire du mois** (saisi dans les réglages) — pilote en partie le reste du budget.
+- **Cartes des comptes** : aperçu des **soldes** (selon la période trésorerie choisie).
+- **Indicateurs clés (KPI)** : par exemple actifs totaux, passifs / sorties du mois, solde disponible (liquide), épargne cumulée — avec textes d’aide.
+- **Mini-indicateurs** : taux d’endettement, taux d’épargne, **dépensé ce mois**, solde net du mois, dette restante.
+- **Budget par catégorie** : liste **repliable** : pour chaque catégorie, combien tu as **budgétisé**, combien tu as **dépensé**, barre de progression.
+- **Graphiques** : par ex. **revenus vs dépenses** sur l’année.
+- **Export PDF** du bilan (selon mise en œuvre actuelle).
+
+### 4.4 Transactions (`/transactions`)
+
+Le **cœur du quotidien** :
+
+- Liste de **toutes les opérations** du mois : dépenses variables, charges fixes payées, revenus saisis, transferts.
+- **Filtres** par type (tout, dépenses seules, revenus, transferts…).
+- **Deux vues** : liste continue ou **regroupement par jour** avec totaux du jour (sorties en rouge, entrées en vert, volume des transferts en orange).
+- **Synthèse en haut** : totaux du mois (dépenses variables, fixes, total sorties, revenus, volume transferts, reste sur budget variable…).
+- **Ajouter** une dépense (souvent via bouton ou **modale**).
+- **Modifier / supprimer** une ligne (selon les règles).
+- **Exporter** le mois en **CSV**.
+- **Dépenses planifiées** : liste des achats à venir avec dates ; exécution possible depuis ici ou via les notifications.
+- Section **historique** des dépenses variables sur **autres périodes** (comparaison / audit).
+
+### 4.5 Budget (`/budget`)
+
+- Vue par **catégorie** : plafond mensuel, **déjà dépensé**, pourcentage, signal visuel si tu dépasses.
+- Tu peux **ajuster** les montants budgétés (selon les réglages).
+
+### 4.6 Calendrier (`/calendar`)
+
+- **Grille du mois** : chaque jour peut montrer un **résumé** entrées / sorties.
+- **Clic sur un jour** : détail des événements, totaux **revenus** / **dépenses** du jour.
+- **Ajout rapide** d’une dépense ou d’un revenu **à cette date**.
+- **Résumé du mois** en haut (actifs, revenus, charges fixes, prêts, dépenses variables, liquidité…).
+
+### 4.7 Épargne (`/savings`)
+
+- Objectifs d’épargne (dont **fonds d’urgence**).
+- Saisie / suivi de l’épargne **mois par mois** et **cumul**.
+- Lien possible avec un **compte coffre** pour le fonds d’urgence.
+- Période d’objectif (dates de début / fin) pour suivre la progression.
+
+### 4.8 Envies (`/wishes`)
+
+- **Listes de souhaits** (ex. équipement, cadeaux).
+- Articles avec montants, statuts ; **achat** peut être enregistré et lié à la trésorerie (selon flux).
+- **Modales** pour créer liste, article, ou enregistrer un achat.
+
+### 4.9 Courses — listes de shopping (`/shopping-lists`)
+
+- Plusieurs **listes** (ex. supermarché, marché).
+- **Articles** à cocher, montants ; possibilité d’**enregistrer un achat** rattaché à un compte / catégorie.
+- Modales pour nouvelle liste, nouvel article, achat.
+
+### 4.10 Prêts & dettes (`/loans`, `/loans/new`, `/loans/[id]/edit`)
+
+- Liste des **prêts** : emprunts ou argent prêté à quelqu’un (**récupération**).
+- Création avec **échéancier** (génération / régénération possible selon règles).
+- **Paiements** d’échéances, montant, compte, frais éventuels.
+- **Capital restant**, historique, notifications liées aux échéances (voir §7).
+
+### 4.11 Projets (`/projects`)
+
+- **Projets** d’épargne (vacances, véhicule…).
+- **Fonds** versés sur le projet (et parfois **achats** liés au projet).
+- Suivi des montants **objectif vs épargné**.
+
+### 4.12 Indicateurs (`/history`)
+
+*(Le titre dans le menu peut être « Indicateurs » ; ce n’est pas seulement une « liste passée », c’est surtout une **vue analytique**.)*
+
+- **Période** : jour, mois, trimestre, semestre, année.
+- **Filtres** par type de mouvement : dépenses, revenus, charges fixes, prêts, épargne, projets, planifiées, envies, courses…
+- **Graphiques** : barres (revenus / dépenses), **répartition** des dépenses, **mix des revenus**, **flux net** dans le temps.
+- **Tableau détaillé** des opérations unifiées.
+- **Exports CSV et PDF** de l’historique filtré.
+- Données chargées via le serveur avec **mise en cache** côté navigateur pour la fluidité.
+
+### 4.13 Réglages (`/settings`)
+
+- **Profil** et **sécurité** : mot de passe, avatar.
+- **Lien** vers la **Trésorerie** (comptes) — carte dédiée en haut de page.
+- **Configuration du budget** : catégories de dépenses, **charges fixes** du mois, **salaires** (mois par mois, compte de versement), types de revenus, **projets** en config, **logo** de l’app (affichage), paramètres d’objectifs d’épargne, etc.
+- **Sauvegardes** : export JSON complet, import, liste des sauvegardes automatiques (voir §8).
+
+### 4.14 Trésorerie — comptes (`/settings/accounts`)
+
+- **Liste** de tous les comptes avec **soldes** (et choix d’une **date limite** pour le calcul des soldes, si prévu).
+- **Création** (`/settings/accounts/new`) : nom, type (espèces, Mobile Money, banque, coffre…), couleur, logo, solde d’ouverture, ordre d’affichage, date de déverrouillage pour coffre…
+- **Édition** d’un compte.
+- **Archivage** pour retirer un compte des vues courantes sans tout perdre (selon règles).
+- **Transferts** entre comptes (montant, **frais** éventuels payés sur un compte « frais »).
+- **Historique récent** des transferts depuis cette page.
+- **Suppression** d’un compte (si **aucune opération** ne pointe encore dessus ; sinon message d’erreur explicite).
+
+### 4.15 Mouvements d’un compte (`/settings/accounts/[id]`)
+
+- **Fil du temps** : dépenses, revenus et transferts **affectant ce compte**.
+- Libellés du type « Transfert vers… » / « reçu depuis… » avec **montants** colorés (vert / rouge / orange pour transferts).
+- Lien pour **modifier le compte**.
+
+### 4.16 Redirection `/accounts` et `/expenses`
+
+- **`/accounts`** redirige vers **`/settings/accounts`** (trésorerie).
+- **`/expenses`** : entrée alternative vers la **saisie de dépenses** (flux prévu pour l’UX).
+
+### 4.17 Hors ligne (`/offline`)
+
+- Page affichée quand la connexion réseau **manque** (souvent en lien avec la **PWA**).
+
+### 4.18 Fenêtre modale globale (`/modal`)
+
+- Page technique servant de **conteneur** pour les formulaires plein écran (voir §5).
+
+---
+
+## 5. Actions rapides et fenêtres « modales »
+
+Plusieurs actions ouvrent une **route dédiée** du type `/modal?type=…&returnTo=…` puis reviennent à la page d’origine :
+
+| Type | Rôle |
+|------|------|
+| **Nouvelle dépense** | Montant, date, heure, catégorie, compte, notes, **frais de transaction** si besoin. |
+| **Nouveau revenu** | Montant, date, type de revenu, compte de crédit. |
+| **Transfert rapide** | Compte source, destination, montant, frais éventuels. |
+| **Dépense planifiée** | Programmer une dépense future (date, description, catégorie, compte). |
+| **Envies / courses** | Nouvelle liste, nouvel article, enregistrement d’**achat** (panier ou envie). |
+
+Cela permet d’**ajouter une transaction depuis le tableau de bord** (ou ailleurs) sans perdre le contexte.
+
+---
+
+## 6. Indicateurs, rapports et exports
+
+- **Tableau de bord** : export **PDF** du bilan.
+- **Transactions** : export **CSV** du mois.
+- **Indicateurs** : **CSV** et **PDF** sur la période et les filtres choisis.
+- Graphiques **Revenus vs Dépenses**, **camembert** des dépenses, **mix des revenus**, **cash-flow net**.
+
+---
+
+## 7. Notifications et rappels
+
+- **Cloche** dans l’en-tête (sur les grands écrans / layout connecté).
+- Affiche une liste de **« choses à faire »** générées côté serveur : par exemple **dépenses planifiées** à valider ou payer, **échéances de prêts**, rappels liés aux **envies** ou **courses** (selon la logique métier en place).
+- Tu peux **agir** depuis le panneau (valider une planifiée, aller au prêt…) ou **rafraîchir** la liste.
+- Mise à jour **périodique** légère en arrière-plan.
+
+---
+
+## 8. Sauvegardes de tes données
+
+*(Section **Réglages**, en bas de page.)*
+
+- **Exporter** toutes tes données dans un **fichier JSON** (sauvegarde manuelle).
+- **Importer / restaurer** un fichier JSON (**écrase** les données actuelles — confirmation nécessaire).
+- **Sauvegardes automatiques** : liste téléchargeable par date (selon configuration serveur).
+
+> Pour un utilisateur lambda : pense-y comme une **copie de sécurité** de ton carnet de comptes Yenni, pour changer de téléphone ou éviter une perte accidentelle.
+
+---
+
+## 9. Application mobile & mode hors ligne
+
+- Yenni peut être **installée** sur l’écran d’accueil du téléphone (**PWA** : « Ajouter à l’écran d’accueil » depuis le navigateur).
+- Fichiers prévus dans le projet : **manifest**, **service worker** (enregistrement via composants dédiés), **icônes** multiples tailles.
+- **Hors ligne** : page dédiée explique l’état ; les **données vivent sur le serveur** qui héberge l’app — sans Internet, les **consultations complètes** ne sont pas garanties (le hors ligne reste un **confort**, pas une synchro cloud native type banque).
+
+---
+
+## 10. Parcours types
+
+### Première utilisation
+
+1. **Créer un compte** ou se connecter.
+2. Aller dans **Réglages** : renseigner **salaire**, **charges fixes**, **catégories**, éventuellement créer ses **comptes** dans **Trésorerie**.
+3. Enregister une **première dépense** ou **revenu** dans **Transactions**.
+4. Consulter l’**Accueil** pour voir les indicateurs se remplir.
+
+### Quotidien
+
+1. **Transactions** ou **raccourci Dépense** depuis l’accueil.
+2. Vérifier le **budget par jour** dans le menu (basé sur liquide disponible et jours restants).
+
+### Fin de mois / analyse
+
+1. **Budget** : ajuster le mois suivant.
+2. **Indicateurs** : graphes et exports.
+3. **Prêts / épargne / projets** : mise à jour des versements.
+
+---
+
+## 11. Règles importantes
+
+- **Transfert** : ne compte pas comme **dépense budgétaire** ; il **déplace** la trésorerie.
+- **Coffre verrouillé** : les **sorties** (dépenses, transferts sortants) peuvent être **bloquées** jusqu’à la date ou l’action de déblocage.
+- **Suppression de compte** : souvent **impossible** tant qu’il reste des opérations liées ; l’app propose plutôt l’**archivage**.
+- **Montants** : stockés et affichés en **FCFA** (entiers).
+- **Plusieurs onglets** : les soldes des comptes peuvent se **synchroniser** entre onglets du même navigateur ; retour sur l’app après mise en veille peut **rafraîchir** les comptes.
+
+---
+
+## 12. Annexe technique (équipe produit / dev)
+
+### 12.1 Stack
 
 | Couche | Technologies |
 |--------|----------------|
 | Framework | **Next.js** (App Router), **React 19** |
 | Styles | **Tailwind CSS** |
-| Données | **SQLite** (local via `better-sqlite3`) ou **Turso** (`@libsql/client`) selon l’environnement |
-| Auth | Sessions **JWT** (cookies), mots de passe hashés (**bcryptjs**) |
+| Données | **SQLite** (`better-sqlite3`) en local ou **Turso** (`@libsql/client`) selon l’environnement |
+| Auth | **JWT** (cookies), **bcryptjs** |
 | API | Routes `src/app/api/**` (REST JSON) |
-| État client | **React Context** (`BudgetContext`, `AuthContext`), hook **`useBudget`**, **SWR** (ex. historique) |
-| Divers | **date-fns**, **Recharts**, **Framer Motion**, export **PDF** (jspdf / html2canvas) |
+| État client | **React Context** (`BudgetContext`, `AuthContext`), **`useBudget`**, **SWR** (historique / notifications) |
+| Divers | **date-fns**, **Recharts**, **Framer Motion**, exports **PDF** (jspdf / html2canvas) |
 
-### Structure des dossiers (simplifié)
+### 12.2 Structure des dossiers (simplifié)
 
 ```
 src/
-  app/                 # Pages Next + routes API
-    (app)/             # Shell connecté (sidebar, bottom nav, budget)
+  app/                 # Pages Next.js + routes API
+    (app)/             # Layout connecté (sidebar, bottom nav, providers)
     (auth)/            # Login, inscription
-  components/          # UI métier (Dashboard, ExpenseTracker, Settings, …)
+  components/          # Vues métier (Dashboard, ExpenseTracker, HistoryView, …)
   contexts/            # BudgetContext, AuthContext
-  hooks/useBudget.ts   # Chargement agrégé : config, dépenses, comptes, prêts, …
+  hooks/useBudget.ts   # Chargement agrégé + mutations budget
   lib/
-    db.ts              # Accès BDD, migrations, logique serveur
+    db.ts              # Accès BDD, migrations
+    account-balance.ts # Calcul des soldes comptes
     types.ts           # Modèles TypeScript
-    constants.ts       # Labels, formats CFA, règles coffre, etc.
+    constants.ts       # Formats CFA, règles coffre, …
 ```
 
----
+### 12.3 Liste des routes « pages » principales
 
-## 3. Concepts métier fondamentaux
+| Chemin | Titre UI (voir `pageTitles.ts`) |
+|--------|----------------------------------|
+| `/dashboard` | Accueil |
+| `/transactions` | Transactions |
+| `/budget` | Budget |
+| `/calendar` | Calendrier |
+| `/savings` | Épargne |
+| `/wishes` | Envies |
+| `/shopping-lists` | Courses |
+| `/loans` | Prêts & dettes |
+| `/projects` | Projets |
+| `/history` | Indicateurs |
+| `/settings` | Réglages |
+| `/settings/accounts` | Trésorerie |
+| `/settings/accounts/new` | Nouveau compte |
+| `/settings/accounts/[id]` | Mouvements du compte |
+| `/settings/accounts/[id]/edit` | Modifier le compte |
 
-### 3.1 Budget vs trésorerie
+### 12.4 API (aperçu)
 
-- **Budget** : enveloppes par **catégorie** pour un **mois / année** donnés (configuration utilisateur + dépenses enregistrées).
-- **Trésorerie** : **comptes** avec **solde calculé** = solde initial + revenus affectés au compte − dépenses − transferts sortants (+ transferts entrants, etc.).
+Les routes **`/api/*`** valident la session quand nécessaire. Exemples : `auth/*`, `config`, `expenses`, `incomes`, `fixed-charges`, `savings`, `salaries`, `accounts`, `accounts/[id]/transactions`, `account-transfers`, `loans`, `loan-payments`, `loan-schedule`, `projects`, `project-funds-sum`, `planned-expenses`, `category-budgets`, `budget-summary`, `history`, `notifications`, `wish-lists`, `wishes`, `shopping-lists`, `backup`, `backup/auto`, `logo`, etc.
 
-Indicateurs clés (dashboard / navigation) :
+### 12.5 Synchronisation client (sans WebSocket)
 
-- **Solde disponible** : somme des soldes **espèces** (`cash`) + **mobile money** uniquement (comptes non archivés) — base du **budget / jour** dans la barre latérale et la nav mobile.
-- **Actifs** (carte tableau de bord) : **somme des soldes** de tous les comptes **non archivés** uniquement. Les **entrées du mois** ne sont pas ajoutées en plus : elles sont déjà comptées dans les soldes via les comptes de versement.
-- **Solde net (mois)** : toujours **flux uniquement** = ces mêmes entrées du mois moins les sorties budgétées (charges, dépenses variables, épargne du mois, fonds projet, remboursements de prêts).
+- Rechargement des **comptes** après opérations impactant les soldes.
+- Compteur **`accountsRevision`** pour propager les mises à jour (ex. vue mouvements d’un compte).
+- **`BroadcastChannel`** : synchro entre onglets.
+- **`visibilitychange`** : rafraîchissement possible au retour sur l’onglet.
 
-Une **dépense** ou un **revenu** peut être rattaché à un **`account_id`** : cela **impacte le solde** du compte et les agrégats du mois.
+### 12.6 Budget vs trésorerie (rappel technique)
 
-### 3.2 Comptes (`Account`)
+- **Soldes** : logique centralisée (`account-balance`, migrations comptables strictes avec `account_id` / `fees_account_id` sur les flux concernés).
+- **Indicateurs** « budget / jour » : basés sur **liquide** (espèces + Mobile Money) et jours restants du **mois budgétaire**.
 
-Types principaux (voir `ACCOUNT_KIND_PRESETS` dans le code) : espèces, mobile money, cartes prépayées, comptes bancaires (livret, courant…), **coffre-fort** (`vault`), autre.
+### 12.7 Performance (chargement)
 
-- **Coffre** : période de **verrouillage** : entrées autorisées, sorties (achats, transferts sortants) bloquées jusqu’à une date ou **déblocage manuel**.
-- **Transferts entre comptes** : déplacent la trésorerie **sans** traiter comme une dépense budgétaire.
-
-#### Comptabilité stricte (soldes)
-
-- **Source de vérité** : `src/lib/account-balance.ts` agrège solde initial + revenus − dépenses (avec frais) − charges fixes payées − achats projet (sans dépense liée) − paiements de prêt « orphelins » + encaissements prêt fait orphelins ± transferts (dont frais éventuels sur un compte tiers `fees_account_id`).
-- **Migrations** : `031_strict_accounts.sql` ajoute `account_id` sur les paiements (charges fixes, prêts, achats projet, dépenses planifiées, etc.) et `fees_account_id` sur les transferts ; données existantes sont rattachées aux comptes quand c’est possible.
-- **API** : les créations de mouvements exigent un **`account_id`** valide là où la trésorerie est impactée ; `GET /api/accounts/balances` renvoie les soldes recalculés.
-
-### 3.3 Configuration budget (`BudgetConfig`)
-
-Catégories, charges fixes, salaire mensuel (réglages), types de revenu à la saisie (Freelance, Don, Commissions, etc.), projets, fonds d’urgence (dont lien possible vers un compte coffre), logo app, etc.
-
-### 3.4 Prêts
-
-Prêts avec **échéancier**, paiements, rattachement possible à des **comptes** pour équilibre trésorerie ; notifications / rappels selon l’implémentation (cloche).
-
----
-
-## 4. Fonctionnalités par module
-
-| Zone | Route(s) | Rôle |
-|------|-----------|------|
-| **Accueil** | `/dashboard` | Synthèse : soldes, alertes, raccourcis, cartes comptes |
-| **Transactions** | `/transactions` | Saisie / liste des dépenses & revenus (compte, catégorie, frais…) |
-| **Budget** | `/budget` | Vue catégories, reste à vivre, pilotage du mois |
-| **Calendrier** | `/calendar` | Vue temporelle des dépenses / événements liés au budget |
-| **Épargne** | `/savings` | Objectifs d’épargne, fonds d’urgence (dont coffre) |
-| **Envies** | `/wishes` | Listes de souhaits, catégories, achats liés |
-| **Courses** | `/shopping-lists` | Listes de courses |
-| **Prêts** | `/loans`, `/loans/new`, `/loans/[id]/edit` | Emprunts, échéances, paiements |
-| **Projets** | `/projects` | Épargne projetée, poche compte, versements |
-| **Historique** | `/history` | Historique consolidé (cache SWR) |
-| **Réglages** | `/settings` | Profil, préférences, salaires, charges, catégories envies, lien vers trésorerie |
-| **Trésorerie** | `/settings/accounts` | Liste des comptes, transferts, archivage, suppression |
-| **Compte — mouvements** | `/settings/accounts/[id]` | Fil des opérations du compte |
-| **Compte — création / édition** | `/settings/accounts/new`, `.../[id]/edit` | Formulaire compte |
-| **Auth** | `/login`, `/register` | Connexion / inscription |
-| **Dépenses (alias)** | `/expenses` | Redirection ou variante UX vers la saisie |
-
-**Navigation**
-
-- **Desktop** : sidebar (`Sidebar.tsx`).
-- **Mobile** : barre du bas + feuille « Plus » (`BottomNav.tsx`).
+- Chargement initial du budget : données **critiques** d’abord (config, comptes, flux du mois…), puis **projets, prêts, planifiées** en arrière-plan pour afficher l’interface plus tôt.
+- Calcul des **soldes par compte** en parallèle côté serveur lorsque plusieurs comptes sont listés.
 
 ---
 
-## 5. Parcours utilisateur (parcours types)
+## 13. Évolutions possibles
 
-### 5.1 Nouvel utilisateur
-
-1. Atterrissage sur `/` → redirection vers `/login` ou `/dashboard` si déjà connecté.
-2. Inscription → connexion → chargement du **BudgetProvider** (config, mois courant, comptes par défaut si prévus).
-3. Découverte : **Accueil** → **Réglages** pour renseigner revenus / catégories → **Transactions** pour première saisie.
-
-### 5.2 Saisie du quotidien
-
-1. Ouvre **Transactions** (ou raccourci depuis le dashboard).
-2. Ajoute une **dépense** : montant, catégorie, **compte** de paiement, éventuels frais.
-3. Le **solde du compte** et les **totaux du mois** se mettent à jour (via `fetchAccounts` + révisions — voir synchro).
-
-### 5.3 Gestion des comptes
-
-1. **Réglages** → **Trésorerie** (`/settings/accounts`).
-2. Création / édition / archivage / suppression (selon règles métier : ex. compte encore utilisé).
-3. **Transfert** entre deux comptes depuis la même page.
-4. Détail **Mouvements** par compte pour audit.
-
-### 5.4 Pilotage budgétaire mensuel
-
-1. Choisir mois / année dans les vues concernées.
-2. **Budget** : comparer budget catégorie vs dépensé.
-3. **Calendrier** : répartition dans le temps.
-4. Ajuster **épargne** ou **projets** si besoin.
-
-### 5.5 Prêt avec échéances
-
-1. **Prêts** → création, saisie échéancier.
-2. Paiement d’échéance (potentiellement lié à un compte).
-3. Suivi du capital restant dans les écrans prêts + notifications si activées.
+- Import de **relevé bancaire** et catégorisation assistée.
+- **Notifications push** (nécessiterait un service dédié).
+- **Multi-devises** (au-delà du FCFA).
+- **Partage de budget** en couple / foyer avec rôles.
 
 ---
 
-## 6. User stories (backlog de référence)
+## 14. Maintenance de ce document
 
-Formulation classique : *En tant que … je veux … afin de …*.
-
-### Authentification & profil
-
-- **US-A1** — En tant qu’**utilisateur**, je veux **me connecter avec email / mot de passe** afin d’**accéder à mes données de façon sécurisée**.
-- **US-A2** — En tant qu’**utilisateur**, je veux **modifier mon profil / avatar** afin de **personnaliser l’application**.
-
-### Transactions & budget
-
-- **US-T1** — En tant qu’**utilisateur**, je veux **enregistrer une dépense en FCFA avec catégorie et compte** afin de **voir mon budget et ma trésorerie à jour**.
-- **US-T2** — En tant qu’**utilisateur**, je veux **enregistrer un revenu** afin de **créditer un compte et compléter mon mois**.
-- **US-T3** — En tant qu’**utilisateur**, je veux **voir mon reste à vivre / budget par jour** afin de **m’ajuster avant la fin du mois**.
-
-### Comptes & trésorerie
-
-- **US-C1** — En tant qu’**utilisateur**, je veux **créer plusieurs comptes** (Wave, banque, espèces…) afin de **refléter ma réalité**.
-- **US-C2** — En tant qu’**utilisateur**, je veux **modifier ou archiver un compte** afin de **corriger ou ranger** sans perdre l’historique si les règles le permettent.
-- **US-C3** — En tant qu’**utilisateur**, je veux **transférer de l’argent entre comptes** afin de **ne pas confondre avec une dépense budgétaire**.
-- **US-C4** — En tant qu’**utilisateur**, je veux **voir les mouvements d’un compte** afin de **justifier un solde**.
-
-### Épargne, projets, envies
-
-- **US-E1** — En tant qu’**utilisateur**, je veux **définir une épargne ou un projet** avec objectif afin de **mettre de côté de façon structurée**.
-- **US-W1** — En tant qu’**utilisateur**, je veux **tenir une liste d’envies / courses** afin de **planifier des achats sans oublis**.
-
-### Prêts
-
-- **US-L1** — En tant qu’**utilisateur**, je veux **enregistrer un prêt et son échéancier** afin de **visualiser les mensualités**.
-- **US-L2** — En tant qu’**utilisateur**, je veux **marquer une échéance comme payée** afin de **garder un historique fiable**.
-
-*(Les user stories peuvent être découpées en tickets plus petits côté dev / QA.)*
+- **Mettre à jour** ce fichier lors de l’ajout d’un **écran majeur**, d’un **flux utilisateur** important, ou d’une **nouvelle entité métier** (nouveau type d’opération, nouveau module).
+- Titres affichés dans l’en-tête : `src/lib/pageTitles.ts`.
+- Ce document doit rester **compréhensible par un lecteur non technique** dans les sections 1 à 11 ; l’annexe §12 peut être plus dense.
 
 ---
 
-## 7. Synchronisation des données (UX « temps réel » côté client)
-
-Sans WebSocket : l’app s’appuie sur :
-
-- **`fetchAccounts`** après les opérations qui touchent aux soldes.
-- Un compteur **`accountsRevision`** incrémenté après rechargements des comptes (hors premier chargement), pour **rafraîchir** par ex. la page **Mouvements** d’un compte.
-- **`BroadcastChannel`** pour **synchroniser plusieurs onglets**.
-- **`visibilitychange`** pour **recharger les comptes** au retour sur l’onglet.
-
----
-
-## 8. API & persistance (logique côté serveur)
-
-- Les routes **`/api/*`** valident la session (`getSessionFromCookies`) quand nécessaire.
-- **`src/lib/db.ts`** concentre migrations, requêtes, et règles (ex. suppression de compte, soldes, prêts).
-- Les types dans **`src/lib/types.ts`** alignent le **contrat** JSON avec le front.
-
----
-
-## 9. Contraintes & règles métier à connaître (non exhaustif)
-
-- Suppression d’un **compte** souvent **bloquée** si des dépenses, revenus ou transferts y sont encore liés (message invitant à archiver ou réaffecter).
-- **Dernier compte** : typiquement non supprimable.
-- **Coffre** : respect du verrou pour les sorties (débits) ; exceptions via **déblocage** selon l’UI.
-- Montants en **entiers FCFA** arrondis côté API sur plusieurs opérations.
-
----
-
-## 10. Évolutions possibles (idées)
-
-- Import relevé bancaire / catégorisation automatique.
-- Rappels push (nécessite service worker / backend dédié).
-- Multi-devises (au-delà du CFA).
-- Rôles / partage de budget en foyer.
-
----
-
-## 11. Maintenance de ce document
-
-- **Tenir à jour** lors d’ajout de route majeure, changement de flux auth, ou nouvelle entité métier.
-- Référence rapide des titres de page : `src/lib/pageTitles.ts`.
-
----
-
-*Document généré pour le dépôt **monbudget** (Yenni) — à adapter au fil des releases.*
+*Projet **monbudget** — nom produit **Yenni**. Document pour la compréhension produit, support et onboarding ; dernière révision globale : structuration « tout inclus » pour publics techniques et non techniques.*

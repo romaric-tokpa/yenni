@@ -1,105 +1,44 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { ArrowRight, Wallet, Settings, PiggyBank } from "lucide-react";
+import LandingPage from "@/components/LandingPage";
 
 export default function Home() {
   const router = useRouter();
-  const [checking, setChecking] = useState(true);
+  const [phase, setPhase] = useState<"checking" | "landing">("checking");
 
   useEffect(() => {
-    fetch("/api/auth/me")
+    fetch("/api/auth/me", { credentials: "include" })
       .then((r) => {
         if (r.ok) return r.json();
-        throw new Error("not auth");
+        return null;
       })
       .then((data) => {
-        if (data.user) {
+        if (data?.user) {
           router.replace("/dashboard");
-        } else {
-          router.replace("/login");
+          return;
         }
+        setPhase("landing");
       })
       .catch(() => {
-        setChecking(false);
+        setPhase("landing");
       });
   }, [router]);
 
-  if (checking) {
+  if (phase === "checking") {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center bg-[var(--bg-primary)] px-4">
         <div className="text-center">
-          <div className="mb-4 animate-pulse flex justify-center">
-            <img src="/api/logo" alt="Yenni" className="w-16 h-16" />
+          <div className="mb-4 flex justify-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/api/logo" alt="" className="h-16 w-16 animate-pulse opacity-90" width={64} height={64} />
           </div>
           <div className="font-mono text-lg text-emerald-400">Yenni</div>
-          <div className="text-sm text-slate-500 mt-2">Chargement...</div>
+          <div className="mt-2 text-sm text-neutral-500">Chargement…</div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <div className="glass-strong rounded-2xl p-6 sm:p-10 max-w-lg w-full text-center animate-slide-up">
-        <div className="mb-5 flex justify-center">
-          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/20 flex items-center justify-center p-3">
-            <img src="/api/logo" alt="Yenni" className="w-full h-full object-contain" />
-          </div>
-        </div>
-        <h1 className="text-xl sm:text-2xl font-bold mb-2 bg-gradient-to-r from-emerald-400 to-emerald-400 bg-clip-text text-transparent">
-          Bienvenue sur Yenni
-        </h1>
-        <p className="text-slate-400 text-sm mb-8">
-          Configure ton budget pour commencer à suivre tes finances.
-        </p>
-
-        <div className="grid gap-3 mb-8 text-left">
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0">
-              <Wallet size={18} className="text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-xs font-medium">Renseigne tes revenus</div>
-              <div className="text-[10px] text-slate-500">Salaire, revenus complémentaires</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
-            <div className="w-9 h-9 rounded-lg bg-red-500/15 flex items-center justify-center shrink-0">
-              <Settings size={18} className="text-red-400" />
-            </div>
-            <div>
-              <div className="text-xs font-medium">Ajoute tes charges fixes</div>
-              <div className="text-[10px] text-slate-500">Loyer, abonnements, crédits</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0">
-              <PiggyBank size={18} className="text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-xs font-medium">Définis tes budgets</div>
-              <div className="text-[10px] text-slate-500">Par catégorie de dépenses</div>
-            </div>
-          </div>
-        </div>
-
-        <Link
-          href="/register"
-          prefetch={false}
-          className="btn-primary w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 mb-3"
-        >
-          Créer un compte <ArrowRight size={16} />
-        </Link>
-        <Link
-          href="/login"
-          prefetch={false}
-          className="w-full py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border border-white/10 text-slate-400 hover:bg-white/5 transition-colors"
-        >
-          Se connecter
-        </Link>
-      </div>
-    </div>
-  );
+  return <LandingPage />;
 }
