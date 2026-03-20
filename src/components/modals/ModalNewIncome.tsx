@@ -3,17 +3,7 @@
 import { useState } from "react";
 import { TrendingUp, X, Check } from "lucide-react";
 import type { BudgetContextValue } from "./types";
-
-const INCOME_SOURCES = [
-  { id: "salary", label: "Salaire" },
-  { id: "freelance", label: "Freelance" },
-  { id: "gift", label: "Don / Cadeau" },
-  { id: "refund", label: "Remboursement" },
-  { id: "investment", label: "Investissement" },
-  { id: "project", label: "Épargne projet" },
-  { id: "loan_recovery", label: "Remboursement prêt reçu" },
-  { id: "other", label: "Autre" },
-];
+import { INCOME_TYPE_OPTIONS } from "@/lib/incomeSources";
 
 interface ModalNewIncomeProps {
   onClose: () => void;
@@ -113,13 +103,13 @@ export default function ModalNewIncome({ onClose, budget }: ModalNewIncomeProps)
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-neutral-500 mb-1.5 block">Source</label>
+            <label className="text-xs text-neutral-500 mb-1.5 block">Type de revenu</label>
             <select
               className="input-field"
               value={form.source}
               onChange={(e) => setForm({ ...form, source: e.target.value })}
             >
-              {INCOME_SOURCES.map((s) => (
+              {INCOME_TYPE_OPTIONS.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.label}
                 </option>

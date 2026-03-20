@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { ArrowRightLeft, X, Check } from "lucide-react";
-import { isVaultAccountLocked } from "@/lib/constants";
+import { accountHasActiveOutgoingLock } from "@/lib/constants";
 import type { BudgetContextValue } from "./types";
 
 interface ModalQuickTransferProps {
@@ -13,7 +13,7 @@ interface ModalQuickTransferProps {
 export default function ModalQuickTransfer({ onClose, budget }: ModalQuickTransferProps) {
   const { showToast, fetchAccounts, accountsWithBalance } = budget;
   const activeAccounts = accountsWithBalance.filter((a) => !a.is_archived);
-  const fromAccounts = activeAccounts.filter((a) => !isVaultAccountLocked(a.vault_unlocks_on));
+  const fromAccounts = activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on));
 
   const [form, setForm] = useState({
     from_account_id: "",

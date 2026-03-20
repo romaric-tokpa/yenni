@@ -7,10 +7,10 @@ import { mutate } from "swr";
 import { BudgetConfig, Expense, Income, Project, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput, AccountWithBalance } from "@/lib/types";
 import {
   DEFAULT_CONFIG,
-  INCOME_SOURCE_SALARY_SETTINGS,
   sumActiveAccountBalances,
   sumLiquideCashAndMobileMoney,
 } from "@/lib/constants";
+import { isIncomeCountedInMonthlyBudget } from "@/lib/incomeSources";
 
 /** Invalide le cache de l'historique pour forcer un rafraîchissement */
 function invalidateHistoryCache() {
@@ -43,7 +43,6 @@ export function useBudget() {
   const [salaries, setSalaries] = useState<number[]>(Array(12).fill(0));
   /** Compte de versement du salaire par mois (0–11), année = selectedYear */
   const [salaryAccountIds, setSalaryAccountIds] = useState<(number | null)[]>(() => Array(12).fill(null));
-  const [otherIncomes, setOtherIncomes] = useState<number[]>(Array(12).fill(0));
   const [projects, setProjects] = useState<Project[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loanPayments, setLoanPayments] = useState<LoanPayment[]>([]);
@@ -59,6 +58,10 @@ export function useBudget() {
   const [accountsRevision, setAccountsRevision] = useState(0);
   const accountsHydratedRef = useRef(false);
   const lastAccountsBroadcastTsRef = useRef(0);
+  /** Évite de refetch mois/fixes/catégories au 1er rendu (déjà couvert par le chargement initial). */
+  const skipInitialMonthScopedRef = useRef(true);
+  /** Idem pour épargne / salaires (effet année). */
+  const skipInitialYearScopedRef = useRef(true);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -151,13 +154,6 @@ export function useBudget() {
     } catch {
       /* ignore */
     }
-  }, [selectedYear]);
-
-  const fetchOtherIncomes = useCallback(async () => {
-    try {
-      const r = await fetch(`/api/other-incomes?year=${selectedYear}`);
-      if (r.ok) setOtherIncomes(await r.json());
-    } catch { /* ignore */ }
   }, [selectedYear]);
 
   const fetchCategoryBudgets = useCallback(async () => {
@@ -277,26 +273,45 @@ export function useBudget() {
     };
   }, [fetchAccounts]);
 
+  /** Montage : données « tableaux de bord » d’abord, le reste en arrière-plan pour ouvrir l’UI plus tôt. */
   useEffect(() => {
-    Promise.all([
-      fetchConfig(),
-      fetchExpenses(),
-      fetchIncomes(),
-      fetchFixedPayments(),
-      fetchSavings(),
-      fetchSalaries(),
-      fetchOtherIncomes(),
+    let cancelled = false;
+    const background = Promise.all([
       fetchProjects(),
-      fetchMonthProjectFunds(),
-      fetchCategoryBudgets(),
       fetchLoans(),
       fetchLoanPayments(),
       fetchPlannedExpenses(),
-      fetchAccounts(),
-    ]).then(() => setLoading(false));
-  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchOtherIncomes, fetchProjects, fetchMonthProjectFunds, fetchCategoryBudgets, fetchLoans, fetchLoanPayments, fetchPlannedExpenses, fetchAccounts]);
+      fetchMonthProjectFunds(),
+    ]);
+    const run = async () => {
+      await Promise.all([
+        fetchConfig(),
+        fetchAccounts(),
+        fetchExpenses(),
+        fetchIncomes(),
+        fetchFixedPayments(),
+        fetchSavings(),
+        fetchSalaries(),
+        fetchCategoryBudgets(),
+      ]);
+      if (!cancelled) setLoading(false);
+      void background.catch(() => {
+        /* ignore */
+      });
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // Uniquement au montage : changements mois/année gérés par les effets dédiés.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
+    if (skipInitialMonthScopedRef.current) {
+      skipInitialMonthScopedRef.current = false;
+      return;
+    }
     fetchExpenses();
     fetchIncomes();
     fetchFixedPayments();
@@ -306,10 +321,13 @@ export function useBudget() {
   }, [selectedMonth, selectedYear, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchLoanPayments, fetchMonthProjectFunds, fetchCategoryBudgets]);
 
   useEffect(() => {
+    if (skipInitialYearScopedRef.current) {
+      skipInitialYearScopedRef.current = false;
+      return;
+    }
     fetchSavings();
     fetchSalaries();
-    fetchOtherIncomes();
-  }, [selectedYear, fetchSavings, fetchSalaries, fetchOtherIncomes]);
+  }, [selectedYear, fetchSavings, fetchSalaries]);
 
   useEffect(() => {
     fetchSavedInPeriod();
@@ -324,7 +342,6 @@ export function useBudget() {
       fetchFixedPayments(),
       fetchSavings(),
       fetchSalaries(),
-      fetchOtherIncomes(),
       fetchProjects(),
       fetchMonthProjectFunds(),
       fetchCategoryBudgets(),
@@ -334,7 +351,7 @@ export function useBudget() {
       fetchAccounts(),
     ]);
     await fetchSavedInPeriod();
-  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchOtherIncomes, fetchProjects, fetchMonthProjectFunds, fetchCategoryBudgets, fetchLoans, fetchLoanPayments, fetchPlannedExpenses, fetchAccounts, fetchSavedInPeriod]);
+  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchProjects, fetchMonthProjectFunds, fetchCategoryBudgets, fetchLoans, fetchLoanPayments, fetchPlannedExpenses, fetchAccounts, fetchSavedInPeriod]);
 
   const updateCategoryBudget = useCallback(
     async (categoryId: string, amount: number) => {
@@ -785,21 +802,6 @@ export function useBudget() {
     [salaries, salaryAccountIds, selectedYear, fetchIncomes, fetchAccounts]
   );
 
-  const updateOtherIncome = useCallback(
-    async (month: number, amount: number) => {
-      const ns = [...otherIncomes];
-      ns[month] = amount;
-      setOtherIncomes(ns);
-      await fetch("/api/other-incomes", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month, year: selectedYear, amount }),
-      });
-      invalidateHistoryCache();
-    },
-    [otherIncomes, selectedYear]
-  );
-
   const addProject = useCallback(
     async (p: Omit<Project, "id" | "created_at">) => {
       const r = await fetch("/api/projects", {
@@ -848,11 +850,7 @@ export function useBudget() {
   // Revenus saisis (hors fonds projet : ceux-ci sont prélevés du solde, comme l'épargne)
   const totalMonthIncomes = useMemo(
     () =>
-      incomes
-        .filter(
-          (i) => i.source !== "project" && i.source !== INCOME_SOURCE_SALARY_SETTINGS,
-        )
-        .reduce((s, i) => s + i.amount, 0),
+      incomes.filter((i) => isIncomeCountedInMonthlyBudget(i.source)).reduce((s, i) => s + i.amount, 0),
     [incomes],
   );
 
@@ -875,8 +873,6 @@ export function useBudget() {
 
   const monthSaving = savings[selectedMonth] || 0;
   const monthSalary = salaries[selectedMonth] || 0;
-  const monthOtherIncome = otherIncomes[selectedMonth] || 0;
-
   const loansById = useMemo(() => {
     const map: Record<number, Loan> = {};
     loans.forEach((l) => { map[l.id] = l; });
@@ -919,8 +915,8 @@ export function useBudget() {
 
   const totalSaved = totalSavedManual + totalProjectSaved;
 
-  // Actifs : salaire + autres revenus (par mois) + revenus saisis + remboursements reçus (prêts perso)
-  const totalIncome = monthSalary + monthOtherIncome + totalMonthIncomes + monthLoanRecovered;
+  // Actifs : salaire (réglages) + revenus saisis (hors sync salaire / projet) + remboursements reçus (prêts perso)
+  const totalIncome = monthSalary + totalMonthIncomes + monthLoanRecovered;
   // Passifs : charges fixes + dépenses + épargne + fonds projet (prélevés du solde) + remboursements dettes
   const totalExpenses = totalFixed + totalMonthSpent + monthSaving + monthProjectFunds + monthLoanRepayments;
   // Solde net du mois (flux) = entrées déclarées − sorties budgétées
@@ -974,8 +970,6 @@ export function useBudget() {
     savings,
     salaries,
     salaryAccountIds,
-    otherIncomes,
-    updateOtherIncome,
     projects,
     selectedMonth,
     selectedYear,

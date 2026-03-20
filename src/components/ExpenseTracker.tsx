@@ -1,11 +1,11 @@
 "use client";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatCFA, MONTHS_FULL, EXPENSES_PAGE_SIZE, getSelectableYears, suggestedTransactionFeePercentFromAccount, isVaultAccountLocked } from "@/lib/constants";
+import { formatCFA, MONTHS_FULL, EXPENSES_PAGE_SIZE, getSelectableYears, suggestedTransactionFeePercentFromAccount, accountHasActiveOutgoingLock } from "@/lib/constants";
 import { BudgetConfig, Expense, FixedChargePayment, Category, PlannedExpense, AccountWithBalance, Income, AccountTransfer } from "@/lib/types";
 import { Plus, Trash2, X, FileText, Check, Landmark, CalendarClock, Clock, CircleCheck, Pencil, CirclePlay, History, Calendar, ChevronLeft, ChevronRight, FileSpreadsheet, List, CalendarDays, TrendingUp, ArrowRightLeft, Filter } from "lucide-react";
 import { exportTransactionsCSV } from "@/lib/exportUtils";
-import { getIncomeSourceLabel } from "@/lib/incomeSources";
+import { getIncomeSourceLabel, isIncomeCountedInMonthlyBudget } from "@/lib/incomeSources";
 import { getModalHref } from "@/lib/modal";
 import Icon from "./ui/Icon";
 import AccountSelect from "./AccountSelect";
@@ -108,7 +108,7 @@ export default function ExpenseTracker({
     [accountsWithBalance]
   );
   const debitAccounts = useMemo(
-    () => activeAccounts.filter((a) => !isVaultAccountLocked(a.vault_unlocks_on)),
+    () => activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)),
     [activeAccounts]
   );
   const firstDebitAccountId = debitAccounts[0]?.id;
@@ -148,7 +148,15 @@ export default function ExpenseTracker({
   }, [expenses, fixedPayments, incomes, transfers]);
 
   const totalAllSpent = totalMonthSpent + totalFixed;
-  const totalManualIncomes = useMemo(() => incomes.reduce((s, i) => s + i.amount, 0), [incomes]);
+  const totalManualIncomes = useMemo(
+    () => incomes.filter((i) => isIncomeCountedInMonthlyBudget(i.source)).reduce((s, i) => s + i.amount, 0),
+    [incomes],
+  );
+  /** Volume transféré sur le mois (montants + frais), pour la pastille synthèse. */
+  const totalTransfersVolume = useMemo(
+    () => transfers.reduce((s, t) => s + t.amount + (t.fee ?? 0), 0),
+    [transfers],
+  );
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -525,11 +533,11 @@ export default function ExpenseTracker({
       <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
-            { label: "Dépenses variables", value: formatCFA(totalMonthSpent), color: "text-amber-400" },
-            { label: "Charges fixes", value: formatCFA(totalFixed), color: "text-orange-400" },
-            { label: "Total sorties", value: formatCFA(totalAllSpent), color: "text-red-300" },
-            { label: "Revenus (entrées)", value: formatCFA(totalManualIncomes), color: "text-emerald-400" },
-            { label: "Transferts", value: String(transfers.length), color: "text-cyan-400/90" },
+            { label: "Dépenses variables", value: formatCFA(totalMonthSpent), color: "text-red-400" },
+            { label: "Charges fixes", value: formatCFA(totalFixed), color: "text-red-500" },
+            { label: "Total sorties", value: formatCFA(totalAllSpent), color: "text-red-500" },
+            { label: "Revenus saisis", value: formatCFA(totalManualIncomes), color: "text-emerald-400" },
+            { label: "Transferts (vol.)", value: formatCFA(totalTransfersVolume), color: "text-orange-400" },
             {
               label: "Reste budget var.",
               value: formatCFA(totalBudgetVar - totalMonthSpent),
@@ -680,6 +688,9 @@ export default function ExpenseTracker({
           groupedByDay.map(([dateStr, items]) => {
             const dayOut = items.reduce((s, i) => s + getOutflowAmount(i), 0);
             const dayIn = items.reduce((s, i) => s + getInflowAmount(i), 0);
+            const dayXfer = items
+              .filter((i) => i.kind === "transfer")
+              .reduce((s, i) => s + i.data.amount + (i.data.fee ?? 0), 0);
             const nXfer = items.filter((i) => i.kind === "transfer").length;
             const dateLabel = new Date(dateStr + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
             return (
@@ -688,15 +699,15 @@ export default function ExpenseTracker({
                   <span className="text-sm font-semibold text-slate-300 capitalize">{dateLabel}</span>
                   <div className="text-right text-xs leading-tight">
                     {dayOut > 0 && (
-                      <span className="font-mono font-semibold text-amber-400">−{formatCFA(dayOut)} sorties</span>
+                      <span className="font-mono font-semibold text-red-400">−{formatCFA(dayOut)} sorties</span>
                     )}
                     {dayOut > 0 && dayIn > 0 && <span className="text-neutral-600 mx-2">·</span>}
                     {dayIn > 0 && (
                       <span className="font-mono font-semibold text-emerald-400">+{formatCFA(dayIn)} entrées</span>
                     )}
-                    {nXfer > 0 && (
-                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">
-                        {nXfer} transfert{nXfer > 1 ? "s" : ""}
+                    {dayXfer > 0 && (
+                      <div className="text-[10px] text-orange-400 font-medium mt-0.5 font-mono">
+                        ↔ {formatCFA(dayXfer)} ({nXfer} transfert{nXfer > 1 ? "s" : ""})
                       </div>
                     )}
                   </div>
@@ -721,7 +732,7 @@ export default function ExpenseTracker({
                           </span>
                           <span className="text-[9px] text-slate-500">{getAccountName(exp.account_id)}</span>
                         </div>
-                        <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{getExpenseTotalLabel(exp)}</div>
+                        <div className="font-mono text-[13px] font-semibold text-red-400 text-right">-{getExpenseTotalLabel(exp)}</div>
                         <div className="flex justify-end gap-0.5">
                           <button onClick={() => handleEditExpense(exp)} className="text-slate-600 hover:text-emerald-400 transition-colors p-1" title="Modifier">
                             <Pencil size={14} />
@@ -747,7 +758,7 @@ export default function ExpenseTracker({
                             <Landmark size={12} /> Charge fixe
                           </span>
                         </div>
-                        <div className="font-mono text-[13px] font-semibold text-orange-300 text-right">-{formatCFA(fp.amount)}</div>
+                        <div className="font-mono text-[13px] font-semibold text-red-400 text-right">-{formatCFA(fp.amount)}</div>
                         <div className="flex justify-end">
                           <button
                             onClick={async () => {
@@ -790,7 +801,7 @@ export default function ExpenseTracker({
                       <div className="font-mono text-xs text-slate-500">{xfer.time && xfer.time !== "00:00" ? xfer.time : "—"}</div>
                       <div className="text-[13px]">{xfer.notes?.trim() ? xfer.notes : "Transfert entre comptes"}</div>
                       <div className="flex flex-col gap-0.5">
-                        <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit bg-cyan-500/15 text-cyan-300">
+                        <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit bg-orange-500/15 text-orange-300">
                           <ArrowRightLeft size={12} /> Transfert
                         </span>
                         <span className="text-[9px] text-slate-500">
@@ -798,7 +809,7 @@ export default function ExpenseTracker({
                         </span>
                       </div>
                       <div className="text-right">
-                        <div className="font-mono text-[13px] font-semibold text-cyan-200/90">↔ {formatCFA(xfer.amount)}</div>
+                        <div className="font-mono text-[13px] font-semibold text-orange-400">↔ {formatCFA(xfer.amount)}</div>
                         {fee > 0 && <div className="text-[10px] text-slate-500">frais {formatCFA(fee)}</div>}
                       </div>
                       <div className="flex justify-end">
@@ -834,7 +845,7 @@ export default function ExpenseTracker({
                     </span>
                     <span className="text-[9px] text-slate-500">{getAccountName(exp.account_id)}</span>
                   </div>
-                  <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{getExpenseTotalLabel(exp)}</div>
+                  <div className="font-mono text-[13px] font-semibold text-red-400 text-right">-{getExpenseTotalLabel(exp)}</div>
                   <div className="flex justify-end gap-0.5">
                     <button onClick={() => handleEditExpense(exp)} className="text-slate-600 hover:text-emerald-400 transition-colors p-1" title="Modifier">
                       <Pencil size={14} />
@@ -863,7 +874,7 @@ export default function ExpenseTracker({
                       <Landmark size={12} /> Charge fixe
                     </span>
                   </div>
-                  <div className="font-mono text-[13px] font-semibold text-orange-300 text-right">-{formatCFA(fp.amount)}</div>
+                  <div className="font-mono text-[13px] font-semibold text-red-400 text-right">-{formatCFA(fp.amount)}</div>
                   <div className="flex justify-end">
                     <button
                       onClick={async () => {
@@ -912,7 +923,7 @@ export default function ExpenseTracker({
                 </div>
                 <div className="text-[13px]">{xfer.notes?.trim() ? xfer.notes : "Transfert entre comptes"}</div>
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit bg-cyan-500/15 text-cyan-300">
+                  <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit bg-orange-500/15 text-orange-300">
                     <ArrowRightLeft size={12} /> Transfert
                   </span>
                   <span className="text-[9px] text-slate-500">
@@ -920,7 +931,7 @@ export default function ExpenseTracker({
                   </span>
                 </div>
                 <div className="text-right">
-                  <div className="font-mono text-[13px] font-semibold text-cyan-200/90">↔ {formatCFA(xfer.amount)}</div>
+                  <div className="font-mono text-[13px] font-semibold text-orange-400">↔ {formatCFA(xfer.amount)}</div>
                   {fee > 0 && <div className="text-[10px] text-slate-500">frais {formatCFA(fee)}</div>}
                 </div>
                 <div className="flex justify-end">
@@ -964,6 +975,9 @@ export default function ExpenseTracker({
             {groupedByDay.map(([dateStr, items]) => {
               const dayOut = items.reduce((s, i) => s + getOutflowAmount(i), 0);
               const dayIn = items.reduce((s, i) => s + getInflowAmount(i), 0);
+              const dayXfer = items
+                .filter((i) => i.kind === "transfer")
+                .reduce((s, i) => s + i.data.amount + (i.data.fee ?? 0), 0);
               const nXfer = items.filter((i) => i.kind === "transfer").length;
               const dateLabel = new Date(dateStr + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
               return (
@@ -971,11 +985,11 @@ export default function ExpenseTracker({
                   <div className="px-4 py-2.5 bg-white/[0.03] flex flex-col gap-1 border-b border-white/5 sm:flex-row sm:justify-between sm:items-center">
                     <span className="text-sm font-semibold text-slate-300 capitalize">{dateLabel}</span>
                     <div className="text-xs text-right">
-                      {dayOut > 0 && <span className="font-mono font-semibold text-amber-400">−{formatCFA(dayOut)} </span>}
+                      {dayOut > 0 && <span className="font-mono font-semibold text-red-400">−{formatCFA(dayOut)} </span>}
                       {dayIn > 0 && <span className="font-mono font-semibold text-emerald-400">+{formatCFA(dayIn)}</span>}
-                      {nXfer > 0 && (
-                        <div className="text-[10px] text-slate-500">
-                          {nXfer} transfert{nXfer > 1 ? "s" : ""}
+                      {dayXfer > 0 && (
+                        <div className="text-[10px] text-orange-400 font-mono font-medium">
+                          ↔ {formatCFA(dayXfer)} ({nXfer} transfert{nXfer > 1 ? "s" : ""})
                         </div>
                       )}
                     </div>
@@ -985,10 +999,10 @@ export default function ExpenseTracker({
                       if (item.kind === "fixed") {
                         const fp = item.data;
                         return (
-                          <div key={`f-${fp.id}`} className="rounded-lg border border-white/5 p-3" style={{ borderLeft: "3px solid rgb(249 115 22 / 0.6)" }}>
+                          <div key={`f-${fp.id}`} className="rounded-lg border border-white/5 p-3" style={{ borderLeft: "3px solid rgb(248 113 113 / 0.55)" }}>
                             <div className="flex justify-between items-start">
                               <div className="text-[13px] font-medium">{fp.label}</div>
-                              <div className="font-mono text-sm font-bold text-orange-300">-{formatCFA(fp.amount)}</div>
+                              <div className="font-mono text-sm font-bold text-red-400">-{formatCFA(fp.amount)}</div>
                             </div>
                             <div className="flex justify-between items-center mt-1">
                               <span className="text-[9px] text-slate-500">
@@ -1032,7 +1046,7 @@ export default function ExpenseTracker({
                         const xfer = item.data;
                         const fee = xfer.fee ?? 0;
                         return (
-                          <div key={`t-${xfer.id}`} className="rounded-lg border border-white/5 p-3" style={{ borderLeft: "3px solid rgb(34 211 238 / 0.5)" }}>
+                          <div key={`t-${xfer.id}`} className="rounded-lg border border-white/5 p-3" style={{ borderLeft: "3px solid rgb(251 146 60 / 0.55)" }}>
                             <div className="flex justify-between items-start gap-2">
                               <div className="min-w-0 flex-1">
                                 <div className="text-sm font-medium truncate">{xfer.notes?.trim() ? xfer.notes : "Transfert"}</div>
@@ -1041,7 +1055,7 @@ export default function ExpenseTracker({
                                 </div>
                               </div>
                               <div className="text-right shrink-0">
-                                <div className="font-mono text-sm font-bold text-cyan-200/90">↔ {formatCFA(xfer.amount)}</div>
+                                <div className="font-mono text-sm font-bold text-orange-400">↔ {formatCFA(xfer.amount)}</div>
                                 {fee > 0 && <div className="text-[10px] text-slate-500">frais {formatCFA(fee)}</div>}
                                 <button onClick={() => handleDeleteTransfer(xfer.id)} className="p-1 text-slate-600 hover:text-red-400 mt-1">
                                   <Trash2 size={13} />
@@ -1068,7 +1082,7 @@ export default function ExpenseTracker({
                               </div>
                             </div>
                             <div className="flex items-center gap-1 shrink-0 ml-2">
-                              <span className="font-mono text-sm font-bold text-amber-400">-{getExpenseTotalLabel(exp)}</span>
+                              <span className="font-mono text-sm font-bold text-red-400">-{getExpenseTotalLabel(exp)}</span>
                               <button onClick={() => handleEditExpense(exp)} className="p-1.5 text-slate-500 active:text-emerald-400">
                                 <Pencil size={14} />
                               </button>
@@ -1091,7 +1105,7 @@ export default function ExpenseTracker({
               if (item.kind === "fixed") {
                 const fp = item.data;
                 return (
-                  <div key={`f-${fp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(249 115 22 / 0.6)" }}>
+                  <div key={`f-${fp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(248 113 113 / 0.55)" }}>
                     <div className="flex justify-between items-start mb-1.5">
                       <div>
                         <div className="text-[13px] font-medium flex items-center gap-1.5">
@@ -1104,7 +1118,7 @@ export default function ExpenseTracker({
                           {fp.notes && ` — ${fp.notes}`}
                         </div>
                       </div>
-                      <div className="font-mono text-sm font-bold text-orange-300">-{formatCFA(fp.amount)}</div>
+                      <div className="font-mono text-sm font-bold text-red-400">-{formatCFA(fp.amount)}</div>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 inline-flex items-center gap-1">
@@ -1151,7 +1165,7 @@ export default function ExpenseTracker({
                 const xfer = item.data;
                 const fee = xfer.fee ?? 0;
                 return (
-                  <div key={`t-${xfer.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(34 211 238 / 0.5)" }}>
+                  <div key={`t-${xfer.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(251 146 60 / 0.55)" }}>
                     <div className="flex justify-between items-start mb-1.5 gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium truncate">{xfer.notes?.trim() ? xfer.notes : "Transfert entre comptes"}</div>
@@ -1164,7 +1178,7 @@ export default function ExpenseTracker({
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="font-mono text-sm font-bold text-cyan-200/90">↔ {formatCFA(xfer.amount)}</div>
+                        <div className="font-mono text-sm font-bold text-orange-400">↔ {formatCFA(xfer.amount)}</div>
                         {fee > 0 && <div className="text-[10px] text-slate-500">frais {formatCFA(fee)}</div>}
                         <button onClick={() => handleDeleteTransfer(xfer.id)} className="text-slate-500 active:text-red-400 p-1.5 mt-1">
                           <Trash2 size={14} />
@@ -1197,7 +1211,7 @@ export default function ExpenseTracker({
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
-                      <span className="font-mono text-sm font-bold text-amber-400">-{getExpenseTotalLabel(exp)}</span>
+                      <span className="font-mono text-sm font-bold text-red-400">-{getExpenseTotalLabel(exp)}</span>
                       <button onClick={() => handleEditExpense(exp)} className="text-slate-500 active:text-emerald-400 p-1.5" title="Modifier">
                         <Pencil size={14} />
                       </button>
@@ -1727,7 +1741,7 @@ function HistoryByPeriod({
             </div>
             <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-center">
               <div className="text-[10px] text-neutral-500">Moyenne / jour</div>
-              <div className="font-mono text-sm font-bold text-amber-400 mt-0.5">{formatCFA(avgDaily)}</div>
+              <div className="font-mono text-sm font-bold text-red-400 mt-0.5">{formatCFA(avgDaily)}</div>
             </div>
           </div>
 

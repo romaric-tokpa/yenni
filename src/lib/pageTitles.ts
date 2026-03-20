@@ -16,7 +16,7 @@ const RULES: { test: (p: string) => boolean; title: string }[] = [
   { test: (p) => p === "/wishes" || p.startsWith("/wishes/"), title: "Envies" },
   { test: (p) => p === "/shopping-lists" || p.startsWith("/shopping-lists/"), title: "Courses" },
   { test: (p) => p === "/projects" || p.startsWith("/projects/"), title: "Projets" },
-  { test: (p) => p === "/history", title: "Historique" },
+  { test: (p) => p === "/history", title: "Indicateurs" },
   { test: (p) => p.startsWith("/settings"), title: "Réglages" },
   { test: (p) => p === "/dashboard", title: "Accueil" },
 ];

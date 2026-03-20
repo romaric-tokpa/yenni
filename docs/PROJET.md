@@ -77,7 +77,7 @@ Types principaux (voir `ACCOUNT_KIND_PRESETS` dans le code) : espèces, mobile m
 
 ### 3.3 Configuration budget (`BudgetConfig`)
 
-Catégories, charges fixes, salaires / autres revenus par mois, projets, fonds d’urgence (dont lien possible vers un compte coffre), logo app, etc.
+Catégories, charges fixes, salaire mensuel (réglages), types de revenu à la saisie (Freelance, Don, Commissions, etc.), projets, fonds d’urgence (dont lien possible vers un compte coffre), logo app, etc.
 
 ### 3.4 Prêts
 

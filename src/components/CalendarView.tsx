@@ -1,25 +1,15 @@
 "use client";
 import { useState, useMemo } from "react";
-import { formatCFA, MONTHS_FULL, isVaultAccountLocked } from "@/lib/constants";
+import { formatCFA, MONTHS_FULL, accountHasActiveOutgoingLock } from "@/lib/constants";
 import { BudgetConfig, Expense, Income, FixedChargePayment, LoanPayment, Loan, CalendarEvent, AccountWithBalance } from "@/lib/types";
 import Icon from "./ui/Icon";
 import {
   ChevronLeft, ChevronRight, Plus, X, Check, Wallet, HandCoins,
   TrendingDown, TrendingUp, Clock, ArrowDownCircle, ArrowUpCircle,
 } from "lucide-react";
+import { INCOME_TYPE_OPTIONS, getIncomeSourceLabel } from "@/lib/incomeSources";
 
 const DAYS_FR = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
-
-const INCOME_SOURCES = [
-  { id: "salary", label: "Salaire" },
-  { id: "freelance", label: "Freelance" },
-  { id: "gift", label: "Don / Cadeau" },
-  { id: "refund", label: "Remboursement" },
-  { id: "investment", label: "Investissement" },
-  { id: "project", label: "Épargne projet" },
-  { id: "loan_recovery", label: "Remboursement prêt reçu" },
-  { id: "other", label: "Autre" },
-];
 
 interface BudgetData {
   config: BudgetConfig;
@@ -85,7 +75,7 @@ export default function CalendarView({
 
   const activeAccounts = useMemo(() => accountsWithBalance.filter((a) => !a.is_archived), [accountsWithBalance]);
   const debitAccounts = useMemo(
-    () => activeAccounts.filter((a) => !isVaultAccountLocked(a.vault_unlocks_on)),
+    () => activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)),
     [activeAccounts],
   );
   const defaultAccountId = activeAccounts[0]?.id;
@@ -306,9 +296,9 @@ export default function CalendarView({
           {[
             { label: "Actifs", value: `+${formatCFA(totalActifsKpi)}`, color: "text-emerald-400", icon: ArrowUpCircle },
             { label: "Revenus (mois)", value: `+${formatCFA(totalIncome)}`, color: "text-emerald-400/90", icon: ArrowUpCircle },
-            { label: "Charges fixes", value: `-${formatCFA(totalFixed)}`, color: "text-orange-400", icon: ArrowDownCircle },
+            { label: "Charges fixes", value: `-${formatCFA(totalFixed)}`, color: "text-red-500", icon: ArrowDownCircle },
             { label: "Prêts", value: `-${formatCFA(monthLoanPayments)}`, color: "text-teal-400", icon: HandCoins },
-            { label: "Dépenses", value: `-${formatCFA(totalMonthSpent)}`, color: "text-amber-400", icon: ArrowDownCircle },
+            { label: "Dépenses variables", value: `-${formatCFA(totalMonthSpent)}`, color: "text-red-400", icon: ArrowDownCircle },
             {
               label: "Liquide dispo.",
               value: `${soldeDisponibleLiquide >= 0 ? "+" : "-"}${formatCFA(Math.abs(soldeDisponibleLiquide))}`,
@@ -397,7 +387,7 @@ export default function CalendarView({
                       </div>
                     )}
                     {totals.totalOut > 0 && (
-                      <div className="text-[8px] lg:text-[9px] font-mono text-amber-400 leading-tight" title={`Dépenses: ${formatCFA(totals.totalOut)}`}>
+                      <div className="text-[8px] lg:text-[9px] font-mono text-red-400 leading-tight" title={`Dépenses: ${formatCFA(totals.totalOut)}`}>
                         -{formatShort(totals.totalOut)}
                       </div>
                     )}
@@ -406,7 +396,7 @@ export default function CalendarView({
                 {hasEvents && (
                   <div className="absolute bottom-1 flex gap-0.5">
                     {totals.totalIn > 0 && <span className="w-1 h-1 rounded-full bg-emerald-400" />}
-                    {totals.totalOut > 0 && <span className="w-1 h-1 rounded-full bg-amber-400" />}
+                    {totals.totalOut > 0 && <span className="w-1 h-1 rounded-full bg-red-400" />}
                   </div>
                 )}
               </button>
@@ -435,9 +425,9 @@ export default function CalendarView({
                   <span className="font-mono text-sm font-bold text-emerald-400">+{formatCFA(t.totalIn)}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <ArrowDownCircle size={16} className="text-amber-400" />
+                  <ArrowDownCircle size={16} className="text-red-400" />
                   <span className="text-xs text-neutral-500">Dépenses</span>
-                  <span className="font-mono text-sm font-bold text-amber-400">-{formatCFA(t.totalOut)}</span>
+                  <span className="font-mono text-sm font-bold text-red-400">-{formatCFA(t.totalOut)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Wallet size={16} className="text-slate-400" />
@@ -470,12 +460,15 @@ export default function CalendarView({
                   ? config.categories.find((c) => c.id === ev.category)
                   : null;
                 const src = ev.type === "income"
-                  ? INCOME_SOURCES.find((s) => s.id === ev.source) || INCOME_SOURCES[INCOME_SOURCES.length - 1]
+                  ? INCOME_TYPE_OPTIONS.find((s) => s.id === ev.source) || {
+                      id: ev.source || "other",
+                      label: getIncomeSourceLabel(ev.source || "other"),
+                    }
                   : null;
                 const bgColor = ev.type === "expense"
                   ? (cat?.color || "#ef4444") + "22"
                   : ev.type === "fixed"
-                  ? "rgba(249,115,22,0.15)"
+                  ? "rgba(248,113,113,0.15)"
                   : ev.type === "loan"
                   ? "rgba(168,85,247,0.15)"
                   : "rgba(16,185,129,0.15)";
@@ -507,7 +500,7 @@ export default function CalendarView({
                           </span>
                         )}
                         {ev.type === "fixed" && (
-                          <span className="text-[9px] lg:text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-400">
+                          <span className="text-[9px] lg:text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400">
                             Charge fixe
                           </span>
                         )}
@@ -523,7 +516,7 @@ export default function CalendarView({
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={`font-mono text-sm font-bold ${
-                        ev.type === "income" ? "text-emerald-400" : ev.type === "fixed" ? "text-orange-300" : ev.type === "loan" ? "text-teal-300" : "text-amber-400"
+                        ev.type === "income" ? "text-emerald-400" : ev.type === "fixed" ? "text-red-500" : ev.type === "loan" ? "text-teal-300" : "text-red-400"
                       }`}>
                         {ev.type === "income" ? "+" : "-"}{formatCFA(ev.amount)}
                       </span>
@@ -589,7 +582,7 @@ export default function CalendarView({
                   <label className="text-xs text-neutral-500 mb-1.5 block">Source</label>
                   <select className="input-field" value={incomeForm.source}
                     onChange={(e) => setIncomeForm({ ...incomeForm, source: e.target.value })}>
-                    {INCOME_SOURCES.map((s) => (
+                    {INCOME_TYPE_OPTIONS.map((s) => (
                       <option key={s.id} value={s.id}>{s.label}</option>
                     ))}
                   </select>

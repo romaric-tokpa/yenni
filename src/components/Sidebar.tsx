@@ -13,7 +13,7 @@ import {
   FolderKanban,
   HandCoins,
   Settings,
-  History,
+  LineChart,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -31,7 +31,7 @@ const tabs = [
   { href: "/shopping-lists", label: "Courses", Icon: ShoppingCart },
   { href: "/loans", label: "Prêts", Icon: HandCoins },
   { href: "/projects", label: "Projets", Icon: FolderKanban },
-  { href: "/history", label: "Historique", Icon: History },
+  { href: "/history", label: "Indicateurs", Icon: LineChart },
   { href: "/settings", label: "Réglages", Icon: Settings },
 ];
 
@@ -51,9 +51,9 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
     <>
       {/* Zone scrollable : logo + nav (le scroll ne s'applique qu'ici si besoin) */}
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
-        <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2"} mb-5 shrink-0`}>
+        <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2"} mb-4 shrink-0`}>
           <Link href="/dashboard" prefetch={false} className="flex items-center gap-2 min-w-0">
-            <img src="/api/logo" alt="Yenni" className="w-9 h-9 shrink-0" />
+            <img src="/api/logo" alt="Yenni" className="w-8 h-8 shrink-0" />
             {!collapsed && (
               <span className="font-semibold text-emerald-400 truncate">Yenni</span>
             )}
@@ -89,8 +89,8 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
       </div>
 
       {/* Footer fixe : toujours visible en bas (budget/jour + user + déconnexion) */}
-      <div className={`flex-shrink-0 pt-4 border-t border-white/5 ${collapsed ? "space-y-2" : "space-y-3"}`}>
-        <div className={`rounded-lg border border-white/5 bg-white/[0.02] ${collapsed ? "p-2 text-center" : "p-3"}`}>
+      <div className={`flex-shrink-0 pt-3 border-t border-white/5 ${collapsed ? "space-y-2" : "space-y-2.5"}`}>
+        <div className={`rounded-lg border border-white/5 bg-white/[0.02] ${collapsed ? "p-1.5 text-center" : "p-2.5"}`}>
           {collapsed ? (
             <div
               className="font-mono text-xs font-bold text-emerald-400"
@@ -108,7 +108,7 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
           )}
         </div>
 
-        <div className={`flex items-center ${collapsed ? "flex-col gap-1.5" : "gap-2.5"} py-2`}>
+        <div className={`flex items-center ${collapsed ? "flex-col gap-1.5" : "gap-2.5"} py-1.5`}>
           <div className={`flex items-center ${collapsed ? "justify-center" : "flex-1 min-w-0"} gap-2.5`}>
             <Avatar avatarPath={user.avatar_path} firstName={user.first_name} lastName={user.last_name} size="sm" className="shrink-0 ring-1 ring-white/10" />
             {!collapsed && (
@@ -139,12 +139,12 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
       <div className={`hidden lg:block shrink-0 ${widthClass} transition-all duration-200`} aria-hidden />
       {/* Sidebar fixe : ne défile pas, footer toujours visible */}
       <aside
-        className={`hidden lg:flex flex-col fixed top-0 left-0 h-screen p-3 transition-[width] duration-200 bg-[var(--bg-surface)] border-r border-white/[0.06] z-30 shadow-[4px_0_24px_rgba(0,0,0,0.25)] ${widthClass}`}
+        className={`hidden lg:flex flex-col fixed top-2 bottom-2 left-0 p-2.5 rounded-r-2xl transition-[width] duration-200 bg-[var(--bg-surface)] border-y border-r border-white/[0.08] z-30 shadow-[4px_0_24px_rgba(0,0,0,0.25)] ${widthClass}`}
       >
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}
-          className="absolute -right-3 top-6 z-10 w-7 h-7 rounded-full bg-[var(--bg-surface)] border border-white/12 flex items-center justify-center text-neutral-400 hover:text-white hover:border-emerald-500/30 shadow-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+          className="absolute -right-3 top-5 z-10 w-7 h-7 rounded-full bg-[var(--bg-surface)] border border-white/12 flex items-center justify-center text-neutral-400 hover:text-white hover:border-emerald-500/30 shadow-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
           title={collapsed ? "Agrandir le menu" : "Réduire le menu"}
           aria-expanded={!collapsed}
         >

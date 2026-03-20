@@ -37,7 +37,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     const nextKind = body.kind !== undefined ? String(body.kind) : existing.kind;
-    if (body.kind !== undefined && nextKind !== "vault") {
+    if (body.kind !== undefined && nextKind !== "vault" && nextKind !== "bank_blocked_savings") {
       updates.vault_unlocks_on = null;
     }
     if (body.kind !== undefined && !nextKind.startsWith("bank_")) {

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useBudgetContext } from "@/contexts/BudgetContext";
 import { formatCFA, accountTypeLabel } from "@/lib/constants";
+import { getIncomeSourceLabel } from "@/lib/incomeSources";
 import type { Account, AccountWithBalance, Expense, Income, AccountTransfer } from "@/lib/types";
 import AccountGlyph from "@/components/ui/AccountGlyph";
 import {
@@ -155,7 +156,7 @@ export default function AccountTransactionsView({ accountId }: { accountId: numb
         time: i.time || "00:00",
         sortKey: sk,
         label: i.description || "Revenu",
-        subtitle: i.source ? `Source · ${i.source}` : "Revenu",
+        subtitle: i.source ? `Type · ${getIncomeSourceLabel(i.source)}` : "Revenu",
         amount: i.amount,
         signedDelta: i.amount,
         icon: ArrowDownLeft,
@@ -180,7 +181,7 @@ export default function AccountTransactionsView({ accountId }: { accountId: numb
         fee: t.fee > 0 ? t.fee : undefined,
         otherAccountId: other,
         icon: ArrowRightLeft,
-        accent: isOut ? "#fbbf24" : "#38bdf8",
+        accent: "#fb923c",
       });
     }
 
@@ -316,7 +317,13 @@ export default function AccountTransactionsView({ accountId }: { accountId: numb
                   </div>
                   <div className="shrink-0 text-right">
                     <div
-                      className={`font-mono text-sm font-semibold tabular-nums ${pos ? "text-emerald-400" : "text-red-400"}`}
+                      className={`font-mono text-sm font-semibold tabular-nums ${
+                        row.kind === "transfer_in" || row.kind === "transfer_out"
+                          ? "text-orange-400"
+                          : pos
+                            ? "text-emerald-400"
+                            : "text-red-400"
+                      }`}
                     >
                       {pos ? "+" : "−"}
                       {formatCFA(Math.abs(row.signedDelta))}

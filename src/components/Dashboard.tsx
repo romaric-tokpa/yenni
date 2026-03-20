@@ -1,21 +1,61 @@
 "use client";
-import { useState, useEffect, type ComponentType } from "react";
-import { formatCFA, MONTHS_FULL, getSelectableYears, getLinkedVaultEmergencyBalance } from "@/lib/constants";
+import { useState, useEffect, useMemo, type ComponentType } from "react";
+import useSWR from "swr";
+import { format, parseISO } from "date-fns";
+import {
+  formatCFA,
+  MONTHS_FULL,
+  getSelectableYears,
+  getLinkedVaultEmergencyBalance,
+  sumActiveAccountBalances,
+  sumLiquideCashAndMobileMoney,
+} from "@/lib/constants";
+import {
+  type TreasuryPeriodMode,
+  todayIsoLocal,
+  lastDayOfMonthIso,
+  endOfYearIso,
+  endOfQuarterIso,
+  effectiveTreasuryThroughDate,
+  isValidIsoDate,
+} from "@/lib/dashboardTreasuryPeriod";
 import Avatar from "./ui/Avatar";
-import { BudgetConfig, Category, FixedCharge, AccountWithBalance } from "@/lib/types";
+import type { BudgetConfig, Category, FixedCharge, AccountWithBalance } from "@/lib/types";
 import DashboardAccountCards from "./DashboardAccountCards";
 import MonthlyBarChart from "./charts/MonthlyBarChart";
 import BudgetPieChart from "./charts/BudgetPieChart";
 import Icon from "./ui/Icon";
 import AnimatedProgressBar from "./ui/AnimatedProgressBar";
 import {
-  TrendingUp, TrendingDown, Wallet, Trophy, Scale, Banknote, HandCoins,
+  TrendingUp, TrendingDown, Wallet, Trophy, Scale, Banknote,
   FolderOpen, PieChart, BarChart3, ClipboardList,
-  CircleCheck, CircleAlert, CircleMinus, FileDown, ArrowRightLeft, ChevronRight, ChevronDown,
+  CircleCheck, CircleAlert, CircleMinus, FileDown, ArrowRightLeft, ChevronLeft, ChevronRight, ChevronDown,
 } from "lucide-react";
 import { exportBilanPDFFromData } from "@/lib/exportUtils";
 import Link from "next/link";
 import { getModalHref } from "@/lib/modal";
+
+const TREASURY_PILLS: { id: TreasuryPeriodMode; label: string; title: string }[] = [
+  { id: "month", label: "Mois", title: "Trésorerie à la fin du mois sélectionné ci-dessous" },
+  { id: "quarter", label: "Trimestre", title: "Trésorerie à la fin du trimestre (année du mois / année)" },
+  { id: "year", label: "Année", title: "Trésorerie au 31/12 de l’année du sélecteur" },
+  { id: "custom", label: "Dates", title: "Plage personnalisée — soldes à la date de fin" },
+];
+
+const filterPillClass = (active: boolean) =>
+  `px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+    active
+      ? "bg-emerald-500/30 text-emerald-300 ring-1 ring-emerald-500/50"
+      : "bg-white/5 text-slate-400 hover:bg-white/10"
+  }`;
+
+/** Bouton chevron rond (navigation mois). */
+const navRoundClass =
+  "inline-flex items-center justify-center size-8 shrink-0 rounded-full border border-white/[0.08] bg-white/[0.05] text-slate-400 hover:bg-white/[0.09] hover:text-slate-200 disabled:opacity-30 transition-colors";
+
+/** Sélecteur mois / année en pastille. */
+const selectPillClass =
+  "h-8 rounded-full border border-white/[0.08] bg-white/[0.05] pl-3 pr-7 text-[11px] text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500/35 shrink-0 cursor-pointer";
 
 interface AuthUser {
   first_name: string;
@@ -31,9 +71,6 @@ interface BudgetData {
   soldeNet: number;
   /** Espèces + mobile money (soldes réels). */
   soldeDisponibleLiquide: number;
-  /** Trésorerie totale (somme des soldes comptes actifs) — sans double-compter les entrées du mois. */
-  totalActifsKpi: number;
-  totalTreasuryBalances: number;
   resteAVivre: number;
   dailyBudget: number;
   daysLeftInMonth: number;
@@ -107,8 +144,6 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     totalExpenses,
     soldeNet,
     soldeDisponibleLiquide,
-    totalActifsKpi,
-    totalTreasuryBalances,
     resteAVivre,
     dailyBudget,
     daysLeftInMonth,
@@ -134,6 +169,94 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
   const [exportingPdf, setExportingPdf] = useState(false);
   const [monthlyChartData, setMonthlyChartData] = useState<Array<{ month: number; Revenus: number; Dépenses: number }> | null>(null);
   const [budgetCategoriesOpen, setBudgetCategoriesOpen] = useState(true);
+
+  /** Période d’affichage des soldes (trésorerie / « actifs »). */
+  const [treasuryMode, setTreasuryMode] = useState<TreasuryPeriodMode>("month");
+  const [treasuryQuarter, setTreasuryQuarter] = useState(() => Math.floor(new Date().getMonth() / 3));
+  const [customFrom, setCustomFrom] = useState(() => format(new Date(new Date().getFullYear(), 0, 1), "yyyy-MM-dd"));
+  const [customTo, setCustomTo] = useState(() => todayIsoLocal());
+
+  const periodEndIso = useMemo(() => {
+    switch (treasuryMode) {
+      case "month":
+        return lastDayOfMonthIso(selectedYear, selectedMonth);
+      case "quarter":
+        return endOfQuarterIso(selectedYear, treasuryQuarter);
+      case "year":
+        return endOfYearIso(selectedYear);
+      case "custom": {
+        const a = isValidIsoDate(customFrom) ? customFrom : todayIsoLocal();
+        const b = isValidIsoDate(customTo) ? customTo : todayIsoLocal();
+        return a <= b ? b : a;
+      }
+      default:
+        return lastDayOfMonthIso(selectedYear, selectedMonth);
+    }
+  }, [treasuryMode, selectedYear, selectedMonth, treasuryQuarter, customFrom, customTo]);
+
+  const effectiveThrough = useMemo(
+    () => effectiveTreasuryThroughDate(periodEndIso),
+    [periodEndIso],
+  );
+
+  const fetchAccountsAsOf = (url: string) =>
+    fetch(url).then((r) => {
+      if (!r.ok) throw new Error("accounts");
+      return r.json() as Promise<AccountWithBalance[]>;
+    });
+
+  const treasurySwrKey = `/api/accounts?through=${encodeURIComponent(effectiveThrough)}`;
+  const {
+    data: treasuryAccountsRaw,
+    error: treasuryError,
+    isLoading: treasuryLoading,
+    isValidating: treasuryValidating,
+  } = useSWR<AccountWithBalance[]>(treasurySwrKey, fetchAccountsAsOf);
+
+  const treasuryAccounts = Array.isArray(treasuryAccountsRaw) ? treasuryAccountsRaw : null;
+  const showTreasuryLoading =
+    treasuryAccounts == null && !treasuryError && (treasuryLoading || treasuryValidating);
+
+  const displayTreasuryAccounts = treasuryAccounts ?? accountsWithBalance;
+  const totalActifsForPeriod = sumActiveAccountBalances(displayTreasuryAccounts);
+  const soldeLiquideForPeriod = sumLiquideCashAndMobileMoney(displayTreasuryAccounts);
+
+  const treasurySubLabel = useMemo(() => {
+    try {
+      const d = format(parseISO(effectiveThrough), "dd/MM/yyyy");
+      if (effectiveThrough !== periodEndIso) {
+        return `Soldes au ${d} (cible ${format(parseISO(periodEndIso), "dd/MM/yyyy")})`;
+      }
+      return `Soldes au ${d}`;
+    } catch {
+      return null;
+    }
+  }, [effectiveThrough, periodEndIso]);
+
+  const setTreasuryModeAndSync = (mode: TreasuryPeriodMode) => {
+    setTreasuryMode(mode);
+    if (mode === "quarter") setTreasuryQuarter(Math.floor(selectedMonth / 3));
+  };
+
+  const selectableYearsArr = useMemo(() => getSelectableYears(), []);
+  const yMin = selectableYearsArr[0];
+  const yMax = selectableYearsArr[selectableYearsArr.length - 1];
+  const canPrevMonth = selectedYear > yMin || selectedMonth > 0;
+  const canNextMonth = selectedYear < yMax || selectedMonth < 11;
+  const goPrevMonth = () => {
+    if (selectedMonth > 0) setSelectedMonth(selectedMonth - 1);
+    else if (selectedYear > yMin) {
+      setSelectedYear(selectedYear - 1);
+      setSelectedMonth(11);
+    }
+  };
+  const goNextMonth = () => {
+    if (selectedMonth < 11) setSelectedMonth(selectedMonth + 1);
+    else if (selectedYear < yMax) {
+      setSelectedYear(selectedYear + 1);
+      setSelectedMonth(0);
+    }
+  };
 
   useEffect(() => {
     fetch(`/api/budget-summary?year=${selectedYear}`)
@@ -170,9 +293,9 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
         catSpending,
         categories: config.categories,
         effectiveBudgets: effectiveCategoryBudgets,
-        totalActifsKpi,
-        soldeDisponibleLiquide,
-        totalTreasuryBalances,
+        totalActifsKpi: totalActifsForPeriod,
+        soldeDisponibleLiquide: soldeLiquideForPeriod,
+        totalTreasuryBalances: totalActifsForPeriod,
       });
     } catch {
       // silent fail
@@ -180,11 +303,19 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     setExportingPdf(false);
   };
 
+  const actifsKpiSub = treasuryError
+    ? "Impossible de charger les soldes à date — montant des comptes en cache (indicatif)."
+    : showTreasuryLoading
+      ? "Chargement des soldes à la date choisie…"
+      : effectiveThrough === todayIsoLocal()
+        ? "Trésorerie à la date du jour · comptes non archivés."
+        : `Trésorerie au ${format(parseISO(effectiveThrough), "dd/MM/yyyy")} · comptes non archivés.`;
+
   const kpis = [
     {
       label: "Actifs",
-      value: formatCFA(totalActifsKpi),
-      sub: "Trésorerie uniquement — les entrées du mois sont déjà reflétées sur les comptes",
+      value: showTreasuryLoading ? "—" : formatCFA(totalActifsForPeriod),
+      sub: actifsKpiSub,
       color: "text-green-500",
       shadow: "",
       IconComp: TrendingUp,
@@ -201,16 +332,16 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     },
     {
       label: "Solde disponible",
-      value: formatCFA(Math.abs(soldeDisponibleLiquide)),
+      value: showTreasuryLoading ? "—" : formatCFA(Math.abs(soldeLiquideForPeriod)),
       sub:
-        soldeDisponibleLiquide >= 0
-          ? `Espèces + Mobile Money · ${formatCFA(dailyBudget)} / jour · ${daysLeftInMonth} jour${daysLeftInMonth > 1 ? "s" : ""} restant${daysLeftInMonth > 1 ? "s" : ""}`
-          : "Espèces + Mobile Money",
-      color: soldeDisponibleLiquide >= 0 ? "text-green-500" : "text-red-500",
+        soldeLiquideForPeriod >= 0
+          ? `Espèces + Mobile Money (à date) · ${formatCFA(dailyBudget)} / jour · ${daysLeftInMonth} jour${daysLeftInMonth > 1 ? "s" : ""} restant${daysLeftInMonth > 1 ? "s" : ""}`
+          : "Espèces + Mobile Money (à date)",
+      color: soldeLiquideForPeriod >= 0 ? "text-green-500" : "text-red-500",
       shadow: "",
-      IconComp: soldeDisponibleLiquide >= 0 ? Wallet : Scale,
-      iconColor: soldeDisponibleLiquide >= 0 ? "text-green-500" : "text-red-500",
-      prefix: soldeDisponibleLiquide < 0 ? "-" : "",
+      IconComp: soldeLiquideForPeriod >= 0 ? Wallet : Scale,
+      iconColor: soldeLiquideForPeriod >= 0 ? "text-green-500" : "text-red-500",
+      prefix: soldeLiquideForPeriod < 0 ? "-" : "",
     },
     {
       label: "Épargne Cumulée",
@@ -237,6 +368,7 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     {
       label: "Dépensé ce mois",
       value: `${formatCFA(totalMonthSpent)} FCFA`,
+      valueClass: "text-red-400",
       level: (totalMonthSpent <= totalBudgetVar ? "good" : "bad") as "good" | "bad",
     },
     {
@@ -255,41 +387,146 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
 
   return (
     <div className="animate-slide-up">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          {user && (
-            <Avatar
-              avatarPath={user.avatar_path}
-              firstName={user.first_name}
-              lastName={user.last_name}
-              size="lg"
-              className="shrink-0"
-            />
-          )}
-          <div>
-            <h1 className="text-xl lg:text-2xl font-bold tracking-tight">{greeting}</h1>
-            <p className="text-neutral-500 text-xs lg:text-sm mt-0.5">
-              {MONTHS_FULL[selectedMonth]} {selectedYear}
-            </p>
+      {/* En-tête : salut à gauche, pastilles mois / année / PDF à droite (même niveau) */}
+      <div className="mb-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            {user && (
+              <Avatar
+                avatarPath={user.avatar_path}
+                firstName={user.first_name}
+                lastName={user.last_name}
+                size="md"
+                className="shrink-0"
+              />
+            )}
+            <div className="min-w-0">
+              <h1 className="text-lg sm:text-xl font-bold tracking-tight">{greeting}</h1>
+              <p className="text-slate-500 text-[11px] mt-0.5 line-clamp-1">
+                Budget : {MONTHS_FULL[selectedMonth]} {selectedYear}
+              </p>
+            </div>
+          </div>
+
+          <div
+            className="flex flex-wrap items-center gap-1.5 sm:justify-end"
+            role="group"
+            aria-label="Mois budgétaire et export PDF"
+          >
+            <button
+              type="button"
+              onClick={goPrevMonth}
+              disabled={!canPrevMonth}
+              className={navRoundClass}
+              aria-label="Mois précédent"
+            >
+              <ChevronLeft size={17} />
+            </button>
+            <select
+              className={`${selectPillClass} min-w-[6.5rem] max-w-[10rem] sm:max-w-[11rem]`}
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              aria-label="Mois budgétaire"
+            >
+              {MONTHS_FULL.map((m, i) => (
+                <option key={i} value={i}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <select
+              className={`${selectPillClass} w-[5.25rem] sm:w-[5.75rem] min-w-[5.25rem]`}
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              aria-label="Année"
+            >
+              {selectableYearsArr.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={goNextMonth}
+              disabled={!canNextMonth}
+              className={navRoundClass}
+              aria-label="Mois suivant"
+            >
+              <ChevronRight size={17} />
+            </button>
+            <button
+              type="button"
+              onClick={handleExportPDF}
+              disabled={exportingPdf}
+              className="inline-flex items-center justify-center gap-1 rounded-full px-3.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-[11px] font-semibold border border-emerald-500/25 transition-colors shrink-0 disabled:opacity-50"
+              title="Export PDF du bilan"
+            >
+              <FileDown size={13} />
+              {exportingPdf ? "…" : "PDF"}
+            </button>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <select className="input-field w-32 text-sm py-2" value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))}>
-            {MONTHS_FULL.map((m, i) => <option key={i} value={i}>{m}</option>)}
-          </select>
-          <select className="input-field w-24 text-sm py-2" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}>
-            {getSelectableYears().map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-          <button
-            onClick={handleExportPDF}
-            disabled={exportingPdf}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-xs font-medium transition-colors"
-          >
-            <FileDown size={14} />
-            {exportingPdf ? "..." : "PDF"}
-          </button>
+
+        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide mt-3 mb-1.5">
+          Actifs (trésorerie à date)
+        </p>
+        <div className="flex flex-wrap gap-1.5 mb-2" role="tablist" aria-label="Période pour les soldes">
+          {TREASURY_PILLS.map(({ id, label, title }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={treasuryMode === id}
+              title={title}
+              onClick={() => setTreasuryModeAndSync(id)}
+              className={filterPillClass(treasuryMode === id)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
+
+        {treasuryMode === "quarter" && (
+          <div className="flex flex-wrap gap-1.5 mb-2" aria-label="Trimestre">
+            {[0, 1, 2, 3].map((q) => (
+              <button
+                key={q}
+                type="button"
+                title={`Trimestre ${q + 1} · ${selectedYear}`}
+                onClick={() => setTreasuryQuarter(q)}
+                className={filterPillClass(treasuryQuarter === q)}
+              >
+                T{q + 1}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {treasuryMode === "custom" && (
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <input
+              id="treasury-from"
+              type="date"
+              className="input-field text-[11px] py-1 h-8 max-w-[9.75rem]"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              aria-label="Date de début"
+            />
+            <span className="text-slate-600 text-xs" aria-hidden>
+              →
+            </span>
+            <input
+              id="treasury-to"
+              type="date"
+              className="input-field text-[11px] py-1 h-8 max-w-[9.75rem]"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              title="Soldes à cette date (max. aujourd’hui)"
+              aria-label="Date de fin (soldes à cette date)"
+            />
+          </div>
+        )}
       </div>
 
       {/* Actions rapides — barre segmentée */}
@@ -371,7 +608,7 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
         </div>
       </div>
 
-      <DashboardAccountCards accounts={accountsWithBalance} />
+      <DashboardAccountCards accounts={displayTreasuryAccounts} treasurySubLabel={treasurySubLabel} />
 
       {/* KPIs principaux */}
       <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
@@ -396,7 +633,11 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
           <div key={i} className="flex justify-between items-center py-2 px-3 rounded-lg bg-white/[0.02] border border-white/5">
             <div className="min-w-0">
               <div className="text-[10px] text-neutral-500 truncate">{k.label}</div>
-              <div className="font-mono text-xs font-semibold mt-0.5 truncate">{k.value}</div>
+              <div
+                className={`font-mono text-xs font-semibold mt-0.5 truncate ${"valueClass" in k && k.valueClass ? k.valueClass : ""}`}
+              >
+                {k.value}
+              </div>
             </div>
             <StatusDot level={k.level} />
           </div>

@@ -37,6 +37,7 @@ function accountToFormState(acc: AccountWithBalance) {
     vault_lock_preset_months: 6 as number,
     vault_lock_use_custom: false,
     vault_lock_custom_months: "",
+    savings_plan_lock_enabled: false,
   };
 }
 
@@ -69,6 +70,8 @@ const EMPTY_NEW_FORM = {
   vault_lock_preset_months: 6 as number,
   vault_lock_use_custom: false,
   vault_lock_custom_months: "",
+  /** Plan d'épargne : si false, aucune échéance (sorties autorisées comme un compte courant). */
+  savings_plan_lock_enabled: false,
 };
 
 export default function AccountForm({ editAccountId }: { editAccountId?: number }) {
@@ -115,11 +118,19 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
         : undefined;
 
     let vaultLockMonths: number | undefined;
-    if (newForm.kind === "vault" && !isEdit) {
+    const needsLockSchedule =
+      (newForm.kind === "vault" && !isEdit) ||
+      (newForm.kind === "bank_blocked_savings" && !isEdit && newForm.savings_plan_lock_enabled);
+    if (needsLockSchedule) {
       if (newForm.vault_lock_use_custom) {
         const n = Math.floor(Number(newForm.vault_lock_custom_months));
         if (!Number.isFinite(n) || n < 1 || n > 120) {
-          showToast("Indique une durée entre 1 et 120 mois pour le coffre", "error");
+          showToast(
+            newForm.kind === "vault"
+              ? "Indique une durée entre 1 et 120 mois pour le coffre"
+              : "Indique une durée entre 1 et 120 mois pour le verrouillage du plan d'épargne",
+            "error",
+          );
           return null;
         }
         vaultLockMonths = n;
@@ -152,10 +163,12 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
         ? (newForm.logoDataUri.trim() || logoUrlInput.trim())
         : "",
       institution_name: newForm.kind.startsWith("bank_") ? newForm.institution_name.trim() : "",
-      ...(newForm.kind === "vault" && !isEdit && vaultLockMonths != null ? { vault_lock_months: vaultLockMonths } : {}),
+      ...(!isEdit && vaultLockMonths != null && (newForm.kind === "vault" || newForm.kind === "bank_blocked_savings")
+        ? { vault_lock_months: vaultLockMonths }
+        : {}),
     };
 
-    if (newForm.kind === "vault" && isEdit) {
+    if ((newForm.kind === "vault" || newForm.kind === "bank_blocked_savings") && isEdit) {
       payload.vault_unlocks_on = vaultUnlockDate.trim() || null;
     }
 
@@ -338,6 +351,12 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
           icon: "landmark",
           color: defaultColorForKind(kind),
           logoDataUri: logoPreserved,
+          savings_plan_lock_enabled:
+            kind === "bank_blocked_savings" && f.kind === "bank_blocked_savings"
+              ? f.savings_plan_lock_enabled
+              : kind === "bank_blocked_savings"
+                ? false
+                : false,
         };
       }
       const label = ACCOUNT_KIND_PRESETS.find((p) => p.id === kind)?.label ?? "";
@@ -497,6 +516,113 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
                   onChange={(e) => setNewForm((f) => ({ ...f, vault_lock_custom_months: e.target.value }))}
                 />
               </div>
+            )}
+          </div>
+        )}
+
+        {newForm.kind === "bank_blocked_savings" && isEdit && (
+          <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4 space-y-3">
+            <p className="text-xs text-cyan-100/90 leading-relaxed">
+              <strong className="text-cyan-50">Plan d&apos;épargne :</strong> tu peux laisser le compte{" "}
+              <strong>sans échéance</strong> (l&apos;argent entre et sort librement) ou définir une date jusqu&apos;à
+              laquelle <strong>seuls les encaissements</strong> sont autorisés (pas de dépenses ni transferts sortants),
+              sauf si tu <strong>débloques</strong> depuis la liste des comptes.
+            </p>
+            <div>
+              <label className="text-xs text-neutral-500 mb-1 block">
+                Sorties autorisées à partir du (vide = pas de blocage)
+              </label>
+              <input
+                type="date"
+                className="input-field font-mono"
+                value={vaultUnlockDate}
+                onChange={(e) => setVaultUnlockDate(e.target.value)}
+              />
+              <p className="text-[10px] text-neutral-500 mt-1.5 leading-relaxed">
+                Laisse vide pour un plan <strong>débloqué</strong>. Renseigne une date pour verrouiller les sorties
+                jusqu&apos;à cette échéance.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {newForm.kind === "bank_blocked_savings" && !isEdit && (
+          <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4 space-y-3">
+            <p className="text-xs text-cyan-100/90 leading-relaxed">
+              <strong className="text-cyan-50">Plan d&apos;épargne :</strong> compte bancaire dédié à
+              l&apos;épargne. Par défaut les fonds peuvent entrer et sortir. Tu peux optionnellement{" "}
+              <strong>bloquer les sorties</strong> jusqu&apos;à une échéance : tant que le blocage est actif, le compte{" "}
+              <strong>ne peut que recevoir</strong> de l&apos;argent (virements, revenus…) ; aucune sortie (dépense,
+              transfert) tant que la date n&apos;est pas atteinte ou que tu n&apos;as pas débloqué le compte.
+            </p>
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-white/20"
+                checked={newForm.savings_plan_lock_enabled}
+                onChange={(e) =>
+                  setNewForm((f) => ({ ...f, savings_plan_lock_enabled: e.target.checked }))
+                }
+              />
+              <span className="text-xs text-cyan-100/90 leading-snug">
+                Bloquer les sorties jusqu&apos;à une échéance (durée ci-dessous)
+              </span>
+            </label>
+            {newForm.savings_plan_lock_enabled && (
+              <>
+                <div>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Durée du verrouillage</label>
+                  <div className="flex flex-wrap gap-2">
+                    {VAULT_PERIOD_MONTHS_PRESETS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() =>
+                          setNewForm((f) => ({
+                            ...f,
+                            vault_lock_preset_months: m,
+                            vault_lock_use_custom: false,
+                          }))
+                        }
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          !newForm.vault_lock_use_custom && newForm.vault_lock_preset_months === m
+                            ? "border-cyan-400/60 bg-cyan-500/20 text-cyan-50"
+                            : "border-white/10 text-neutral-400 hover:bg-white/5"
+                        }`}
+                      >
+                        {m} mois
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setNewForm((f) => ({ ...f, vault_lock_use_custom: true }))}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                        newForm.vault_lock_use_custom
+                          ? "border-cyan-400/60 bg-cyan-500/20 text-cyan-50"
+                          : "border-white/10 text-neutral-400 hover:bg-white/5"
+                      }`}
+                    >
+                      Autre durée
+                    </button>
+                  </div>
+                </div>
+                {newForm.vault_lock_use_custom && (
+                  <div>
+                    <label className="text-xs text-neutral-500 mb-1 block">Nombre de mois (1 à 120)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={120}
+                      className="input-field font-mono"
+                      placeholder="Ex : 18"
+                      value={newForm.vault_lock_custom_months}
+                      onChange={(e) =>
+                        setNewForm((f) => ({ ...f, vault_lock_custom_months: e.target.value }))
+                      }
+                    />
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

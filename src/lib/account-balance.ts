@@ -10,7 +10,7 @@
  */
 
 import { getDbClient } from "./db/client";
-import { isVaultAccountLocked } from "./constants";
+import { accountHasActiveOutgoingLock } from "./constants";
 
 type Row = Record<string, unknown>;
 
@@ -20,8 +20,19 @@ function num(row: Row | undefined, key: string): number {
   return v == null ? 0 : Number(v);
 }
 
-export async function calculateAccountBalance(userId: number, accountId: number): Promise<number> {
+/**
+ * @param throughDateInclusive — Si renseigné (YYYY-MM-DD), seules les écritures avec `date <=` cette valeur sont prises en compte (solde « à date »).
+ */
+export async function calculateAccountBalance(
+  userId: number,
+  accountId: number,
+  throughDateInclusive?: string,
+): Promise<number> {
   const db = getDbClient();
+  const td = throughDateInclusive?.trim() || "";
+  const dateClause = td ? " AND date <= ?" : "";
+  const loanDateClause = td ? " AND lp.date <= ?" : "";
+
   const accRs = await db.execute({
     sql: "SELECT opening_balance FROM accounts WHERE id = ? AND user_id = ?",
     args: [accountId, userId],
@@ -30,14 +41,14 @@ export async function calculateAccountBalance(userId: number, accountId: number)
   const opening = num(accRs.rows[0] as Row, "opening_balance");
 
   const incomeRs = await db.execute({
-    sql: "SELECT COALESCE(SUM(amount), 0) AS s FROM incomes WHERE account_id = ?",
-    args: [accountId],
+    sql: `SELECT COALESCE(SUM(amount), 0) AS s FROM incomes WHERE account_id = ?${dateClause}`,
+    args: td ? [accountId, td] : [accountId],
   });
   const incomeIn = num(incomeRs.rows[0] as Row, "s");
 
   const expRs = await db.execute({
-    sql: "SELECT COALESCE(SUM(amount + COALESCE(transaction_fee, 0)), 0) AS s FROM expenses WHERE account_id = ? AND (user_id = ? OR user_id IS NULL)",
-    args: [accountId, userId],
+    sql: `SELECT COALESCE(SUM(amount + COALESCE(transaction_fee, 0)), 0) AS s FROM expenses WHERE account_id = ? AND (user_id = ? OR user_id IS NULL)${dateClause}`,
+    args: td ? [accountId, userId, td] : [accountId, userId],
   });
   const expenseOut = num(expRs.rows[0] as Row, "s");
 
@@ -50,15 +61,15 @@ export async function calculateAccountBalance(userId: number, accountId: number)
         END
       ), 0) AS s
       FROM account_transfers
-      WHERE user_id = ? AND from_account_id = ?
+      WHERE user_id = ? AND from_account_id = ?${dateClause}
     `,
-    args: [userId, accountId],
+    args: td ? [userId, accountId, td] : [userId, accountId],
   });
   const xferFrom = num(xferFromRs.rows[0] as Row, "s");
 
   const xferToRs = await db.execute({
-    sql: "SELECT COALESCE(SUM(amount), 0) AS s FROM account_transfers WHERE user_id = ? AND to_account_id = ?",
-    args: [userId, accountId],
+    sql: `SELECT COALESCE(SUM(amount), 0) AS s FROM account_transfers WHERE user_id = ? AND to_account_id = ?${dateClause}`,
+    args: td ? [userId, accountId, td] : [userId, accountId],
   });
   const xferTo = num(xferToRs.rows[0] as Row, "s");
 
@@ -69,15 +80,15 @@ export async function calculateAccountBalance(userId: number, accountId: number)
       WHERE user_id = ?
         AND fees_account_id = ?
         AND fees_account_id IS NOT NULL
-        AND fees_account_id != from_account_id
+        AND fees_account_id != from_account_id${dateClause}
     `,
-    args: [userId, accountId],
+    args: td ? [userId, accountId, td] : [userId, accountId],
   });
   const xferFeesOnly = num(xferFeeOnlyRs.rows[0] as Row, "s");
 
   const fcpRs = await db.execute({
-    sql: "SELECT COALESCE(SUM(amount), 0) AS s FROM fixed_charge_payments WHERE account_id = ?",
-    args: [accountId],
+    sql: `SELECT COALESCE(SUM(amount), 0) AS s FROM fixed_charge_payments WHERE account_id = ?${dateClause}`,
+    args: td ? [accountId, td] : [accountId],
   });
   const fcpOut = num(fcpRs.rows[0] as Row, "s");
 
@@ -89,9 +100,9 @@ export async function calculateAccountBalance(userId: number, accountId: number)
       WHERE lp.account_id = ?
         AND (lp.expense_id IS NULL OR lp.expense_id = 0)
         AND (lp.income_id IS NULL OR lp.income_id = 0)
-        AND l.type IN ('bank', 'personal_borrowed')
+        AND l.type IN ('bank', 'personal_borrowed')${loanDateClause}
     `,
-    args: [accountId],
+    args: td ? [accountId, td] : [accountId],
   });
   const loanDebit = num(loanDebitRs.rows[0] as Row, "s");
 
@@ -103,18 +114,18 @@ export async function calculateAccountBalance(userId: number, accountId: number)
       WHERE lp.account_id = ?
         AND (lp.expense_id IS NULL OR lp.expense_id = 0)
         AND (lp.income_id IS NULL OR lp.income_id = 0)
-        AND l.type = 'personal_lent'
+        AND l.type = 'personal_lent'${loanDateClause}
     `,
-    args: [accountId],
+    args: td ? [accountId, td] : [accountId],
   });
   const loanCredit = num(loanCreditRs.rows[0] as Row, "s");
 
   const ppRs = await db.execute({
     sql: `
       SELECT COALESCE(SUM(amount), 0) AS s FROM project_purchases
-      WHERE account_id = ? AND (expense_id IS NULL OR expense_id = 0)
+      WHERE account_id = ? AND (expense_id IS NULL OR expense_id = 0)${dateClause}
     `,
-    args: [accountId],
+    args: td ? [accountId, td] : [accountId],
   });
   const projectPurchaseOut = num(ppRs.rows[0] as Row, "s");
 
@@ -171,9 +182,11 @@ export async function checkVaultRules(
   });
   if (rs.rows.length === 0) return { allowed: false, reason: "ACCOUNT_NOT_FOUND" };
   const row = rs.rows[0] as Row;
-  if (row.kind !== "vault") return { allowed: true };
+  const kind = String(row.kind ?? "");
+  if (!accountHasActiveOutgoingLock(kind, row.vault_unlocks_on as string | null | undefined)) {
+    return { allowed: true };
+  }
   const unlock = row.vault_unlocks_on as string | null | undefined;
-  if (!isVaultAccountLocked(unlock ?? null)) return { allowed: true };
   return {
     allowed: false,
     reason: "VAULT_LOCKED",

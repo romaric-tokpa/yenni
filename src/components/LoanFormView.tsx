@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { formatCFA, isVaultAccountLocked, accountTypeLabel, isBankTreasuryDebitAccount } from "@/lib/constants";
+import { formatCFA, accountHasActiveOutgoingLock, accountTypeLabel, isBankTreasuryDebitAccount } from "@/lib/constants";
 import { useBudgetContext } from "@/contexts/BudgetContext";
 import { generateAmortizationSchedule } from "@/lib/loan-calculator";
 import { Loan } from "@/lib/types";
@@ -102,7 +102,7 @@ export default function LoanFormView({
         (a) =>
           !a.is_archived &&
           isBankTreasuryDebitAccount(a.kind) &&
-          !isVaultAccountLocked(a.vault_unlocks_on)
+          !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)
       ),
     [accountsWithBalance]
   );
@@ -110,7 +110,7 @@ export default function LoanFormView({
   const repaymentChoiceAccounts = useMemo(
     () =>
       accountsWithBalance.filter(
-        (a) => !a.is_archived && !isVaultAccountLocked(a.vault_unlocks_on)
+        (a) => !a.is_archived && !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)
       ),
     [accountsWithBalance]
   );

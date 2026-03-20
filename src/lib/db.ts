@@ -6,7 +6,7 @@ import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, M
 import type { ScheduleRowUpdate } from "./types";
 import {
   DEFAULT_CONFIG,
-  isVaultAccountLocked,
+  accountHasActiveOutgoingLock,
   isBankTreasuryDebitAccount,
   INCOME_SOURCE_SALARY_SETTINGS,
   salarySettingsIncomeNote,
@@ -31,7 +31,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -272,14 +272,14 @@ export async function assertAccountAllowsDebit(
   }
   const acc = await getAccountById(Number(id), userId);
   if (!acc) throw new Error("ACCOUNT_NOT_FOUND");
-  if (isVaultAccountLocked(acc.vault_unlocks_on)) {
+  if (accountHasActiveOutgoingLock(acc.kind, acc.vault_unlocks_on)) {
     throw new Error("ACCOUNT_VAULT_LOCKED");
   }
   return Number(id);
 }
 
 function isArchivedOrVaultLockedForDebit(acc: Account): boolean {
-  return !!acc.is_archived || isVaultAccountLocked(acc.vault_unlocks_on);
+  return !!acc.is_archived || accountHasActiveOutgoingLock(acc.kind, acc.vault_unlocks_on);
 }
 
 /**
@@ -333,14 +333,19 @@ export async function resolveLoanRecoveryCreditAccountId(
   return Number(id);
 }
 
-export async function getAccountsWithBalances(userId: number): Promise<AccountWithBalance[]> {
+export async function getAccountsWithBalances(
+  userId: number,
+  throughDateInclusive?: string | null,
+): Promise<AccountWithBalance[]> {
   const accounts = await getAccounts(userId);
-  const out: AccountWithBalance[] = [];
-  for (const a of accounts) {
-    const balance = await calculateAccountBalance(userId, a.id);
-    out.push({ ...a, balance });
-  }
-  return out;
+  const through =
+    throughDateInclusive && String(throughDateInclusive).trim()
+      ? String(throughDateInclusive).trim()
+      : undefined;
+  const balances = await Promise.all(
+    accounts.map((a) => calculateAccountBalance(userId, a.id, through)),
+  );
+  return accounts.map((a, i) => ({ ...a, balance: balances[i]! }));
 }
 
 export async function addAccount(
@@ -370,7 +375,7 @@ export async function addAccount(
   });
   const nextOrder = Number((maxRs.rows[0] as Row)?.n ?? 0);
   const vaultUntil =
-    data.kind === "vault" && data.vault_unlocks_on?.trim()
+    (data.kind === "vault" || data.kind === "bank_blocked_savings") && data.vault_unlocks_on?.trim()
       ? String(data.vault_unlocks_on).trim()
       : null;
   const rs = await db.execute({
@@ -1054,30 +1059,6 @@ export async function syncSalaryLinkedIncome(
   });
 }
 
-// ── Other Incomes ──
-
-export async function getOtherIncomes(year: number): Promise<number[]> {
-  await ensureMigrations();
-  const rs = await getDbClient().execute({
-    sql: "SELECT month, amount FROM other_incomes WHERE year = ? ORDER BY month",
-    args: [year],
-  });
-  const rows = rowsToObjs<{ month: number; amount: number }>(rs.rows as Row[], rs.columns);
-  const result = Array(12).fill(0);
-  rows.forEach((r) => {
-    result[r.month] = r.amount;
-  });
-  return result;
-}
-
-export async function setOtherIncome(month: number, year: number, amount: number): Promise<void> {
-  await ensureMigrations();
-  await getDbClient().execute({
-    sql: "INSERT INTO other_incomes (month, year, amount) VALUES (?, ?, ?) ON CONFLICT(month, year) DO UPDATE SET amount = excluded.amount",
-    args: [month, year, amount],
-  });
-}
-
 // ── Category budgets (par mois) ──
 
 /** Retourne les budgets par catégorie pour un mois donné. Seules les entrées explicites sont retournées. */
@@ -1731,22 +1712,30 @@ export async function ensureRecurringPayments(userId: number, month: number, yea
 
   for (const ch of config.fixedCharges || []) {
     if (ch.amount <= 0 || existingChargeIds.has(ch.id)) continue;
-    await addFixedChargePayment(
-      {
-        charge_id: ch.id,
-        label: ch.label,
-        icon: ch.icon || "house",
-        amount: ch.amount,
-        date: dateStr,
-        time: "00:00",
-        month,
-        year,
-        notes: "Créé automatiquement",
-      },
-      userId,
-    );
-    existingChargeIds.add(ch.id);
-    created++;
+    try {
+      await addFixedChargePayment(
+        {
+          charge_id: ch.id,
+          label: ch.label,
+          icon: ch.icon || "house",
+          amount: ch.amount,
+          date: dateStr,
+          time: "00:00",
+          month,
+          year,
+          notes: "Créé automatiquement",
+        },
+        userId,
+      );
+      existingChargeIds.add(ch.id);
+      created++;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      /* Ne pas faire échouer un simple GET (liste du mois) si solde insuffisant ou compte bloqué. */
+      console.warn(
+        `[ensureRecurringPayments] charge ${ch.id} (${ch.label}) non créée — ${msg}`,
+      );
+    }
   }
   return created;
 }
@@ -2740,7 +2729,6 @@ export interface BackupData {
     config: BudgetConfig;
     savings: Array<{ id?: number; month: number; year: number; amount: number }>;
     salaries: Array<{ id?: number; month: number; year: number; amount: number; account_id?: number | null }>;
-    other_incomes: Array<{ id?: number; month: number; year: number; amount: number }>;
     projects: Project[];
     fixed_charge_payments: FixedChargePayment[];
     loans: Loan[];
@@ -2752,14 +2740,13 @@ export interface BackupData {
 export async function exportBackup(): Promise<BackupData> {
   await ensureMigrations();
   const db = getDbClient();
-  const [expensesRs, incomesRs, accountsRs, transfersRs, savingsRs, salariesRs, otherIncomesRs, projectsRs, fcpRs, loansRs, loanPayRs, plannedRs] = await Promise.all([
+  const [expensesRs, incomesRs, accountsRs, transfersRs, savingsRs, salariesRs, projectsRs, fcpRs, loansRs, loanPayRs, plannedRs] = await Promise.all([
     db.execute("SELECT * FROM expenses ORDER BY id"),
     db.execute("SELECT * FROM incomes ORDER BY id"),
     db.execute("SELECT * FROM accounts ORDER BY id"),
     db.execute("SELECT * FROM account_transfers ORDER BY id"),
     db.execute("SELECT * FROM savings ORDER BY year, month"),
     db.execute("SELECT * FROM salaries ORDER BY year, month"),
-    db.execute("SELECT * FROM other_incomes ORDER BY year, month"),
     db.execute("SELECT * FROM projects ORDER BY id"),
     db.execute("SELECT * FROM fixed_charge_payments ORDER BY id"),
     db.execute("SELECT * FROM loans ORDER BY id"),
@@ -2779,7 +2766,6 @@ export async function exportBackup(): Promise<BackupData> {
       config,
       savings: rowsToObjs(savingsRs.rows as Row[], savingsRs.columns),
       salaries: rowsToObjs(salariesRs.rows as Row[], salariesRs.columns),
-      other_incomes: rowsToObjs(otherIncomesRs.rows as Row[], otherIncomesRs.columns),
       projects: rowsToObjs<Project>(projectsRs.rows as Row[], projectsRs.columns),
       fixed_charge_payments: rowsToObjs<FixedChargePayment>(fcpRs.rows as Row[], fcpRs.columns),
       loans: rowsToObjs<Loan>(loansRs.rows as Row[], loansRs.columns),
@@ -2810,7 +2796,6 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
       { sql: "DELETE FROM accounts" },
       { sql: "DELETE FROM savings" },
       { sql: "DELETE FROM salaries" },
-      { sql: "DELETE FROM other_incomes" },
       { sql: "DELETE FROM project_purchases" },
       { sql: "DELETE FROM project_funds" },
       { sql: "DELETE FROM projects" },
@@ -2879,9 +2864,6 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
         sql: "INSERT INTO salaries (month, year, amount, account_id) VALUES (?, ?, ?, ?)",
         args: [s.month, s.year, s.amount ?? 0, (s as { account_id?: number | null }).account_id ?? null],
       });
-    }
-    for (const o of data.other_incomes || []) {
-      batch.push({ sql: "INSERT INTO other_incomes (month, year, amount) VALUES (?, ?, ?)", args: [o.month, o.year, o.amount ?? 0] });
     }
     for (const p of data.projects || []) {
       batch.push({

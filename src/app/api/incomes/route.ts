@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/apiError";
 import { getSessionFromCookies } from "@/lib/auth";
 import { getIncomes, getIncomesByDateRange, addIncome, deleteIncome } from "@/lib/db";
+import { isForbiddenManualIncomeSource } from "@/lib/incomeSources";
 
 export async function GET(req: NextRequest) {
   try {
@@ -40,7 +41,15 @@ export async function POST(req: NextRequest) {
     ) {
       return NextResponse.json({ error: "Données invalides : compte requis" }, { status: 400 });
     }
-    const income = await addIncome({ ...body, account_id: acc }, session.userId);
+    const rawSource =
+      typeof body.source === "string" && body.source.trim() !== "" ? String(body.source).trim() : "other";
+    if (isForbiddenManualIncomeSource(rawSource)) {
+      return NextResponse.json(
+        { error: "Ce type de revenu est réservé au salaire des Réglages." },
+        { status: 400 },
+      );
+    }
+    const income = await addIncome({ ...body, source: rawSource, account_id: acc }, session.userId);
     return NextResponse.json(income, { status: 201 });
   } catch (err) {
     console.error("[API ERROR]", err);

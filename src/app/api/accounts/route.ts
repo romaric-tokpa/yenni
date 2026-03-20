@@ -5,12 +5,24 @@ import { apiErrorResponse } from "@/lib/apiError";
 import { accountKindAllowsLogo } from "@/lib/accountLogoShared";
 import { resolveAccountLogoInput } from "@/lib/accountLogoParse";
 import { computeVaultUnlockDateFromNow } from "@/lib/constants";
+import { isValidIsoDate } from "@/lib/dashboardTreasuryPeriod";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await getSessionFromCookies();
     if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-    return NextResponse.json(await getAccountsWithBalances(session.userId));
+    const throughRaw = req.nextUrl.searchParams.get("through");
+    const through =
+      throughRaw != null && String(throughRaw).trim() !== ""
+        ? String(throughRaw).trim()
+        : null;
+    if (through != null && !isValidIsoDate(through)) {
+      return NextResponse.json(
+        { error: "Paramètre through invalide (attendu AAAA-MM-JJ)" },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json(await getAccountsWithBalances(session.userId, through));
   } catch (err) {
     console.error("[API ERROR]", err);
     return NextResponse.json(apiErrorResponse(err), { status: 500 });
@@ -48,6 +60,13 @@ export async function POST(req: NextRequest) {
         );
       }
       vaultUnlocksOn = computeVaultUnlockDateFromNow(monthsRaw);
+    } else if (kind === "bank_blocked_savings") {
+      if (body.vault_lock_months != null && body.vault_lock_months !== "") {
+        const monthsRaw = Number(body.vault_lock_months);
+        if (Number.isFinite(monthsRaw) && monthsRaw >= 1) {
+          vaultUnlocksOn = computeVaultUnlockDateFromNow(monthsRaw);
+        }
+      }
     }
 
     const acc = await addAccount(session.userId, {

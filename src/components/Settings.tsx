@@ -1,7 +1,13 @@
 "use client";
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { formatCFA, AVAILABLE_ICONS, CATEGORY_COLORS, MONTHS_SHORT, isVaultAccountLocked } from "@/lib/constants";
+import {
+  formatCFA,
+  AVAILABLE_ICONS,
+  CATEGORY_COLORS,
+  MONTHS_SHORT,
+  accountHasActiveOutgoingLock,
+} from "@/lib/constants";
 import AccountSelect from "./AccountSelect";
 import {
   BudgetConfig,
@@ -21,8 +27,6 @@ interface BudgetData {
   salaries: number[];
   salaryAccountIds?: (number | null)[];
   updateSalary: (month: number, amount: number, accountId?: number | null) => Promise<void>;
-  otherIncomes: number[];
-  updateOtherIncome: (month: number, amount: number) => Promise<void>;
   fixedPayments: FixedChargePayment[];
   addFixedPayment: (p: Omit<FixedChargePayment, "id" | "created_at">) => Promise<boolean>;
   removeFixedPayment: (id: number) => Promise<void>;
@@ -63,7 +67,7 @@ function SalarySection({
         <strong className="text-neutral-400">« Salaire (réglages) »</strong> est créé automatiquement (date du 1
         <sup>er</sup> du mois) — le <strong className="text-neutral-400">solde du compte</strong>, les{" "}
         <strong className="text-neutral-400">mouvements</strong> et l&apos;<strong className="text-neutral-400">historique</strong>{" "}
-        sont mis à jour. Tu peux toujours ajouter d&apos;autres revenus dans Transactions.
+        sont mis à jour.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
         {MONTHS_SHORT.map((m, i) => {
@@ -125,58 +129,6 @@ function SalarySection({
   );
 }
 
-function OtherIncomeSection({
-  otherIncomes,
-  selectedMonth,
-  updateOtherIncome,
-}: {
-  otherIncomes: number[];
-  selectedMonth: number;
-  updateOtherIncome: (month: number, amount: number) => Promise<void>;
-}) {
-  const totalAnnual = otherIncomes.reduce((a, b) => a + b, 0);
-
-  return (
-    <div className="rounded-lg border border-white/5 p-4 mb-4">
-      <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-        <Coins size={14} className="text-amber-500" /> Autres revenus
-      </h3>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
-        {MONTHS_SHORT.map((m, i) => (
-          <div
-            key={i}
-            className={`flex items-center gap-2 p-2 rounded-xl transition-all ${
-              i === selectedMonth
-                ? "bg-amber-500/15 ring-1 ring-amber-500/40"
-                : otherIncomes[i] > 0
-                ? "bg-white/[0.03]"
-                : "bg-white/[0.02]"
-            }`}
-          >
-            <span className={`text-[10px] lg:text-xs font-medium w-8 ${i === selectedMonth ? "text-amber-300" : "text-slate-500"}`}>
-              {m}
-            </span>
-            <input
-              type="number"
-              className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 flex-1 min-w-0"
-              placeholder="0"
-              defaultValue={otherIncomes[i] || ""}
-              key={`oth-${i}`}
-              onChange={(e) => updateOtherIncome(i, Number(e.target.value) || 0)}
-            />
-          </div>
-        ))}
-      </div>
-      {totalAnnual > 0 && (
-        <div className="flex justify-between mt-2 px-2.5 py-1.5 rounded-lg bg-white/4 text-xs">
-          <span className="text-neutral-500">Total annuel</span>
-          <span className="font-mono font-semibold text-amber-500">{formatCFA(totalAnnual)}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function Settings({
   budget,
   showToast,
@@ -190,8 +142,6 @@ export default function Settings({
     salaries,
     salaryAccountIds = Array(12).fill(null),
     updateSalary,
-    otherIncomes,
-    updateOtherIncome,
     fixedPayments,
     addFixedPayment,
     removeFixedPayment,
@@ -210,8 +160,7 @@ export default function Settings({
 
   const defaultDebitAccountId = useMemo(() => {
     const unlocked = accountsWithBalance.find(
-      (x) =>
-        !x.is_archived && !(x.kind === "vault" && isVaultAccountLocked(x.vault_unlocks_on)),
+      (x) => !x.is_archived && !accountHasActiveOutgoingLock(x.kind, x.vault_unlocks_on),
     );
     return unlocked?.id ?? accountsWithBalance.find((x) => !x.is_archived)?.id ?? 0;
   }, [accountsWithBalance]);
@@ -374,13 +323,6 @@ export default function Settings({
         selectedMonth={selectedMonth}
         updateSalary={updateSalary}
         accounts={accountsWithBalance}
-      />
-
-      {/* Autres revenus par mois */}
-      <OtherIncomeSection
-        otherIncomes={otherIncomes}
-        selectedMonth={selectedMonth}
-        updateOtherIncome={updateOtherIncome}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">

@@ -160,7 +160,6 @@ export interface ProjectFund {
 
 export interface BudgetConfig {
   salary: number;
-  otherIncome: number;
   fixedCharges: FixedCharge[];
   categories: Category[];
   /** Catégories personnalisées pour la liste des envies */

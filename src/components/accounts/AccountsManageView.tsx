@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useBudgetContext } from "@/contexts/BudgetContext";
-import { formatCFA, accountTypeLabel, isVaultAccountLocked } from "@/lib/constants";
+import { formatCFA, accountTypeLabel, accountHasActiveOutgoingLock } from "@/lib/constants";
 import type { AccountWithBalance, AccountTransfer } from "@/lib/types";
 import AccountGlyph from "@/components/ui/AccountGlyph";
 import {
@@ -23,10 +23,12 @@ import {
   Lock,
   Unlock,
   Pencil,
+  RefreshCw,
 } from "lucide-react";
 
 export default function AccountsManageView() {
   const { showToast, accountsWithBalance, accountsRevision, fetchAccounts } = useBudgetContext();
+  const [refreshing, setRefreshing] = useState(false);
   const [transferList, setTransferList] = useState<AccountTransfer[]>([]);
   const [showTransfer, setShowTransfer] = useState(false);
   const [xferForm, setXferForm] = useState({
@@ -54,7 +56,7 @@ export default function AccountsManageView() {
 
   const activeAccounts = accountsWithBalance.filter((a) => !a.is_archived);
   const transferFromAccounts = useMemo(
-    () => activeAccounts.filter((a) => !isVaultAccountLocked(a.vault_unlocks_on)),
+    () => activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)),
     [activeAccounts],
   );
 
@@ -139,9 +141,12 @@ export default function AccountsManageView() {
   };
 
   const unlockVault = async (a: AccountWithBalance) => {
+    const isCoffre = a.kind === "vault";
     if (
       !confirm(
-        `Débloquer le coffre « ${a.name} » maintenant ? Tu pourras à nouveau payer et transférer depuis ce compte.`,
+        isCoffre
+          ? `Débloquer le coffre « ${a.name} » maintenant ? Tu pourras à nouveau payer et transférer depuis ce compte.`
+          : `Débloquer le plan d'épargne « ${a.name} » maintenant ? Les sorties (dépenses, transferts) seront à nouveau autorisées.`,
       )
     )
       return;
@@ -155,7 +160,7 @@ export default function AccountsManageView() {
       showToast(j.error || "Impossible de débloquer", "error");
       return;
     }
-    showToast("Coffre débloqué — les sorties sont à nouveau possibles.");
+    showToast(isCoffre ? "Coffre débloqué — les sorties sont à nouveau possibles." : "Plan d'épargne débloqué — les sorties sont à nouveau possibles.");
     await fetchAccounts();
   };
 
@@ -172,114 +177,116 @@ export default function AccountsManageView() {
 
   const loadingAccounts = accountsWithBalance.length === 0;
 
+  const handleRefreshAccounts = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchAccounts();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchAccounts]);
+
   return (
-    <div className="animate-slide-up max-w-4xl mx-auto pb-28 lg:pb-24 relative">
-      {/* décor */}
-      <div className="pointer-events-none absolute inset-x-0 -top-4 h-72 overflow-hidden rounded-b-[2rem] opacity-90">
-        <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/12 via-teal-500/5 to-transparent" />
-        <div className="absolute -top-24 right-0 h-64 w-64 rounded-full bg-emerald-400/10 blur-3xl" />
-        <div className="absolute -top-12 -left-16 h-56 w-56 rounded-full bg-cyan-500/10 blur-3xl" />
+    <div className="animate-slide-up pb-20 lg:pb-8 max-w-5xl mx-auto">
+      <Link
+        href="/settings"
+        className="inline-flex items-center gap-1.5 text-slate-400 hover:text-white text-sm mb-4 transition-colors group"
+      >
+        <span className="rounded-lg bg-white/5 p-1 group-hover:bg-white/10 transition-colors">
+          <ChevronLeft size={16} />
+        </span>
+        Réglages
+      </Link>
+
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-5 lg:mb-6">
+        <div>
+          <h1 className="text-xl lg:text-2xl font-bold flex items-center gap-2 text-slate-100">
+            <Landmark size={24} className="text-emerald-400" strokeWidth={1.75} />
+            Trésorerie
+          </h1>
+          <p className="text-slate-500 text-xs lg:text-sm mt-1 max-w-xl">
+            Tous tes comptes au même endroit : mouvements, soldes et transferts entre comptes (hors budget).
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleRefreshAccounts()}
+            disabled={refreshing || loadingAccounts}
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors disabled:opacity-50"
+            title="Actualiser les comptes"
+          >
+            <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowTransfer(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold transition-colors border border-white/10"
+          >
+            <ArrowRightLeft size={14} className="text-emerald-400" />
+            Transfert
+          </button>
+          <Link
+            href="/settings/accounts/new"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-semibold transition-colors border border-emerald-500/20"
+          >
+            <Plus size={14} />
+            Nouveau compte
+          </Link>
+        </div>
       </div>
 
-      <div className="relative px-1 sm:px-0">
-        <Link
-          href="/settings"
-          className="inline-flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white mb-5 transition-colors group"
-        >
-          <span className="rounded-lg bg-white/5 p-1 group-hover:bg-white/10 transition-colors">
-            <ChevronLeft size={16} />
-          </span>
-          Réglages
-        </Link>
-
-        {/* Hero */}
-        <div className="rounded-2xl border border-white/[0.08] bg-gradient-to-br from-white/[0.07] to-white/[0.02] backdrop-blur-sm p-5 sm:p-6 mb-8 shadow-lg shadow-black/20">
-          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-            <div className="flex gap-4 min-w-0">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0 shadow-inner shadow-emerald-500/10">
-                <Landmark className="text-emerald-400" size={28} strokeWidth={1.75} />
+      {!loadingAccounts && (
+        <div className="rounded-2xl border border-emerald-500/15 bg-gradient-to-br from-emerald-500/[0.07] to-transparent p-4 lg:p-5 mb-5">
+          <div className="text-[11px] font-semibold text-emerald-400/90 mb-3 flex items-center gap-2">
+            <Wallet size={14} /> Synthèse
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-white/8 bg-black/20 p-3 text-center sm:text-left">
+              <div className="text-[10px] text-slate-500 flex items-center justify-center sm:justify-start gap-1">
+                <TrendingUp size={10} /> Solde total (actifs)
               </div>
-              <div className="min-w-0">
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">Trésorerie</h1>
-                <p className="text-neutral-400 text-sm mt-1 max-w-xl leading-relaxed">
-                  Tous tes comptes au même endroit. Les dépenses et revenus sont débités ici ; les transferts déplacent
-                  l’argent sans passer par le budget.
-                </p>
+              <div
+                className={`font-mono text-lg font-bold mt-1 tabular-nums ${
+                  stats.total >= 0 ? "text-emerald-400" : "text-red-400"
+                }`}
+              >
+                {formatCFA(stats.total)}
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2 shrink-0 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => setShowTransfer(true)}
-                className="px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border border-white/15 bg-white/[0.04] text-neutral-100 hover:bg-white/[0.08] hover:border-white/25 transition-all"
-              >
-                <ArrowRightLeft size={18} className="text-emerald-400/90" />
-                Transfert
-              </button>
-              <Link
-                href="/settings/accounts/new"
-                className="btn-primary px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
-              >
-                <Plus size={18} />
-                Nouveau compte
-              </Link>
+            <div className="rounded-xl border border-white/8 bg-black/20 p-3 text-center sm:text-left">
+              <div className="text-[10px] text-slate-500 flex items-center justify-center sm:justify-start gap-1">
+                <Wallet size={10} /> Comptes actifs
+              </div>
+              <div className="font-mono text-lg font-bold text-slate-100 mt-1 tabular-nums">{stats.activeCount}</div>
+            </div>
+            <div className="rounded-xl border border-white/8 bg-black/20 p-3 text-center sm:text-left">
+              <div className="text-[10px] text-slate-500 flex items-center justify-center sm:justify-start gap-1">
+                <Archive size={10} /> Archivés
+              </div>
+              <div className="font-mono text-lg font-bold text-slate-400 mt-1 tabular-nums">{stats.archivedCount}</div>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Stats */}
-          {!loadingAccounts && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6 pt-6 border-t border-white/[0.06]">
-              <div className="rounded-xl bg-black/20 border border-white/[0.06] px-4 py-3 sm:py-4">
-                <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-neutral-500">
-                  <TrendingUp size={12} className="text-emerald-500/80" />
-                  Solde total (actifs)
-                </div>
-                <div
-                  className={`font-mono text-xl sm:text-2xl font-bold mt-1.5 tabular-nums ${
-                    stats.total >= 0 ? "text-emerald-400" : "text-red-400"
-                  }`}
-                >
-                  {formatCFA(stats.total)}{" "}
-                  <span className="text-xs font-normal text-neutral-500">FCFA</span>
-                </div>
-              </div>
-              <div className="rounded-xl bg-black/20 border border-white/[0.06] px-4 py-3 sm:py-4">
-                <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-neutral-500">
-                  <Wallet size={12} className="text-cyan-400/80" />
-                  Comptes actifs
-                </div>
-                <div className="text-xl sm:text-2xl font-bold mt-1.5 text-white tabular-nums">{stats.activeCount}</div>
-              </div>
-              <div className="rounded-xl bg-black/20 border border-white/[0.06] px-4 py-3 sm:py-4">
-                <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-neutral-500">
-                  <Archive size={12} className="text-neutral-500" />
-                  Archivés
-                </div>
-                <div className="text-xl sm:text-2xl font-bold mt-1.5 text-neutral-300 tabular-nums">
-                  {stats.archivedCount}
-                </div>
-              </div>
-            </div>
-          )}
+      <section className="mb-8">
+        <div className="text-[11px] font-semibold text-emerald-400/90 mb-3 flex items-center gap-2">
+          <Landmark size={14} className="opacity-90" />
+          Mes comptes
         </div>
 
-        {/* Liste comptes */}
-        <section className="mb-10">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h2 className="text-sm font-semibold text-neutral-300 uppercase tracking-wide">Mes comptes</h2>
+        {loadingAccounts ? (
+          <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-12 text-center">
+            <Loader2 className="mx-auto mb-4 h-9 w-9 text-emerald-400/80 animate-spin" />
+            <p className="text-slate-500 text-sm">Chargement des comptes…</p>
           </div>
-
-          {loadingAccounts ? (
-            <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-12 text-center">
-              <Loader2 className="mx-auto mb-4 h-9 w-9 text-emerald-500/80 animate-spin" />
-              <p className="text-neutral-500 text-sm">Chargement des comptes…</p>
-            </div>
-          ) : (
-            <ul className="grid gap-3 sm:gap-4">
+        ) : (
+          <ul className="grid gap-3 sm:gap-4">
               {sortedAccounts.map((a) => {
                 const accent = a.color || "#6366f1";
                 const hasLogo = a.logo_url?.trim().startsWith("data:image/");
-                const vaultLocked = isVaultAccountLocked(a.vault_unlocks_on);
+                const outgoingLock = accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on);
                 const isVaultKind = a.kind === "vault";
                 const unlockLabel = a.vault_unlocks_on
                   ? new Date(a.vault_unlocks_on + "T12:00:00").toLocaleDateString("fr-FR", {
@@ -295,8 +302,8 @@ export default function AccountsManageView() {
                         group relative flex flex-col sm:flex-row rounded-2xl border transition-all duration-200 overflow-hidden
                         ${
                           a.is_archived
-                            ? "border-white/[0.05] bg-white/[0.02] opacity-70"
-                            : "border-white/[0.08] bg-gradient-to-br from-white/[0.06] to-white/[0.02] hover:border-emerald-500/25 hover:shadow-lg hover:shadow-emerald-500/5"
+                            ? "border-white/[0.06] bg-white/[0.02] opacity-70"
+                            : "border-white/[0.06] bg-gradient-to-br from-emerald-500/[0.04] to-white/[0.02] hover:border-emerald-500/30"
                         }
                       `}
                     >
@@ -320,16 +327,16 @@ export default function AccountsManageView() {
 
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2 gap-y-1">
-                            <span className="font-semibold text-neutral-50 text-base tracking-tight">{a.name}</span>
+                            <span className="font-semibold text-slate-100 text-base tracking-tight">{a.name}</span>
                             {a.is_archived && (
                               <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md bg-neutral-500/25 text-neutral-400 border border-white/5">
                                 Archivé
                               </span>
                             )}
-                            {(isVaultKind || vaultLocked) && (
+                            {outgoingLock && (
                               <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-200/90 border border-amber-500/30 inline-flex items-center gap-1">
                                 <Lock size={11} strokeWidth={2.5} className="opacity-90" />
-                                Coffre
+                                {isVaultKind ? "Coffre" : "Plan d'épargne"}
                               </span>
                             )}
                           </div>
@@ -337,7 +344,7 @@ export default function AccountsManageView() {
                             {accountTypeLabel(a.kind, a.subtype, a.institution_name)}
                           </p>
                           <p className="text-[10px] text-emerald-500/70 mt-2 font-medium">Voir les mouvements →</p>
-                          {vaultLocked && (
+                          {outgoingLock && (
                             <p
                               className="text-[11px] text-amber-200/80 mt-2 leading-snug flex flex-wrap items-center gap-2"
                               onClick={(e) => e.preventDefault()}
@@ -361,7 +368,7 @@ export default function AccountsManageView() {
                               )}
                             </p>
                           )}
-                          {isVaultKind && !vaultLocked && (
+                          {(isVaultKind || a.kind === "bank_blocked_savings") && !outgoingLock && (
                             <p className="text-[11px] text-emerald-400/90 mt-2">
                               Période écoulée ou déblocage manuel — ce solde est utilisable pour achats et transferts.
                             </p>
@@ -378,7 +385,7 @@ export default function AccountsManageView() {
                               {formatCFA(a.balance)}
                             </div>
                             <div className="text-[10px] text-neutral-500">
-                              FCFA · solde {vaultLocked ? "(immobilisé)" : "courant"}
+                              FCFA · solde {outgoingLock ? "(immobilisé)" : "courant"}
                             </div>
                           </div>
                         </div>
@@ -417,18 +424,17 @@ export default function AccountsManageView() {
                   </li>
                 );
               })}
-            </ul>
-          )}
-        </section>
+          </ul>
+        )}
+      </section>
 
-        {/* Transferts */}
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <History size={16} className="text-amber-400/90" />
-            <h2 className="text-sm font-semibold text-neutral-300 uppercase tracking-wide">Transferts récents</h2>
-          </div>
+      <section className="mb-8">
+        <div className="text-[11px] font-semibold text-emerald-400/90 mb-3 flex items-center gap-2">
+          <History size={14} className="text-emerald-400/90" />
+          Transferts récents
+        </div>
 
-          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
+        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
             {transferList.length === 0 ? (
               <div className="px-6 py-14 text-center">
                 <div className="mx-auto w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-3">
@@ -487,9 +493,8 @@ export default function AccountsManageView() {
                 ))}
               </ul>
             )}
-          </div>
-        </section>
-      </div>
+        </div>
+      </section>
 
       {showTransfer && (
         <div
@@ -497,7 +502,7 @@ export default function AccountsManageView() {
           onClick={() => setShowTransfer(false)}
         >
           <div
-            className="w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-white/10 bg-[#1a1a1a] shadow-2xl shadow-black/50 p-6 max-h-[92dvh] overflow-y-auto"
+            className="w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-white/[0.08] bg-[var(--bg-elevated)] shadow-2xl shadow-black/50 p-6 max-h-[92dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-start mb-2">

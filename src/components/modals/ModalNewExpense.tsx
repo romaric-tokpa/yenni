@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Plus, X, Check, Coins } from "lucide-react";
-import { suggestedTransactionFeePercentFromAccount, isVaultAccountLocked } from "@/lib/constants";
+import { suggestedTransactionFeePercentFromAccount, accountHasActiveOutgoingLock } from "@/lib/constants";
 import type { Category } from "@/lib/types";
 import type { BudgetContextValue } from "./types";
 
@@ -14,7 +14,7 @@ interface ModalNewExpenseProps {
 export default function ModalNewExpense({ onClose, budget }: ModalNewExpenseProps) {
   const { config, addExpense, addLoan, showToast, accountsWithBalance } = budget;
   const activeAccounts = accountsWithBalance.filter((a) => !a.is_archived);
-  const debitAccounts = activeAccounts.filter((a) => !isVaultAccountLocked(a.vault_unlocks_on));
+  const debitAccounts = activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on));
   const defaultAcc = debitAccounts[0]?.id;
   const now = new Date();
   const defaultDueDate = new Date(now);

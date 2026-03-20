@@ -7,9 +7,8 @@ import {
   getLoanPaymentsByDateRange,
   getLoans,
   getSalaries,
-  getOtherIncomes,
 } from "@/lib/db";
-import { INCOME_SOURCE_SALARY_SETTINGS } from "@/lib/constants";
+import { isIncomeCountedInMonthlyBudget } from "@/lib/incomeSources";
 
 /** Retourne les revenus et dépenses par mois pour une année */
 export async function GET(req: NextRequest) {
@@ -20,7 +19,7 @@ export async function GET(req: NextRequest) {
     const start = `${year}-01-01`;
     const end = `${year}-12-31`;
 
-    const [expenses, incomes, fixedPayments, loanPayments, loans, salariesData, otherIncomes] =
+    const [expenses, incomes, fixedPayments, loanPayments, loans, salariesData] =
       await Promise.all([
         getExpensesByDateRange(start, end),
         getIncomesByDateRange(start, end),
@@ -28,7 +27,6 @@ export async function GET(req: NextRequest) {
         getLoanPaymentsByDateRange(start, end),
         getLoans(),
         getSalaries(year),
-        getOtherIncomes(year),
       ]);
     const salaries = salariesData.amounts;
 
@@ -57,11 +55,7 @@ export async function GET(req: NextRequest) {
 
       let income =
         (salaries[m] || 0) +
-        (otherIncomes[m] || 0) +
-        monthIncomes.reduce(
-          (s, i) => s + (i.source === INCOME_SOURCE_SALARY_SETTINGS ? 0 : i.amount),
-          0,
-        );
+        monthIncomes.reduce((s, i) => s + (isIncomeCountedInMonthlyBudget(i.source) ? i.amount : 0), 0);
       let expensesTotal =
         monthFixed.reduce((s, f) => s + f.amount, 0) +
         monthExpenses.reduce((s, e) => s + e.amount + (e.transaction_fee ?? 0), 0);

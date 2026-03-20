@@ -2,14 +2,14 @@
 
 import type { ReactNode } from "react";
 import type { AccountWithBalance } from "@/lib/types";
-import { formatCFA, isVaultAccountLocked } from "@/lib/constants";
+import { formatCFA, accountHasActiveOutgoingLock } from "@/lib/constants";
 export interface AccountSelectProps {
   accounts: AccountWithBalance[];
   value: number;
   onChange: (id: number) => void;
   label?: string;
   required?: boolean;
-  /** Si true : masque les comptes coffre encore verrouillés (sorties). */
+  /** Si true : masque coffre et plan d'épargne avec verrouillage actif (sorties bloquées). */
   excludeVault?: boolean;
   filterType?: "debit" | "credit" | "all";
   id?: string;
@@ -36,7 +36,7 @@ export default function AccountSelect({
 
   const filtered = active.filter((a) => {
     if (filterType === "all") return true;
-    if (a.kind === "vault" && excludeVault && isVaultAccountLocked(a.vault_unlocks_on)) {
+    if (excludeVault && accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)) {
       return false;
     }
     return true;
@@ -80,7 +80,7 @@ export default function AccountSelect({
       >
         <option value="">Choisir un compte…</option>
         {filtered.map((a) => {
-          const locked = a.kind === "vault" && isVaultAccountLocked(a.vault_unlocks_on);
+          const locked = accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on);
           const pos = a.balance >= 0;
           return (
             <option key={a.id} value={a.id}>
@@ -101,7 +101,7 @@ export default function AccountSelect({
 }
 
 function lockedVaultLine(a: AccountWithBalance): ReactNode {
-  if (a.kind !== "vault" || !isVaultAccountLocked(a.vault_unlocks_on)) return null;
+  if (!accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)) return null;
   const d = a.vault_unlocks_on ?? "";
   const [y, m, day] = d.split("-").map(Number);
   const label =

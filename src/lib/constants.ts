@@ -25,7 +25,6 @@ export function sumActiveAccountBalances(accounts: AccountWithBalance[]): number
 
 export const DEFAULT_CONFIG: BudgetConfig = {
   salary: 0,
-  otherIncome: 0,
   fixedCharges: [],
   wishCategories: [],
   categories: [
@@ -98,7 +97,7 @@ export const ACCOUNT_KIND_PRESETS = [
   { id: "prepaid_card", label: "Carte prépayée" },
   { id: "bank_current", label: "Compte bancaire — Courant" },
   { id: "bank_savings", label: "Compte bancaire — Épargne classique" },
-  { id: "bank_blocked_savings", label: "Compte bancaire — Épargne bloquée" },
+  { id: "bank_blocked_savings", label: "Plan d'épargne" },
   { id: "bank_loan", label: "Compte bancaire — Prêt" },
   { id: "other", label: "Autre" },
 ] as const;
@@ -110,7 +109,7 @@ export type AccountKindId = (typeof ACCOUNT_KIND_PRESETS)[number]["id"];
 
 /**
  * Compte bancaire utilisable pour les prélèvements (échéances prêt, etc.) : trésorerie « banque »,
- * hors épargne bloquée (`bank_blocked_savings`). Exclut coffre, espèces, mobile money.
+ * hors plan d'épargne (`bank_blocked_savings`). Exclut coffre, espèces, mobile money.
  */
 export function isBankTreasuryDebitAccount(kind: string): boolean {
   if (!kind.startsWith("bank_")) return false;
@@ -123,6 +122,15 @@ export function isVaultAccountLocked(vaultUnlocksOn: string | null | undefined):
   if (vaultUnlocksOn == null || String(vaultUnlocksOn).trim() === "") return false;
   const today = new Date().toISOString().slice(0, 10);
   return today < String(vaultUnlocksOn).trim();
+}
+
+/**
+ * Coffre (`vault`) ou plan d'épargne (`bank_blocked_savings`) avec une échéance de blocage active :
+ * l'argent peut encore entrer ; les sorties sont bloquées jusqu'à la date ou un déblocage manuel.
+ */
+export function accountHasActiveOutgoingLock(kind: string, vaultUnlocksOn: string | null | undefined): boolean {
+  if (!isVaultAccountLocked(vaultUnlocksOn)) return false;
+  return kind === "vault" || kind === "bank_blocked_savings";
 }
 
 /** Date YYYY-MM-DD à partir de laquelle un coffre créé aujourd’hui autorise les sorties (N mois plus tard). */

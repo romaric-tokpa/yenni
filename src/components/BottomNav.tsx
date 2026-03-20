@@ -14,7 +14,7 @@ import {
   FolderKanban,
   HandCoins,
   Settings,
-  History,
+  LineChart,
   MoreHorizontal,
   X,
   LogOut,
@@ -35,7 +35,7 @@ const moreTabs = [
   { href: "/shopping-lists", label: "Courses", Icon: ShoppingCart },
   { href: "/loans", label: "Prêts", Icon: HandCoins },
   { href: "/projects", label: "Projets", Icon: FolderKanban },
-  { href: "/history", label: "Historique", Icon: History },
+  { href: "/history", label: "Indicateurs", Icon: LineChart },
   { href: "/settings", label: "Réglages", Icon: Settings },
 ];
 

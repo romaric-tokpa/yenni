@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { formatCFA, isVaultAccountLocked } from "@/lib/constants";
+import { formatCFA, accountHasActiveOutgoingLock } from "@/lib/constants";
 import { Plus, X, Trash2, Pause, Play, CheckCircle, Target, Pencil, Check, Lightbulb, Receipt, History, ChevronDown, ChevronUp, ShoppingCart } from "lucide-react";
 import { Project, ProjectFund, ProjectPurchase, BudgetConfig, Category, AccountWithBalance } from "@/lib/types";
 import Icon from "./ui/Icon";
@@ -30,7 +30,7 @@ function fundSourceAccountsForProject(
     (a) =>
       !a.is_archived &&
       a.id !== destId &&
-      !(a.kind === "vault" && isVaultAccountLocked(a.vault_unlocks_on)),
+      !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on),
   );
 }
 
