@@ -31,7 +31,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -2573,33 +2573,40 @@ export async function getWishListItems(listId: number): Promise<WishListItem[]> 
 
 export async function addWishListItem(item: Omit<WishListItem, "id" | "created_at">): Promise<WishListItem> {
   await ensureMigrations();
+  const photosJson = item.photos_json && String(item.photos_json).trim() ? String(item.photos_json) : "[]";
   const rs = await getDbClient().execute({
-    sql: "INSERT INTO wish_list_items (list_id, name, target_date, estimated_amount, actual_amount, category, subcategory, notes, status, purchased_at, expense_id, shop_name, shop_phone, shop_address, shop_lat, shop_lng) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    sql: "INSERT INTO wish_list_items (list_id, name, target_date, estimated_amount, actual_amount, category, subcategory, notes, status, purchased_at, expense_id, shop_name, shop_phone, shop_address, shop_lat, shop_lng, photos_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
     args: [
       item.list_id, item.name, item.target_date, item.estimated_amount, item.actual_amount ?? null,
       item.category || "misc", item.subcategory ?? null, item.notes || "", item.status || "pending",
       item.purchased_at ?? null, item.expense_id ?? null,
       item.shop_name ?? null, item.shop_phone ?? null, item.shop_address ?? null,
       item.shop_lat ?? null, item.shop_lng ?? null,
+      photosJson,
     ],
   });
   return rowToObj<WishListItem>(rs.rows[0] as Row, rs.columns);
 }
 
-export async function updateWishListItem(id: number, updates: Partial<Pick<WishListItem, "name" | "target_date" | "estimated_amount" | "actual_amount" | "category" | "subcategory" | "notes" | "shop_name" | "shop_phone" | "shop_address" | "shop_lat" | "shop_lng">>): Promise<WishListItem | null> {
+export async function updateWishListItem(id: number, updates: Partial<Pick<WishListItem, "name" | "target_date" | "estimated_amount" | "actual_amount" | "category" | "subcategory" | "notes" | "shop_name" | "shop_phone" | "shop_address" | "shop_lat" | "shop_lng" | "photos_json">>): Promise<WishListItem | null> {
   await ensureMigrations();
   const db = getDbClient();
   const currentRs = await db.execute({ sql: "SELECT * FROM wish_list_items WHERE id = ?", args: [id] });
   if (currentRs.rows.length === 0) return null;
   const current = rowToObj<WishListItem>(currentRs.rows[0] as Row, currentRs.columns);
   const merged = { ...current, ...updates };
+  const photosJson =
+    merged.photos_json != null && String(merged.photos_json).trim() !== ""
+      ? String(merged.photos_json)
+      : "[]";
   await db.execute({
-    sql: "UPDATE wish_list_items SET name=?, target_date=?, estimated_amount=?, actual_amount=?, category=?, subcategory=?, notes=?, shop_name=?, shop_phone=?, shop_address=?, shop_lat=?, shop_lng=? WHERE id=?",
+    sql: "UPDATE wish_list_items SET name=?, target_date=?, estimated_amount=?, actual_amount=?, category=?, subcategory=?, notes=?, shop_name=?, shop_phone=?, shop_address=?, shop_lat=?, shop_lng=?, photos_json=? WHERE id=?",
     args: [
       merged.name, merged.target_date, merged.estimated_amount, merged.actual_amount ?? null,
       merged.category || "misc", merged.subcategory ?? null, merged.notes || "",
       merged.shop_name ?? null, merged.shop_phone ?? null, merged.shop_address ?? null,
       merged.shop_lat ?? null, merged.shop_lng ?? null,
+      photosJson,
       id,
     ],
   });

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromCookies } from "@/lib/auth";
 import { updateWishListItem, markWishItemPurchased, deleteWishListItem } from "@/lib/db";
 import { apiErrorResponse } from "@/lib/apiError";
+import { normalizePhotosJson } from "@/lib/wishPhotos";
+import type { WishListItem } from "@/lib/types";
 
 export async function PUT(
   req: NextRequest,
@@ -41,6 +43,8 @@ export async function PUT(
       shop_address,
       shop_lat,
       shop_lng,
+      photos,
+      photos_json,
     } = body;
     const updates: Record<string, unknown> = {};
     if (name !== undefined) updates.name = String(name).trim();
@@ -54,8 +58,31 @@ export async function PUT(
     if (shop_address !== undefined) updates.shop_address = shop_address ? String(shop_address).trim() : null;
     if (shop_lat !== undefined) updates.shop_lat = shop_lat != null ? Number(shop_lat) : null;
     if (shop_lng !== undefined) updates.shop_lng = shop_lng != null ? Number(shop_lng) : null;
+    if (photos !== undefined || photos_json !== undefined) {
+      updates.photos_json = normalizePhotosJson(photos, photos_json);
+    }
 
-    const item = await updateWishListItem(itemId, updates);
+    const item = await updateWishListItem(
+      itemId,
+      updates as Partial<
+        Pick<
+          WishListItem,
+          | "name"
+          | "target_date"
+          | "estimated_amount"
+          | "actual_amount"
+          | "category"
+          | "subcategory"
+          | "notes"
+          | "shop_name"
+          | "shop_phone"
+          | "shop_address"
+          | "shop_lat"
+          | "shop_lng"
+          | "photos_json"
+        >
+      >,
+    );
     if (!item) return NextResponse.json({ error: "Article non trouvé" }, { status: 404 });
     return NextResponse.json(item);
   } catch (err) {

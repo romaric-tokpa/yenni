@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromCookies } from "@/lib/auth";
 import { getWishListItems, addWishListItem } from "@/lib/db";
 import { apiErrorResponse } from "@/lib/apiError";
+import { normalizePhotosJson } from "@/lib/wishPhotos";
 
 export async function GET(
   _req: NextRequest,
@@ -45,6 +46,8 @@ export async function POST(
       shop_address,
       shop_lat,
       shop_lng,
+      photos,
+      photos_json,
     } = body;
 
     if (!name || !target_date || estimated_amount === undefined) {
@@ -69,6 +72,7 @@ export async function POST(
       shop_address: shop_address ? String(shop_address).trim() : null,
       shop_lat: shop_lat != null ? Number(shop_lat) : null,
       shop_lng: shop_lng != null ? Number(shop_lng) : null,
+      photos_json: normalizePhotosJson(photos, photos_json),
     });
     return NextResponse.json(item, { status: 201 });
   } catch (err) {

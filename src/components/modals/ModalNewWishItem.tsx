@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Plus, X, Check, MapPin } from "lucide-react";
 import type { BudgetContextValue } from "./types";
+import { WishItemPhotosEditor } from "@/components/WishItemPhotosEditor";
 
 interface ModalNewWishItemProps {
   onClose: () => void;
@@ -38,6 +39,7 @@ export default function ModalNewWishItem({ onClose, budget, listId, listName }: 
     shop_lat: "" as string | number,
     shop_lng: "" as string | number,
   });
+  const [photos, setPhotos] = useState<string[]>([]);
 
   useEffect(() => {
     setForm((f) => ({ ...f, category: defaultCategory }));
@@ -58,6 +60,7 @@ export default function ModalNewWishItem({ onClose, budget, listId, listName }: 
           estimated_amount: Number(form.estimated_amount),
           category: form.category,
           notes: form.notes,
+          photos,
           shop_name: form.shop_name || undefined,
           shop_phone: form.shop_phone || undefined,
           shop_address: form.shop_address || undefined,
@@ -86,11 +89,11 @@ export default function ModalNewWishItem({ onClose, budget, listId, listName }: 
       </div>
       <div className="space-y-5">
         <section className="space-y-4">
-          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Informations principales</h3>
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Produit</h3>
           <div className="grid gap-4">
             <div>
-              <label className="text-xs text-neutral-500 mb-1.5 block">Description *</label>
-              <input className="input-field" placeholder="Ex: T-shirt, Casque..." value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <label className="text-xs text-neutral-500 mb-1.5 block">Titre de l&apos;article *</label>
+              <input className="input-field" placeholder="Ex : Casque Bluetooth, Robe…" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -98,8 +101,14 @@ export default function ModalNewWishItem({ onClose, budget, listId, listName }: 
                 <input type="date" className="input-field" value={form.target_date} onChange={(e) => setForm({ ...form, target_date: e.target.value })} />
               </div>
               <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Montant (FCFA) *</label>
-                <input type="number" className="input-field font-mono" placeholder="0" value={form.estimated_amount} onChange={(e) => setForm({ ...form, estimated_amount: e.target.value })} />
+                <label className="text-xs text-neutral-500 mb-1.5 block">Prix cible (FCFA) *</label>
+                <input
+                  type="number"
+                  className="input-field font-mono"
+                  placeholder="0"
+                  value={form.estimated_amount}
+                  onChange={(e) => setForm({ ...form, estimated_amount: e.target.value })}
+                />
               </div>
             </div>
             <div>
@@ -111,27 +120,59 @@ export default function ModalNewWishItem({ onClose, budget, listId, listName }: 
               </select>
             </div>
             <div>
-              <label className="text-xs text-neutral-500 mb-1.5 block">Notes (optionnel)</label>
-              <input className="input-field" placeholder="Notes..." value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+              <label className="text-xs text-neutral-500 mb-1.5 block">Description (optionnel)</label>
+              <textarea
+                className="input-field min-h-[88px] resize-y py-3"
+                placeholder="Détails, modèle, couleur, lien mémorisé…"
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-neutral-500 mb-1.5 block">Photos de l&apos;article</label>
+              <WishItemPhotosEditor photos={photos} onChange={setPhotos} idPrefix="new-wish-photo" />
             </div>
           </div>
         </section>
         <section className="border-t border-white/10 pt-4 space-y-4">
-          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Boutique cible (optionnel)</h3>
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Vendeur (optionnel)</h3>
+          <p className="text-[10px] text-neutral-600 leading-relaxed">
+            Affichés comme sur une fiche e-commerce : nom du vendeur / boutique et numéro pour appeler ou écrire.
+          </p>
           <div className="grid gap-3">
             <div>
-              <label className="text-xs text-neutral-500 mb-1.5 block">Nom de la boutique</label>
-              <input className="input-field" placeholder="Ex: Zara, Apple Store" value={form.shop_name} onChange={(e) => setForm({ ...form, shop_name: e.target.value })} />
+              <label className="text-xs text-neutral-500 mb-1.5 block">Nom du vendeur ou de la boutique</label>
+              <input
+                className="input-field"
+                placeholder="Ex : Boutique Hassan, Marché Médina…"
+                value={form.shop_name}
+                onChange={(e) => setForm({ ...form, shop_name: e.target.value })}
+              />
             </div>
             <div>
-              <label className="text-xs text-neutral-500 mb-1.5 block">Téléphone</label>
-              <input type="tel" className="input-field" placeholder="+225 07 00 00 00 00" value={form.shop_phone} onChange={(e) => setForm({ ...form, shop_phone: e.target.value })} />
+              <label className="text-xs text-neutral-500 mb-1.5 block">Numéro joignable</label>
+              <input
+                type="tel"
+                className="input-field"
+                placeholder="+225 07 00 00 00 00"
+                value={form.shop_phone}
+                onChange={(e) => setForm({ ...form, shop_phone: e.target.value })}
+              />
             </div>
             <div>
-              <label className="text-xs text-neutral-500 mb-1.5 block">Adresse</label>
-              <input className="input-field" placeholder="Adresse ou lieu" value={form.shop_address} onChange={(e) => setForm({ ...form, shop_address: e.target.value })} />
+              <label className="text-xs text-neutral-500 mb-1.5 block">Adresse ou lieu</label>
+              <input
+                className="input-field"
+                placeholder="Adresse, quartier…"
+                value={form.shop_address}
+                onChange={(e) => setForm({ ...form, shop_address: e.target.value })}
+              />
             </div>
-            <button type="button" onClick={() => captureGeolocation((lat, lng) => setForm((f) => ({ ...f, shop_lat: lat, shop_lng: lng })))} className="text-xs text-pink-400 hover:text-pink-300 flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => captureGeolocation((lat, lng) => setForm((f) => ({ ...f, shop_lat: lat, shop_lng: lng })))}
+              className="text-xs text-pink-400 hover:text-pink-300 flex items-center gap-1"
+            >
               <MapPin size={12} /> Utiliser ma position actuelle
             </button>
           </div>

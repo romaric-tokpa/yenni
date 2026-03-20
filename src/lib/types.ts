@@ -373,6 +373,8 @@ export interface WishListItem {
   shop_address: string | null;
   shop_lat: number | null;
   shop_lng: number | null;
+  /** Tableau JSON de data URLs (`data:image/...`) — photos de l’article */
+  photos_json?: string | null;
   created_at: string;
 }
 

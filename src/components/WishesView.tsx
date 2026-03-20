@@ -4,10 +4,12 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { getModalHref } from "@/lib/modal";
 import Link from "next/link";
 import { formatCFA, MONTHS_FULL, getSelectableYears } from "@/lib/constants";
-import { Plus, Trash2, X, Heart, Check, Pencil, ChevronDown, ChevronRight, ChevronLeft, MapPin, Phone, Store } from "lucide-react";
-import Icon from "./ui/Icon";
+import { Plus, Trash2, X, Heart, Check, Pencil, ChevronDown, ChevronRight, ChevronLeft, MapPin } from "lucide-react";
 import type { WishList, WishListItem } from "@/lib/types";
-import type { BudgetConfig, Category, WishCategory, WishSubcategory } from "@/lib/types";
+import type { BudgetConfig, Category, WishCategory } from "@/lib/types";
+import { WishItemProductCardPending, WishItemProductCardPurchased } from "@/components/WishItemProductCard";
+import { WishItemPhotosEditor } from "@/components/WishItemPhotosEditor";
+import { parseWishItemPhotos } from "@/lib/wishPhotos";
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -136,7 +138,11 @@ export default function WishesView({
     return { text: `Dans ${diff}j`, cls: "text-slate-400" };
   };
 
-  const handleUpdateItem = async (listId: number, itemId: number, updates: Partial<WishListItem>) => {
+  const handleUpdateItem = async (
+    listId: number,
+    itemId: number,
+    updates: Partial<WishListItem> & { photos?: string[] },
+  ) => {
     try {
       const r = await fetch(`/api/wish-lists/${listId}/items/${itemId}`, {
         method: "PUT",
@@ -333,55 +339,17 @@ export default function WishesView({
                             const isHighlighted = highlightedId === item.id;
                             const mapsUrl = getMapsUrl(item);
                             return (
-                              <div
+                              <WishItemProductCardPending
                                 key={item.id}
-                                className={`rounded-lg p-3 glass border border-white/5 flex flex-col sm:flex-row sm:items-center gap-3 transition-colors ${
-                                  isHighlighted ? "ring-2 ring-pink-500/50 bg-pink-500/20" : ""
-                                }`}
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <p className="font-medium text-slate-400 truncate">{item.name}</p>
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ backgroundColor: `${cat.color}20`, color: cat.color }}>
-                                      <Icon name={cat.icon} size={10} />
-                                      {cat.label}
-                                    </span>
-                                  </div>
-                                  <p className="text-[10px] text-slate-500 mt-0.5">
-                                    Budget : <span className="font-mono text-pink-400">{formatCFA(item.estimated_amount)}</span>
-                                    {" · "}
-                                    {new Date(item.target_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}
-                                    {" · "}
-                                    <span className={dl.cls}>{dl.text}</span>
-                                  </p>
-                                  {(item.shop_name || item.shop_phone || item.shop_address) && (
-                                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px] text-slate-500">
-                                      {item.shop_name && <span className="flex items-center gap-1"><Store size={10} />{item.shop_name}</span>}
-                                      {item.shop_phone && <a href={`tel:${item.shop_phone}`} className="flex items-center gap-1 hover:text-pink-400"><Phone size={10} />{item.shop_phone}</a>}
-                                      {mapsUrl && (
-                                        <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-pink-400 hover:underline">
-                                          <MapPin size={10} /> Voir sur la carte
-                                        </a>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <button
-                                    onClick={() => router.push(getModalHref({ type: "purchase-wish", returnTo: "/wishes", listId: String(list.id), itemId: String(item.id) }))}
-                                    className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-1"
-                                  >
-                                    <Check size={14} />
-                                    Acheté
-                                  </button>
-                                  <button onClick={() => setEditingItem(item)} className="p-2 rounded-lg hover:bg-white/5 text-slate-500">
-                                    <Pencil size={16} />
-                                  </button>
-                                  <button onClick={() => handleDeleteItem(list.id, item.id)} className="p-2 rounded-lg hover:bg-red-500/10 text-slate-500 hover:text-red-400">
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
-                              </div>
+                                item={item}
+                                cat={cat}
+                                listId={list.id}
+                                dueLabel={dl}
+                                mapsUrl={mapsUrl}
+                                isHighlighted={isHighlighted}
+                                onEdit={() => setEditingItem(item)}
+                                onDelete={() => handleDeleteItem(list.id, item.id)}
+                              />
                             );
                           })}
                         </div>
@@ -393,34 +361,15 @@ export default function WishesView({
                         <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide mb-2">Achetés</p>
                         <div className="space-y-2">
                           {purchased.map((item) => {
-                            const actual = item.actual_amount ?? item.estimated_amount;
-                            const diff = actual - item.estimated_amount;
-                            const diffCls = diff > 0 ? "text-red-400" : diff < 0 ? "text-emerald-400" : "text-slate-500";
-                            const diffLabel = diff > 0 ? `+${formatCFA(diff)}` : diff < 0 ? formatCFA(diff) : "0";
                             const cat = wishCategories.find((c) => c.id === (item.category || "misc")) ?? { label: item.category || "Divers", icon: "heart", color: "#EC4899" };
                             return (
-                              <div key={item.id} className="rounded-lg p-3 glass border border-white/5 opacity-90">
-                                <div className="flex justify-between items-start">
-                                  <div>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <p className="font-medium text-slate-400 truncate">{item.name}</p>
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ backgroundColor: `${cat.color}20`, color: cat.color }}>
-                                        <Icon name={cat.icon} size={10} />
-                                        {cat.label}
-                                      </span>
-                                    </div>
-                                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px]">
-                                      <span className="text-slate-500">Prévu : <span className="font-mono text-slate-400">{formatCFA(item.estimated_amount)}</span></span>
-                                      <span className="text-slate-500">Réel : <span className="font-mono text-emerald-400">{formatCFA(actual)}</span></span>
-                                      <span className={diffCls}>Écart : <span className="font-mono">{diffLabel}</span></span>
-                                    </div>
-                                    <p className="text-[9px] text-slate-600 mt-1">Acheté le {formatDateTime(item.purchased_at)}</p>
-                                  </div>
-                                  <button onClick={() => handleDeleteItem(list.id, item.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-slate-500 hover:text-red-400 shrink-0">
-                                    <Trash2 size={14} />
-                                  </button>
-                                </div>
-                              </div>
+                              <WishItemProductCardPurchased
+                                key={item.id}
+                                item={item}
+                                cat={cat}
+                                formatDateTime={formatDateTime}
+                                onDelete={() => handleDeleteItem(list.id, item.id)}
+                              />
                             );
                           })}
                         </div>
@@ -525,7 +474,7 @@ function EditWishItemModal({
 }: {
   item: WishListItem;
   wishCategories: WishCategory[];
-  onSave: (updates: Partial<WishListItem>) => void;
+  onSave: (updates: Partial<WishListItem> & { photos?: string[] }) => void;
   onCancel: () => void;
   onCaptureGeolocation: (cb: (lat: number, lng: number) => void) => void;
 }) {
@@ -534,6 +483,7 @@ function EditWishItemModal({
   const [category, setCategory] = useState(item.category || "misc");
   const [estimated_amount, setEstimatedAmount] = useState(String(item.estimated_amount));
   const [notes, setNotes] = useState(item.notes || "");
+  const [photos, setPhotos] = useState<string[]>(() => parseWishItemPhotos(item));
   const [shop_name, setShopName] = useState(item.shop_name || "");
   const [shop_phone, setShopPhone] = useState(item.shop_phone || "");
   const [shop_address, setShopAddress] = useState(item.shop_address || "");
@@ -542,7 +492,7 @@ function EditWishItemModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={onCancel}>
-      <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-base font-bold flex items-center gap-2">
             <Pencil size={18} className="text-pink-400" />
@@ -572,18 +522,27 @@ function EditWishItemModal({
             <input type="number" className="input-field font-mono" value={estimated_amount} onChange={(e) => setEstimatedAmount(e.target.value)} />
           </div>
           <div>
-            <label className="text-xs text-neutral-500 mb-1.5 block">Notes</label>
-            <input className="input-field" value={notes} onChange={(e) => setNotes(e.target.value)} />
+            <label className="text-xs text-neutral-500 mb-1.5 block">Description / notes</label>
+            <textarea
+              className="input-field min-h-[88px] resize-y py-3"
+              placeholder="Détails, référence produit, couleur…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
           </div>
           <div className="border-t border-white/10 pt-4 mt-2">
-            <p className="text-xs font-medium text-slate-400 mb-3">Boutique cible</p>
+            <p className="text-xs font-medium text-slate-400 mb-2">Photos de l&apos;article</p>
+            <WishItemPhotosEditor photos={photos} onChange={setPhotos} idPrefix={`edit-wish-${item.id}-photo`} />
+          </div>
+          <div className="border-t border-white/10 pt-4 mt-2">
+            <p className="text-xs font-medium text-slate-400 mb-3">Vendeur (comme sur une fiche boutique)</p>
             <div className="grid gap-3">
               <div>
-                <label className="text-[10px] text-neutral-500 mb-1 block">Nom de la boutique</label>
+                <label className="text-[10px] text-neutral-500 mb-1 block">Nom du vendeur / de la boutique</label>
                 <input className="input-field" value={shop_name} onChange={(e) => setShopName(e.target.value)} />
               </div>
               <div>
-                <label className="text-[10px] text-neutral-500 mb-1 block">Téléphone</label>
+                <label className="text-[10px] text-neutral-500 mb-1 block">Numéro joignable</label>
                 <input type="tel" className="input-field" value={shop_phone} onChange={(e) => setShopPhone(e.target.value)} />
               </div>
               <div>
@@ -620,6 +579,7 @@ function EditWishItemModal({
                 category,
                 estimated_amount: Number(estimated_amount) || 0,
                 notes,
+                photos,
                 shop_name: shop_name || null,
                 shop_phone: shop_phone || null,
                 shop_address: shop_address || null,
