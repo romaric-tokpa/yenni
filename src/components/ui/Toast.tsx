@@ -41,7 +41,7 @@ export default function Toast({
 
   return (
     <div
-      className={`fixed top-4 right-4 left-4 sm:left-auto sm:max-w-sm z-[100] px-4 py-3 rounded-xl font-medium text-sm text-white shadow-2xl flex items-center gap-3 ${
+      className={`fixed top-[max(1rem,env(safe-area-inset-top))] right-4 left-4 sm:left-auto sm:max-w-md z-[100] px-4 py-3.5 rounded-xl font-medium text-sm text-white shadow-2xl flex items-center gap-3 border border-white/10 ${
         exiting ? "toast-animate-out" : "toast-animate-in"
       }`}
       style={{ background: bgStyle }}

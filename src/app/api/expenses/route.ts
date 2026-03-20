@@ -34,19 +34,41 @@ export async function POST(req: NextRequest) {
     if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
     const body = await req.json();
+    const accPost = body.account_id != null ? parseInt(String(body.account_id), 10) : NaN;
     if (
       !body.date ||
       !body.description ||
       !body.category ||
       !body.amount ||
-      body.amount <= 0
+      body.amount <= 0 ||
+      !Number.isFinite(accPost) ||
+      accPost <= 0
     ) {
-      return NextResponse.json({ error: "Données invalides" }, { status: 400 });
+      return NextResponse.json({ error: "Données invalides : compte requis" }, { status: 400 });
     }
-    const expense = await addExpense(body, session.userId);
+    const expenseData = {
+      ...body,
+      payment_method: "cash",
+      transaction_fee: body.transaction_fee ?? 0,
+      account_id: body.account_id,
+    };
+    const expense = await addExpense(expenseData, session.userId);
     return NextResponse.json(expense, { status: 201 });
   } catch (err) {
     console.error("[API ERROR]", err);
+    const msg = err instanceof Error ? err.message : "";
+    if (msg === "ACCOUNT_VAULT_LOCKED") {
+      return NextResponse.json(
+        { error: "Ce compte coffre est encore verrouillé : aucune dépense possible jusqu’à la date prévue ou après déblocage manuel." },
+        { status: 403 },
+      );
+    }
+    if (msg === "ACCOUNT_NOT_FOUND" || msg === "ACCOUNT_ID_REQUIRED") {
+      return NextResponse.json({ error: "Compte requis ou compte introuvable" }, { status: 400 });
+    }
+    if (msg === "INSUFFICIENT_BALANCE") {
+      return NextResponse.json({ error: "Solde insuffisant sur ce compte" }, { status: 400 });
+    }
     return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }
@@ -58,14 +80,17 @@ export async function PUT(req: NextRequest) {
     if (!id || isNaN(id)) {
       return NextResponse.json({ error: "ID requis" }, { status: 400 });
     }
+    const accPut = body.account_id != null ? parseInt(String(body.account_id), 10) : NaN;
     if (
       !body.date ||
       !body.description ||
       !body.category ||
       !body.amount ||
-      body.amount <= 0
+      body.amount <= 0 ||
+      !Number.isFinite(accPut) ||
+      accPut <= 0
     ) {
-      return NextResponse.json({ error: "Données invalides" }, { status: 400 });
+      return NextResponse.json({ error: "Données invalides : compte requis" }, { status: 400 });
     }
     const expense = await updateExpense(id, {
       date: body.date,
@@ -74,6 +99,9 @@ export async function PUT(req: NextRequest) {
       category: body.category,
       amount: body.amount,
       notes: body.notes,
+      payment_method: "cash",
+      transaction_fee: body.transaction_fee,
+      account_id: body.account_id,
     });
     if (!expense) {
       return NextResponse.json({ error: "Dépense introuvable" }, { status: 404 });
@@ -81,6 +109,19 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json(expense);
   } catch (err) {
     console.error("[API ERROR]", err);
+    const msg = err instanceof Error ? err.message : "";
+    if (msg === "ACCOUNT_VAULT_LOCKED") {
+      return NextResponse.json(
+        { error: "Ce compte coffre est encore verrouillé : aucune dépense possible jusqu’à la date prévue ou après déblocage manuel." },
+        { status: 403 },
+      );
+    }
+    if (msg === "ACCOUNT_NOT_FOUND" || msg === "ACCOUNT_ID_REQUIRED") {
+      return NextResponse.json({ error: "Compte introuvable ou requis" }, { status: 404 });
+    }
+    if (msg === "INSUFFICIENT_BALANCE") {
+      return NextResponse.json({ error: "Solde insuffisant sur ce compte" }, { status: 400 });
+    }
     return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

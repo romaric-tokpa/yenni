@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/apiError";
+import { getSessionFromCookies } from "@/lib/auth";
 import {
   getProjects,
   addProject,
   updateProject,
   deleteProject,
+  getAccountById,
 } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
@@ -18,14 +20,34 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSessionFromCookies();
+    if (!session) {
+      return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    }
     const body = await req.json();
-    if (!body.name || !body.target_amount) {
+    if (!body.name || body.target_amount == null) {
       return NextResponse.json(
         { error: "Nom et montant cible requis" },
-        { status: 400 }
+        { status: 400 },
       );
     }
-    const project = await addProject(body);
+    const accountId = body.account_id != null ? Number(body.account_id) : NaN;
+    if (!Number.isFinite(accountId)) {
+      return NextResponse.json(
+        { error: "Choisis le compte d’épargne du projet" },
+        { status: 400 },
+      );
+    }
+    const acc = await getAccountById(accountId, session.userId);
+    if (!acc || acc.is_archived) {
+      return NextResponse.json({ error: "Compte invalide ou archivé" }, { status: 400 });
+    }
+    const project = await addProject({
+      ...body,
+      target_amount: Number(body.target_amount),
+      saved_amount: body.saved_amount ?? 0,
+      account_id: accountId,
+    });
     return NextResponse.json(project, { status: 201 });
   } catch (err) {
     console.error("[API ERROR]", err);
@@ -35,9 +57,23 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
+    const session = await getSessionFromCookies();
+    if (!session) {
+      return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    }
     const body = await req.json();
     if (!body.id)
       return NextResponse.json({ error: "ID requis" }, { status: 400 });
+    if (body.account_id != null) {
+      const accountId = Number(body.account_id);
+      if (!Number.isFinite(accountId)) {
+        return NextResponse.json({ error: "Compte invalide" }, { status: 400 });
+      }
+      const acc = await getAccountById(accountId, session.userId);
+      if (!acc || acc.is_archived) {
+        return NextResponse.json({ error: "Compte invalide ou archivé" }, { status: 400 });
+      }
+    }
     const project = await updateProject(body.id, body);
     return project
       ? NextResponse.json(project)

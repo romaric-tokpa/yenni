@@ -1,7 +1,7 @@
 "use client";
 import { motion } from "framer-motion";
-import { formatCFA, MONTHS_SHORT } from "@/lib/constants";
-import { BudgetConfig, FixedCharge, Project } from "@/lib/types";
+import { formatCFA, MONTHS_SHORT, getLinkedVaultEmergencyBalance } from "@/lib/constants";
+import { BudgetConfig, FixedCharge, Project, AccountWithBalance } from "@/lib/types";
 import SavingsLineChart from "./charts/SavingsLineChart";
 import {
   Target,
@@ -18,6 +18,10 @@ import AnimatedProgressBar from "./ui/AnimatedProgressBar";
 import SmartGoalsSection from "./SmartGoalsSection";
 import { useConfetti } from "@/hooks/useConfetti";
 import Link from "next/link";
+import { useMemo, useRef, useCallback, useEffect } from "react";
+
+/** Évite d’envoyer une requête à chaque frappe (champ vide = 0 provoquait un gros « retrait » coffre verrouillé). */
+const SAVING_INPUT_DEBOUNCE_MS = 480;
 
 interface BudgetData {
   config: BudgetConfig;
@@ -34,6 +38,7 @@ interface BudgetData {
   monthSaving: number;
   totalIncome: number;
   updateSaving: (month: number, amount: number) => Promise<void>;
+  accountsWithBalance: AccountWithBalance[];
 }
 
 export default function SavingsTracker({ budget }: { budget: BudgetData }) {
@@ -52,29 +57,95 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
     monthSaving,
     totalIncome,
     updateSaving,
+    accountsWithBalance,
   } = budget;
   const fireConfetti = useConfetti();
+
+  const emergencyVaultBalance = useMemo(
+    () => getLinkedVaultEmergencyBalance(config, accountsWithBalance),
+    [config, accountsWithBalance],
+  );
+  const emergencyProgressAmount =
+    emergencyVaultBalance != null ? emergencyVaultBalance : totalSaved;
 
   const target =
     config.fixedCharges.find((c: FixedCharge) => c.id === "epargne")?.amount || 0;
   const goalPct =
-    config.savingsGoal > 0 ? (totalSaved / config.savingsGoal) * 100 : 0;
+    config.savingsGoal > 0 ? (emergencyProgressAmount / config.savingsGoal) * 100 : 0;
   const goalPctCapped = Math.min(goalPct, 100);
   const savingsRate =
     totalIncome > 0 ? ((monthSaving + totalProjectSaved) / totalIncome) * 100 : 0;
 
-  const handleUpdateSaving = async (month: number, amount: number) => {
-    const prevTotal = totalSaved;
-    const newTotal = prevTotal - (savings[month] ?? 0) + amount;
-    await updateSaving(month, amount);
-    if (
-      config.savingsGoal > 0 &&
-      prevTotal < config.savingsGoal &&
-      newTotal >= config.savingsGoal
-    ) {
-      fireConfetti();
-    }
-  };
+  const savingDebounceRef = useRef<Record<number, ReturnType<typeof setTimeout> | undefined>>(
+    {},
+  );
+
+  const commitSavingMonth = useCallback(
+    async (month: number, amount: number) => {
+      const prevTotal = totalSaved;
+      const newTotal = prevTotal - (savings[month] ?? 0) + amount;
+      await updateSaving(month, amount);
+      if (
+        emergencyVaultBalance == null &&
+        config.savingsGoal > 0 &&
+        prevTotal < config.savingsGoal &&
+        newTotal >= config.savingsGoal
+      ) {
+        fireConfetti();
+      }
+    },
+    [
+      totalSaved,
+      savings,
+      updateSaving,
+      emergencyVaultBalance,
+      config.savingsGoal,
+      fireConfetti,
+    ],
+  );
+
+  const scheduleSavingInputUpdate = useCallback(
+    (month: number, raw: string) => {
+      const trimmed = raw.trim();
+      /* Champ vide pendant la saisie : on n’envoie pas 0 (sinon delta négatif massif + coffre verrouillé). */
+      if (trimmed === "") return;
+      const n = Number(trimmed.replace(",", "."));
+      if (!Number.isFinite(n) || n < 0) return;
+      const amount = Math.round(n);
+      const prev = savingDebounceRef.current[month];
+      if (prev) clearTimeout(prev);
+      savingDebounceRef.current[month] = setTimeout(() => {
+        savingDebounceRef.current[month] = undefined;
+        void commitSavingMonth(month, amount);
+      }, SAVING_INPUT_DEBOUNCE_MS);
+    },
+    [commitSavingMonth],
+  );
+
+  const flushSavingInputOnBlur = useCallback(
+    (month: number, raw: string) => {
+      const pending = savingDebounceRef.current[month];
+      if (pending) {
+        clearTimeout(pending);
+        savingDebounceRef.current[month] = undefined;
+      }
+      const trimmed = raw.trim();
+      const amount =
+        trimmed === ""
+          ? 0
+          : Math.max(0, Math.round(Number(trimmed.replace(",", ".")) || 0));
+      void commitSavingMonth(month, amount);
+    },
+    [commitSavingMonth],
+  );
+
+  useEffect(() => {
+    return () => {
+      Object.values(savingDebounceRef.current).forEach((id) => {
+        if (id) clearTimeout(id);
+      });
+    };
+  }, []);
 
   const container = {
     hidden: { opacity: 0 },
@@ -142,8 +213,13 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
             <span className="text-[9px] text-neutral-500">Fonds d&apos;urgence</span>
           </div>
           <div className="font-mono text-sm font-semibold text-green-500">
-            {formatCFA(totalSavedManualCumulative)}
+            {formatCFA(
+              emergencyVaultBalance != null ? emergencyVaultBalance : totalSavedManualCumulative,
+            )}
           </div>
+          {emergencyVaultBalance != null && (
+            <p className="text-[8px] text-neutral-600 mt-0.5 leading-tight">Lié au coffre</p>
+          )}
         </motion.div>
         <motion.div variants={item} className="rounded-lg border border-white/5 p-3">
           <div className="flex items-center gap-1.5 mb-0.5">
@@ -179,11 +255,16 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
               d&apos;Urgence
             </div>
             <div className="font-mono text-xl lg:text-3xl font-bold text-amber-400 mt-1">
-              {formatCFA(totalSaved)}{" "}
+              {formatCFA(emergencyProgressAmount)}{" "}
               <span className="text-xs lg:text-base text-slate-500 font-normal">
                 / {formatCFA(config.savingsGoal || 0)}
               </span>
             </div>
+            {emergencyVaultBalance != null && (
+              <p className="text-[10px] text-amber-200/70 mt-1">
+                Progression = solde du compte coffre lié (Réglages → Fonds d&apos;urgence).
+              </p>
+            )}
           </div>
           <div className="relative w-16 h-16 lg:w-24 lg:h-24 shrink-0">
             <svg
@@ -220,7 +301,7 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
         {config.savingsGoal > 0 ? (
           <>
             <AnimatedProgressBar
-              value={totalSaved}
+              value={emergencyProgressAmount}
               max={config.savingsGoal}
               gradient="linear-gradient(90deg,#f59e0b,#fbbf24)"
               duration={1}
@@ -248,6 +329,7 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
         projects={projects}
         totalSavedManual={totalSavedManualCumulative}
         savedInPeriod={savedInPeriod ?? undefined}
+        emergencyVaultBalance={emergencyVaultBalance}
         resteAVivre={resteAVivre}
       />
 
@@ -325,9 +407,8 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
                   placeholder="0"
                   defaultValue={savings[i] || ""}
                   key={`sav-${selectedYear}-${i}`}
-                  onChange={(e) =>
-                    handleUpdateSaving(i, Number(e.target.value) || 0)
-                  }
+                  onChange={(e) => scheduleSavingInputUpdate(i, e.target.value)}
+                  onBlur={(e) => flushSavingInputOnBlur(i, e.target.value)}
                 />
               </div>
             );

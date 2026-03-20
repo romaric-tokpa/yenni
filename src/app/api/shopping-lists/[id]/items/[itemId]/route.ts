@@ -22,7 +22,9 @@ export async function PUT(
       if (actualAmount === undefined || actualAmount === null || Number(actualAmount) < 0) {
         return NextResponse.json({ error: "actual_amount requis (montant réel d'achat)" }, { status: 400 });
       }
-      const expense = await markShoppingItemPurchased(itemId, Number(actualAmount), session.userId);
+      const transactionFee = body.transaction_fee ?? 0;
+      const accountId = body.account_id ?? null;
+      const expense = await markShoppingItemPurchased(itemId, Number(actualAmount), session.userId, transactionFee, accountId);
       if (!expense) return NextResponse.json({ error: "Article non trouvé ou déjà acheté" }, { status: 404 });
       return NextResponse.json(expense);
     }

@@ -2,7 +2,8 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import { formatCFA } from "./constants";
 import { MONTHS_FULL } from "./constants";
-import type { Expense, FixedChargePayment, Category } from "./types";
+import type { Expense, FixedChargePayment, Category, Income, AccountTransfer } from "./types";
+import { getIncomeSourceLabel } from "./incomeSources";
 
 export interface BilanData {
   month: number;
@@ -14,6 +15,10 @@ export interface BilanData {
   monthLoanRepayments: number;
   totalExpenses: number;
   soldeNet: number;
+  /** Trésorerie totale = actifs (optionnel si export ancien). */
+  totalActifsKpi?: number;
+  soldeDisponibleLiquide?: number;
+  totalTreasuryBalances?: number;
   dailyBudget: number;
   totalSaved: number;
   totalProjectSaved: number;
@@ -81,8 +86,14 @@ export function createBilanHTML(data: BilanData): string {
     year: "numeric",
   });
 
+  const actifsLabel =
+    data.totalActifsKpi != null ? "Actifs (trésorerie comptes)" : "Actifs (Revenus)";
+  const actifsVal =
+    data.totalActifsKpi != null ? formatCFA(data.totalActifsKpi) : formatCFA(data.totalIncome);
+
   const rows = [
-    ["Actifs (Revenus)", formatCFA(data.totalIncome), "+"],
+    [actifsLabel, actifsVal, "+"],
+    ["Entrées du mois (budget)", formatCFA(data.totalIncome), "+"],
     ["Charges fixes", formatCFA(data.totalFixed), "-"],
     ["Dépenses variables", formatCFA(data.totalMonthSpent), "-"],
     ["Épargne mensuelle", formatCFA(data.monthSaving), "-"],
@@ -90,7 +101,16 @@ export function createBilanHTML(data: BilanData): string {
       ? [["Remboursements prêts", formatCFA(data.monthLoanRepayments), "-"]]
       : []),
     ["Total sorties", formatCFA(data.totalExpenses), "-"],
-    ["Solde net", formatCFA(Math.abs(data.soldeNet)), data.soldeNet >= 0 ? "+" : "-"],
+    ["Solde net (mois)", formatCFA(Math.abs(data.soldeNet)), data.soldeNet >= 0 ? "+" : "-"],
+    ...(data.soldeDisponibleLiquide != null
+      ? [
+          [
+            "Solde disponible (espèces + MM)",
+            formatCFA(Math.abs(data.soldeDisponibleLiquide)),
+            data.soldeDisponibleLiquide >= 0 ? "+" : "-",
+          ] as const,
+        ]
+      : []),
   ];
 
   let tableRows = "";
@@ -199,6 +219,118 @@ export function exportExpensesCSV(
   const a = document.createElement("a");
   a.href = url;
   a.download = `depenses-${monthLabel.toLowerCase()}-${year}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Export CSV : dépenses, charges fixes, revenus manuels, transferts (mois sélectionné). */
+export function exportTransactionsCSV(
+  expenses: Expense[],
+  fixedPayments: FixedChargePayment[],
+  incomes: Income[],
+  transfers: AccountTransfer[],
+  month: number,
+  year: number,
+  categories: { id: string; label: string }[],
+  getAccountName: (id: number | null | undefined) => string
+): void {
+  const monthLabel = MONTHS_FULL[month];
+  type Row = {
+    date: string;
+    time: string;
+    type: string;
+    description: string;
+    detail: string;
+    sign: string;
+    amount: string;
+    notes: string;
+  };
+  const rows: Row[] = [];
+  const getCategoryLabel = (id: string) => categories.find((c) => c.id === id)?.label || id;
+
+  expenses.forEach((e) => {
+    const fee = e.transaction_fee ?? 0;
+    rows.push({
+      date: e.date,
+      time: e.time || "00:00",
+      type: "Dépense variable",
+      description: e.description,
+      detail: getCategoryLabel(e.category),
+      sign: "-",
+      amount: String(e.amount + fee),
+      notes: [e.notes || "", fee > 0 ? `Frais: ${fee}` : ""].filter(Boolean).join(" · "),
+    });
+  });
+
+  fixedPayments.forEach((p) => {
+    rows.push({
+      date: p.date,
+      time: p.time || "00:00",
+      type: "Charge fixe",
+      description: p.label,
+      detail: "—",
+      sign: "-",
+      amount: String(p.amount),
+      notes: p.notes || "",
+    });
+  });
+
+  incomes.forEach((i) => {
+    rows.push({
+      date: i.date,
+      time: i.time || "00:00",
+      type: "Revenu",
+      description: i.description,
+      detail: getIncomeSourceLabel(i.source),
+      sign: "+",
+      amount: String(i.amount),
+      notes: i.notes || "",
+    });
+  });
+
+  transfers.forEach((t) => {
+    const fee = t.fee ?? 0;
+    rows.push({
+      date: t.date,
+      time: t.time || "00:00",
+      type: "Transfert",
+      description: t.notes?.trim() ? t.notes : "Transfert entre comptes",
+      detail: `${getAccountName(t.from_account_id)} → ${getAccountName(t.to_account_id)}`,
+      sign: "↔",
+      amount: String(t.amount + fee),
+      notes: fee > 0 ? `Frais: ${fee} FCFA` : "",
+    });
+  });
+
+  rows.sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
+
+  const headers = ["Date", "Heure", "Type", "Description", "Détail", "Sens", "Montant (FCFA)", "Notes"];
+  const dataRows: string[][] = rows.map((r) => [
+    r.date,
+    r.time,
+    r.type,
+    r.description,
+    r.detail,
+    r.sign,
+    r.amount,
+    r.notes,
+  ]);
+
+  const escape = (s: string) => {
+    const str = String(s);
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const csv = [headers, ...dataRows].map((r) => r.map(escape).join(",")).join("\n");
+  const bom = "\uFEFF";
+  const blob = new Blob([bom + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `transactions-${monthLabel.toLowerCase()}-${year}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }

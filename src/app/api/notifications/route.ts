@@ -103,18 +103,22 @@ export async function GET() {
       if (scheduleLoanIds.has(loan.id)) continue;
       const days = daysBetween(loan.next_due_date);
       if (days > 0 && !isInCurrentMonth(loan.next_due_date)) continue;
+      const isChangeEncash = loan.type === "personal_lent" && (loan.monthly_payment === 0 || loan.label.startsWith("Monnaie chez"));
       todos.push({
         id: `loan-${loan.id}`,
         type: "todo",
-        source_type: "loan_due",
+        source_type: isChangeEncash ? "change_encash" : "loan_due",
         source_id: loan.id,
-        title: "Mensualité prêt",
+        title: isChangeEncash ? "Monnaie à récupérer" : "Mensualité prêt",
         message: loan.label,
-        amount: loan.monthly_payment,
+        amount: isChangeEncash ? loan.remaining_amount : loan.monthly_payment,
         due_date: loan.next_due_date,
         link: `/loans?pay=${loan.id}`,
         is_overdue: days < 0,
         days_left: days,
+        loan_id: loan.id,
+        action_label: isChangeEncash ? "Encaisser" : undefined,
+        action_url: `/loans?pay=${loan.id}`,
       });
     }
 
@@ -131,7 +135,7 @@ export async function GET() {
         message: p.description,
         amount: p.amount,
         due_date: p.due_date,
-        link: `/expenses?planned=${p.id}`,
+        link: `/transactions?planned=${p.id}`,
         is_overdue: days < 0,
         days_left: days,
         priority: days < 0 ? "high" : days <= 3 ? "medium" : "low",

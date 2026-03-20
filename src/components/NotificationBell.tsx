@@ -3,14 +3,14 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { useBudgetContext } from "@/contexts/BudgetContext";
-import { Bell, Check, HandCoins, Receipt, RefreshCw, X, Heart, ShoppingCart } from "lucide-react";
+import { Bell, Check, HandCoins, Receipt, RefreshCw, X, Heart, ShoppingCart, Coins } from "lucide-react";
 import { formatCFA } from "@/lib/constants";
 import type { NotificationTodo } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => (r.ok ? r.json() : []));
 
 export default function NotificationBell({ showToast }: { showToast: (m: string, t?: string) => void }) {
-  const { executePlannedExpense } = useBudgetContext();
+  const { executePlannedExpense, refreshAll } = useBudgetContext();
   const { data: todos = [], mutate } = useSWR<NotificationTodo[]>("/api/notifications", fetcher, {
     refreshInterval: 60 * 1000,
     revalidateOnFocus: true,
@@ -93,7 +93,7 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
         setOpen(false);
         setPayingSchedule(null);
         setPayAmount("");
-        await refreshTodos();
+        await Promise.all([refreshTodos(), refreshAll()]);
       } else {
         const data = await r.json().catch(() => ({}));
         showToast(data.error || "Erreur", "error");
@@ -120,7 +120,7 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
     new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
 
   const hasOverdue = todos.some((t) => t.is_overdue);
-  const hasUpcoming = todos.some((t) => (t.source_type === "loan_upcoming" || t.source_type === "loan_due") && !t.is_overdue);
+  const hasUpcoming = todos.some((t) => (t.source_type === "loan_upcoming" || t.source_type === "loan_due" || t.source_type === "change_encash") && !t.is_overdue);
 
   const renderTodoItem = (t: NotificationTodo) => {
     const dl = dueLabel(t);
@@ -133,9 +133,11 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
         ? "bg-red-500/20 text-red-400"
         : t.source_type === "loan_upcoming"
           ? "bg-amber-500/20 text-amber-400"
-          : t.source_type === "loan_due"
-            ? "bg-teal-500/20 text-teal-400"
-            : t.source_type === "wish"
+          : t.source_type === "change_encash"
+            ? "bg-amber-500/20 text-amber-400"
+            : t.source_type === "loan_due"
+              ? "bg-teal-500/20 text-teal-400"
+              : t.source_type === "wish"
               ? "bg-pink-500/20 text-pink-400"
               : t.source_type === "shopping"
                 ? "bg-amber-500/20 text-amber-400"
@@ -218,6 +220,16 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
         >
           {loading ? "..." : "Valider"}
         </button>
+      ) : t.source_type === "change_encash" ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handlePayLoan(t.source_id);
+          }}
+          className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-semibold transition-colors"
+        >
+          {t.action_label ?? "Encaisser"}
+        </button>
       ) : (
         <button
           onClick={(e) => {
@@ -233,7 +245,9 @@ export default function NotificationBell({ showToast }: { showToast: (m: string,
       <li key={t.id} className="p-3 hover:bg-white/[0.03] transition-colors">
         <div className="flex gap-3">
           <button type="button" onClick={goTo} className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${iconClass} hover:opacity-80 transition-opacity`}>
-            {t.source_type === "loan_due" || t.source_type === "loan_overdue" || t.source_type === "loan_upcoming" ? (
+            {t.source_type === "change_encash" ? (
+              <Coins size={18} />
+            ) : t.source_type === "loan_due" || t.source_type === "loan_overdue" || t.source_type === "loan_upcoming" ? (
               <HandCoins size={18} />
             ) : t.source_type === "wish" ? (
               <Heart size={18} />

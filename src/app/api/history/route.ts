@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
       loanPayments,
       loans,
       savings,
-      salaries,
+      salariesData,
       otherIncomes,
       projects,
       allPlanned,
@@ -55,6 +55,8 @@ export async function GET(req: NextRequest) {
       getPurchasedWishListItemsByDateRange(start, end),
       getPurchasedShoppingListItemsByDateRange(start, end),
     ]);
+
+    const salaries = salariesData.amounts;
 
     const plannedExpenses = allPlanned.filter((p) => p.status !== "cancelled");
 

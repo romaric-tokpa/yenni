@@ -1,8 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
-import { formatCFA, MONTHS_FULL, getSelectableYears } from "@/lib/constants";
+import { useState, useEffect, type ComponentType } from "react";
+import { formatCFA, MONTHS_FULL, getSelectableYears, getLinkedVaultEmergencyBalance } from "@/lib/constants";
 import Avatar from "./ui/Avatar";
-import { BudgetConfig, Category, FixedCharge } from "@/lib/types";
+import { BudgetConfig, Category, FixedCharge, AccountWithBalance } from "@/lib/types";
+import DashboardAccountCards from "./DashboardAccountCards";
 import MonthlyBarChart from "./charts/MonthlyBarChart";
 import BudgetPieChart from "./charts/BudgetPieChart";
 import Icon from "./ui/Icon";
@@ -10,9 +11,11 @@ import AnimatedProgressBar from "./ui/AnimatedProgressBar";
 import {
   TrendingUp, TrendingDown, Wallet, Trophy, Scale, Banknote, HandCoins,
   FolderOpen, PieChart, BarChart3, ClipboardList,
-  CircleCheck, CircleAlert, CircleMinus, FileDown,
+  CircleCheck, CircleAlert, CircleMinus, FileDown, ArrowRightLeft, ChevronRight, ChevronDown,
 } from "lucide-react";
 import { exportBilanPDFFromData } from "@/lib/exportUtils";
+import Link from "next/link";
+import { getModalHref } from "@/lib/modal";
 
 interface AuthUser {
   first_name: string;
@@ -26,6 +29,11 @@ interface BudgetData {
   totalFixed: number;
   totalExpenses: number;
   soldeNet: number;
+  /** Espèces + mobile money (soldes réels). */
+  soldeDisponibleLiquide: number;
+  /** Trésorerie totale (somme des soldes comptes actifs) — sans double-compter les entrées du mois. */
+  totalActifsKpi: number;
+  totalTreasuryBalances: number;
   resteAVivre: number;
   dailyBudget: number;
   daysLeftInMonth: number;
@@ -45,13 +53,50 @@ interface BudgetData {
   selectedYear: number;
   setSelectedMonth: (m: number) => void;
   setSelectedYear: (y: number) => void;
-  updateSalary: (month: number, amount: number) => Promise<void>;
+  accountsWithBalance?: AccountWithBalance[];
 }
 
 function StatusDot({ level }: { level: "good" | "warn" | "bad" }) {
   if (level === "good") return <CircleCheck size={14} className="text-green-500" />;
   if (level === "warn") return <CircleAlert size={14} className="text-amber-500" />;
   return <CircleMinus size={14} className="text-red-500" />;
+}
+
+const quickActionClass =
+  "group relative flex flex-1 items-center gap-0 py-2.5 px-3 sm:px-4 transition-[background-color] duration-200 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:bg-white/[0.05] border-b sm:border-b-0 sm:border-r border-white/[0.06] last:border-b-0 sm:last:border-r-0 active:bg-white/[0.03]";
+
+function QuickActionLink({
+  href,
+  label,
+  ariaLabel,
+  icon: IconEl,
+}: {
+  href: string;
+  label: string;
+  ariaLabel: string;
+  icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string; "aria-hidden"?: boolean }>;
+}) {
+  return (
+    <Link href={href} prefetch={false} className={quickActionClass} title={ariaLabel} aria-label={ariaLabel}>
+      <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:justify-center">
+        <IconEl
+          size={15}
+          strokeWidth={1.5}
+          className="shrink-0 text-neutral-500 transition-colors group-hover:text-neutral-300"
+          aria-hidden
+        />
+        <span className="truncate text-left text-[12.5px] font-medium leading-none tracking-tight text-neutral-400 transition-colors group-hover:text-neutral-200 sm:text-center">
+          {label}
+        </span>
+      </div>
+      <ChevronRight
+        size={13}
+        strokeWidth={1.5}
+        className="shrink-0 text-neutral-600 opacity-60 transition-opacity group-hover:opacity-90 sm:hidden"
+        aria-hidden
+      />
+    </Link>
+  );
 }
 
 export default function Dashboard({ budget, user }: { budget: BudgetData; user?: AuthUser | null }) {
@@ -61,6 +106,9 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     totalFixed,
     totalExpenses,
     soldeNet,
+    soldeDisponibleLiquide,
+    totalActifsKpi,
+    totalTreasuryBalances,
     resteAVivre,
     dailyBudget,
     daysLeftInMonth,
@@ -80,11 +128,12 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     selectedYear,
     setSelectedMonth,
     setSelectedYear,
-    updateSalary,
+    accountsWithBalance = [],
   } = budget;
 
   const [exportingPdf, setExportingPdf] = useState(false);
   const [monthlyChartData, setMonthlyChartData] = useState<Array<{ month: number; Revenus: number; Dépenses: number }> | null>(null);
+  const [budgetCategoriesOpen, setBudgetCategoriesOpen] = useState(true);
 
   useEffect(() => {
     fetch(`/api/budget-summary?year=${selectedYear}`)
@@ -97,6 +146,10 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
   const realMonthlySavings = monthSaving + totalProjectSaved;
   const savingsRate = totalIncome > 0 ? (realMonthlySavings / totalIncome) * 100 : 0;
   const debtRatio = totalIncome > 0 ? (monthLoanRepayments / totalIncome) * 100 : 0;
+
+  const vaultEmergencyBalance = getLinkedVaultEmergencyBalance(config, accountsWithBalance);
+  const savingsGoalProgressAmount =
+    vaultEmergencyBalance != null ? vaultEmergencyBalance : totalSaved;
 
   const handleExportPDF = async () => {
     setExportingPdf(true);
@@ -117,6 +170,9 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
         catSpending,
         categories: config.categories,
         effectiveBudgets: effectiveCategoryBudgets,
+        totalActifsKpi,
+        soldeDisponibleLiquide,
+        totalTreasuryBalances,
       });
     } catch {
       // silent fail
@@ -126,9 +182,9 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
 
   const kpis = [
     {
-      label: "Actifs (Revenus)",
-      value: formatCFA(totalIncome),
-      sub: "Total entrées du mois",
+      label: "Actifs",
+      value: formatCFA(totalActifsKpi),
+      sub: "Trésorerie uniquement — les entrées du mois sont déjà reflétées sur les comptes",
       color: "text-green-500",
       shadow: "",
       IconComp: TrendingUp,
@@ -144,19 +200,22 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
       iconColor: "text-red-500",
     },
     {
-      label: "Solde Disponible",
-      value: formatCFA(Math.abs(soldeNet)),
-      sub: soldeNet >= 0 ? `${formatCFA(dailyBudget)} / jour · ${daysLeftInMonth} jour${daysLeftInMonth > 1 ? "s" : ""} restant${daysLeftInMonth > 1 ? "s" : ""}` : "Solde négatif",
-      color: soldeNet >= 0 ? "text-green-500" : "text-red-500",
+      label: "Solde disponible",
+      value: formatCFA(Math.abs(soldeDisponibleLiquide)),
+      sub:
+        soldeDisponibleLiquide >= 0
+          ? `Espèces + Mobile Money · ${formatCFA(dailyBudget)} / jour · ${daysLeftInMonth} jour${daysLeftInMonth > 1 ? "s" : ""} restant${daysLeftInMonth > 1 ? "s" : ""}`
+          : "Espèces + Mobile Money",
+      color: soldeDisponibleLiquide >= 0 ? "text-green-500" : "text-red-500",
       shadow: "",
-      IconComp: soldeNet >= 0 ? Wallet : Scale,
-      iconColor: soldeNet >= 0 ? "text-green-500" : "text-red-500",
-      prefix: soldeNet < 0 ? "-" : "",
+      IconComp: soldeDisponibleLiquide >= 0 ? Wallet : Scale,
+      iconColor: soldeDisponibleLiquide >= 0 ? "text-green-500" : "text-red-500",
+      prefix: soldeDisponibleLiquide < 0 ? "-" : "",
     },
     {
       label: "Épargne Cumulée",
       value: formatCFA(totalSaved),
-      sub: `${config.savingsGoal > 0 ? ((totalSaved / config.savingsGoal) * 100).toFixed(1) : 0}% objectif${totalProjectSaved > 0 ? ` · Projets ${formatCFA(totalProjectSaved)}` : ""}`,
+      sub: `${config.savingsGoal > 0 ? ((savingsGoalProgressAmount / config.savingsGoal) * 100).toFixed(1) : 0}% objectif fonds d’urgence${vaultEmergencyBalance != null ? " (coffre)" : ""}${totalProjectSaved > 0 ? ` · Projets ${formatCFA(totalProjectSaved)}` : ""}`,
       color: "text-amber-500",
       shadow: "",
       IconComp: Trophy,
@@ -181,7 +240,7 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
       level: (totalMonthSpent <= totalBudgetVar ? "good" : "bad") as "good" | "bad",
     },
     {
-      label: "Solde net",
+      label: "Solde net (mois)",
       value: `${soldeNet >= 0 ? "+" : "-"}${formatCFA(Math.abs(soldeNet))}`,
       level: (soldeNet > 0 ? "good" : soldeNet === 0 ? "warn" : "bad") as "good" | "warn" | "bad",
     },
@@ -233,21 +292,86 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
         </div>
       </div>
 
-      {/* Salaire */}
-      <div className={`rounded-xl border p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-3 ${monthSalary === 0 ? "border-amber-500/40 bg-amber-500/5" : "border-white/5 bg-white/[0.02]"}`}>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Banknote size={18} className={monthSalary > 0 ? "text-emerald-400" : "text-amber-400"} />
-          <span className="text-sm font-medium text-neutral-300">{monthSalary > 0 ? "Salaire du mois" : "Salaire non renseigné"}</span>
+      {/* Actions rapides — barre segmentée */}
+      <div className="mb-6">
+        <p className="mb-1.5 px-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-600">
+          Opérations
+        </p>
+        <div className="overflow-hidden rounded-lg border border-white/[0.06] bg-neutral-950/30">
+          <div className="flex flex-col sm:flex-row">
+            <QuickActionLink
+              href={getModalHref({ type: "new-expense", returnTo: "/dashboard" })}
+              label="Dépense"
+              ariaLabel="Enregistrer une dépense"
+              icon={TrendingDown}
+            />
+            <QuickActionLink
+              href={getModalHref({ type: "new-income", returnTo: "/dashboard" })}
+              label="Revenu"
+              ariaLabel="Ajouter un revenu"
+              icon={TrendingUp}
+            />
+            <QuickActionLink
+              href={getModalHref({ type: "quick-transfer", returnTo: "/dashboard" })}
+              label="Transfert"
+              ariaLabel="Transfert entre comptes"
+              icon={ArrowRightLeft}
+            />
+          </div>
         </div>
-        <input
-          type="number"
-          className="input-field font-mono text-sm flex-1 sm:w-44"
-          placeholder="0 FCFA"
-          defaultValue={monthSalary || ""}
-          key={`sal-${selectedMonth}`}
-          onChange={(e) => updateSalary(selectedMonth, Number(e.target.value) || 0)}
-        />
       </div>
+
+      {/* Salaire — vert charte, sobre, sans dégradé */}
+      <div
+        className={`mb-6 rounded-2xl border px-5 py-5 transition-colors duration-200 sm:px-6 sm:py-6 ${
+          monthSalary > 0
+            ? "border-emerald-500/25 bg-emerald-500/[0.07] hover:border-emerald-500/35"
+            : "border-emerald-500/15 bg-emerald-500/[0.04] hover:border-emerald-500/25"
+        }`}
+      >
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+          <div className="flex min-w-0 flex-1 items-start gap-4">
+            <div
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border ${
+                monthSalary > 0
+                  ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
+                  : "border-emerald-500/20 bg-emerald-500/10 text-emerald-500/55"
+              }`}
+            >
+              <Banknote size={22} strokeWidth={1.75} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500/80">
+                Revenu principal
+              </p>
+              <h2 className="mt-1 text-base font-semibold tracking-tight text-neutral-100 sm:text-lg">
+                {monthSalary > 0 ? "Salaire du mois" : "Salaire à renseigner"}
+              </h2>
+              <p className="mt-2 max-w-md text-xs leading-relaxed text-neutral-500">
+                {monthSalary > 0
+                  ? `Montant net pour ${MONTHS_FULL[selectedMonth]} ${selectedYear}.`
+                  : "Renseigne ton salaire dans Réglages : il pilote budget, indicateurs et reste à vivre."}
+              </p>
+            </div>
+          </div>
+
+          <div
+            className={`w-full rounded-xl border px-4 py-4 sm:max-w-[15rem] sm:text-right ${
+              monthSalary > 0
+                ? "border-emerald-500/25 bg-[var(--bg-surface)] text-[var(--accent)]"
+                : "border-emerald-500/15 bg-[var(--bg-surface)] text-neutral-500"
+            }`}
+            aria-label={monthSalary > 0 ? `Salaire : ${formatCFA(monthSalary)}` : "Salaire non renseigné"}
+          >
+            <span className="block font-mono text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Net FCFA</span>
+            <span className="mt-1 block font-mono text-lg font-bold tabular-nums tracking-tight sm:text-xl">
+              {monthSalary > 0 ? formatCFA(monthSalary) : "—"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <DashboardAccountCards accounts={accountsWithBalance} />
 
       {/* KPIs principaux */}
       <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
@@ -280,47 +404,91 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
         </div>
       </div>
 
-      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
-        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-          <FolderOpen size={14} className="text-emerald-400" /> Budget par catégorie
-        </h3>
-        <div className="grid gap-3 lg:gap-3.5">
+      <div className="mb-6 rounded-2xl border border-emerald-500/12 bg-emerald-500/[0.03] p-5 sm:p-6">
+        <button
+          type="button"
+          id="budget-categories-toggle"
+          aria-expanded={budgetCategoriesOpen}
+          aria-controls="budget-categories-panel"
+          onClick={() => setBudgetCategoriesOpen((open) => !open)}
+          className="flex w-full items-start gap-3 rounded-xl text-left transition-colors hover:bg-white/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] -m-2 p-2 sm:-m-1 sm:p-1"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10">
+            <FolderOpen size={20} className="text-emerald-400" strokeWidth={1.75} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-base font-semibold tracking-tight text-neutral-100">Budget par catégorie</h3>
+            <p className="mt-0.5 text-xs text-neutral-500">
+              Dépenses du mois par rapport au plafond défini ({MONTHS_FULL[selectedMonth]} {selectedYear})
+            </p>
+            <p className="mt-1 text-[11px] text-neutral-600">
+              {budgetCategoriesOpen ? "Cliquer pour replier la liste" : `Cliquer pour afficher les ${config.categories.length} catégories`}
+            </p>
+          </div>
+          <ChevronDown
+            size={22}
+            strokeWidth={2}
+            className={`mt-0.5 shrink-0 text-emerald-400/85 transition-transform duration-200 ${budgetCategoriesOpen ? "rotate-180" : ""}`}
+            aria-hidden
+          />
+        </button>
+
+        {budgetCategoriesOpen && (
+        <div
+          id="budget-categories-panel"
+          role="region"
+          aria-labelledby="budget-categories-toggle"
+          className="mt-5 flex flex-col gap-3 border-t border-emerald-500/10 pt-5"
+        >
           {config.categories.map((cat: Category) => {
             const budget = effectiveCategoryBudgets[cat.id] ?? cat.budget;
             const spent = catSpending[cat.id] || 0;
             const pct = budget > 0 ? Math.min((spent / budget) * 100, 150) : 0;
-            const isOver = spent > budget;
+            const isOver = budget > 0 && spent > budget;
+            const barColor = isOver ? "#ef4444" : pct > 80 ? "#f59e0b" : cat.color;
             return (
-              <div key={cat.id}>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs lg:text-[13px] flex items-center gap-1.5">
-                    <Icon name={cat.icon} size={14} style={{ color: cat.color }} />
-                    {cat.label}
-                  </span>
-                  <div className="flex items-center gap-2 lg:gap-3">
-                    <span className={`font-mono text-[10px] lg:text-xs ${isOver ? "text-red-400" : "text-neutral-400"}`}>
-                      {formatCFA(spent)} / {formatCFA(budget)}
+              <div
+                key={cat.id}
+                className="rounded-xl border border-white/6 bg-[var(--bg-surface)]/80 p-3.5 transition-colors hover:border-white/10 sm:p-4"
+              >
+                <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/8"
+                      style={{ backgroundColor: `${cat.color}18`, borderColor: `${cat.color}33` }}
+                    >
+                      <Icon name={cat.icon} size={15} style={{ color: cat.color }} />
+                    </span>
+                    <span className="truncate text-[13px] font-medium text-neutral-200">{cat.label}</span>
+                  </div>
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <span className={`font-mono text-[11px] sm:text-xs tabular-nums ${isOver ? "text-red-400" : "text-neutral-400"}`}>
+                      <span className="text-neutral-500">consommé</span>{" "}
+                      <span className="font-semibold text-neutral-300">{formatCFA(spent)}</span>
+                      <span className="text-neutral-600"> · </span>
+                      <span className="text-neutral-500">budget</span>{" "}
+                      <span className="text-neutral-400">{formatCFA(budget)}</span>
                     </span>
                     <StatusDot level={isOver ? "bad" : pct > 80 ? "warn" : "good"} />
                   </div>
                 </div>
                 <AnimatedProgressBar
-                  value={spent}
-                  max={budget}
+                  value={budget > 0 ? spent : 0}
+                  max={budget > 0 ? budget : 1}
                   duration={0.6}
-                  className="h-1.5 lg:h-2"
-                  gradient={
-                    isOver
-                      ? "linear-gradient(90deg,#ef4444,#f87171)"
-                      : pct > 80
-                        ? "linear-gradient(90deg,#f59e0b,#fbbf24)"
-                        : `linear-gradient(90deg,${cat.color},${cat.color}dd)`
-                  }
+                  className="h-2 !bg-white/[0.06]"
+                  gradient={`linear-gradient(90deg, ${barColor} 0%, ${barColor} 100%)`}
                 />
+                {budget > 0 && (
+                  <p className="mt-2 text-right font-mono text-[10px] text-neutral-600">
+                    {Math.round(Math.min(pct, 999))}% du budget
+                  </p>
+                )}
               </div>
             );
           })}
         </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">

@@ -1,9 +1,9 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { formatCFA } from "@/lib/constants";
+import { formatCFA, isVaultAccountLocked } from "@/lib/constants";
 import { Plus, X, Trash2, Pause, Play, CheckCircle, Target, Pencil, Check, Lightbulb, Receipt, History, ChevronDown, ChevronUp, ShoppingCart } from "lucide-react";
-import { Project, ProjectFund, ProjectPurchase, BudgetConfig, Category } from "@/lib/types";
+import { Project, ProjectFund, ProjectPurchase, BudgetConfig, Category, AccountWithBalance } from "@/lib/types";
 import Icon from "./ui/Icon";
 import AnimatedProgressBar from "./ui/AnimatedProgressBar";
 import { useConfetti } from "@/hooks/useConfetti";
@@ -15,6 +15,24 @@ import {
   getFeasibilityLabel,
   getFeasibilityColor,
 } from "@/lib/goalUtils";
+
+function accountsEligibleForProjectPocket(accounts: AccountWithBalance[]): AccountWithBalance[] {
+  return accounts.filter((a) => !a.is_archived);
+}
+
+/** Comptes utilisables comme source d’un versement projet (pas coffre verrouillé, ≠ compte cible). */
+function fundSourceAccountsForProject(
+  project: Project,
+  accounts: AccountWithBalance[],
+): AccountWithBalance[] {
+  const destId = project.account_id ?? -1;
+  return accounts.filter(
+    (a) =>
+      !a.is_archived &&
+      a.id !== destId &&
+      !(a.kind === "vault" && isVaultAccountLocked(a.vault_unlocks_on)),
+  );
+}
 
 const PROJECT_COLORS = [
   "#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#f97316",
@@ -39,6 +57,8 @@ interface BudgetData {
   updateConfig?: (config: BudgetConfig) => Promise<void>;
   addExpense: (exp: { date: string; time: string; description: string; category: string; amount: number; notes: string }) => Promise<boolean>;
   invalidateHistoryCache?: () => void;
+  accountsWithBalance?: AccountWithBalance[];
+  fetchAccounts?: () => Promise<void>;
 }
 
 export default function ProjectsView({
@@ -48,17 +68,19 @@ export default function ProjectsView({
   budget: BudgetData;
   showToast: (m: string, t?: string) => void;
 }) {
-  const { config, projects, resteAVivre, soldeNet, monthProjectFunds, selectedMonth, selectedYear, addProject, updateProject, removeProject, fetchProjects, fetchMonthProjectFunds, addToMonthProjectFunds, updateConfig, fetchConfig, fetchExpenses, addExpense, invalidateHistoryCache } = budget;
+  const { config, projects, resteAVivre, soldeNet, monthProjectFunds, selectedMonth, selectedYear, addProject, updateProject, removeProject, fetchProjects, fetchMonthProjectFunds, addToMonthProjectFunds, updateConfig, fetchConfig, fetchExpenses, addExpense, invalidateHistoryCache, accountsWithBalance = [], fetchAccounts } = budget;
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [realizingProject, setRealizingProject] = useState<Project | null>(null);
   const formDefault = {
     name: "", description: "", target_amount: "", deadline: "",
     icon: "target", color: "#6366f1", status: "active" as Project["status"], saved_amount: 0,
+    account_id: "",
   };
   const [form, setForm] = useState(formDefault);
   const [addingTo, setAddingTo] = useState<number | null>(null);
   const [addAmount, setAddAmount] = useState("");
+  const [addFundSourceId, setAddFundSourceId] = useState("");
   const [addFundDate, setAddFundDate] = useState(new Date().toISOString().split("T")[0]);
   const [projectFunds, setProjectFunds] = useState<Record<number, ProjectFund[]>>({});
   const [expandedFunds, setExpandedFunds] = useState<Set<number>>(new Set());
@@ -108,20 +130,26 @@ export default function ProjectsView({
     });
   };
 
-  const addProjectFund = async (projectId: number, amount: number, date: string) => {
+  const addProjectFund = async (
+    projectId: number,
+    amount: number,
+    date: string,
+    fromAccountId: number,
+  ) => {
     try {
       const r = await fetch(`/api/projects/${projectId}/funds`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, date }),
+        body: JSON.stringify({ amount, date, from_account_id: fromAccountId }),
       });
       if (r.ok) {
         await fetchProjectFunds(projectId);
-        return true;
+        return { ok: true as const };
       }
-      return false;
+      const err = await r.json().catch(() => ({}));
+      return { ok: false as const, error: (err as { error?: string })?.error || "Erreur" };
     } catch {
-      return false;
+      return { ok: false as const, error: "Erreur réseau" };
     }
   };
 
@@ -152,9 +180,12 @@ export default function ProjectsView({
         await fetchProjectFunds(fund.project_id);
         await fetchProjects();
         if (fetchMonthProjectFunds) await fetchMonthProjectFunds();
+        await fetchAccounts?.();
         invalidateHistoryCache?.();
         return true;
       }
+      const err = await r.json().catch(() => ({}));
+      if ((err as { error?: string }).error) showToast((err as { error: string }).error, "error");
       return false;
     } catch {
       return false;
@@ -172,6 +203,7 @@ export default function ProjectsView({
       color: p.color,
       status: p.status,
       saved_amount: p.saved_amount,
+      account_id: p.account_id != null ? String(p.account_id) : "",
     });
     setShowModal(true);
   };
@@ -182,8 +214,20 @@ export default function ProjectsView({
     setForm(formDefault);
   };
 
+  const openNewProjectModal = () => {
+    const first = accountsEligibleForProjectPocket(accountsWithBalance)[0];
+    setEditingProject(null);
+    setForm({ ...formDefault, account_id: first ? String(first.id) : "" });
+    setShowModal(true);
+  };
+
   const handleSave = async () => {
     if (!form.name || !form.target_amount) { showToast("Nom et montant requis", "error"); return; }
+    const accId = Number(form.account_id);
+    if (!Number.isFinite(accId)) {
+      showToast("Choisis le compte d’épargne du projet", "error");
+      return;
+    }
     if (editingProject) {
       await updateProject(editingProject.id, {
         name: form.name,
@@ -192,20 +236,40 @@ export default function ProjectsView({
         deadline: form.deadline,
         icon: form.icon,
         color: form.color,
+        account_id: accId,
       });
       showToast("Projet modifié !");
     } else {
-      await addProject({ ...form, target_amount: Number(form.target_amount), saved_amount: 0 });
+      await addProject({
+        name: form.name,
+        description: form.description,
+        target_amount: Number(form.target_amount),
+        saved_amount: 0,
+        deadline: form.deadline,
+        icon: form.icon,
+        color: form.color,
+        status: form.status,
+        account_id: accId,
+      });
       showToast("Projet créé !");
     }
     closeModal();
   };
 
   const handleAddFunds = async (p: Project) => {
+    if (p.account_id == null) {
+      showToast("Définis d’abord un compte d’épargne pour ce projet (modifier le projet)", "error");
+      return;
+    }
     const amt = Number(addAmount);
     if (!amt || amt <= 0) return;
-    const ok = await addProjectFund(p.id, amt, addFundDate);
-    if (ok) {
+    const fromId = Number(addFundSourceId);
+    if (!Number.isFinite(fromId)) {
+      showToast("Choisis un compte source pour le versement", "error");
+      return;
+    }
+    const res = await addProjectFund(p.id, amt, addFundDate, fromId);
+    if (res.ok) {
       const newTotal = p.saved_amount + amt;
       const wasReached = p.saved_amount >= p.target_amount;
       if (!wasReached && newTotal >= p.target_amount && p.target_amount > 0) {
@@ -216,11 +280,15 @@ export default function ProjectsView({
       }
       setAddingTo(null);
       setAddAmount("");
+      setAddFundSourceId("");
       addToMonthProjectFunds?.(amt, addFundDate);
       await fetchProjects();
       await fetchProjectFunds(p.id);
       if (fetchMonthProjectFunds) await fetchMonthProjectFunds();
+      await fetchAccounts?.();
       invalidateHistoryCache?.();
+    } else {
+      showToast(res.error, "error");
     }
   };
 
@@ -360,7 +428,7 @@ export default function ProjectsView({
           </p>
         </div>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={openNewProjectModal}
           className="btn-primary px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 shrink-0 w-full sm:w-auto justify-center"
         >
           <Plus size={18} strokeWidth={2.5} />
@@ -378,7 +446,7 @@ export default function ProjectsView({
             Crée des projets d&apos;épargne pour atteindre tes objectifs : voyage, achat, fonds d&apos;urgence…
           </p>
           <button
-            onClick={() => setShowModal(true)}
+            onClick={openNewProjectModal}
             className="btn-primary px-6 py-3 rounded-lg text-sm font-medium inline-flex items-center gap-2"
           >
             <Plus size={18} />
@@ -508,6 +576,20 @@ export default function ProjectsView({
                       </span>
                     )}
                   </div>
+                  <div className="text-[10px] text-slate-500 mb-2">
+                    {accountsWithBalance.find((a) => a.id === p.account_id) ? (
+                      <>
+                        Épargne sur :{" "}
+                        <span className="text-slate-400 font-medium">
+                          {accountsWithBalance.find((a) => a.id === p.account_id)!.name}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-amber-400/90">
+                        Compte d&apos;épargne non défini — modifie le projet
+                      </span>
+                    )}
+                  </div>
                   {addingTo === p.id ? (
                     <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3 space-y-3">
                       <div className="flex gap-2 flex-wrap">
@@ -526,12 +608,35 @@ export default function ProjectsView({
                           onChange={(e) => setAddFundDate(e.target.value)}
                         />
                       </div>
+                      <div>
+                        <label className="text-[10px] text-neutral-500 mb-1 block">
+                          Prélever sur le compte source
+                        </label>
+                        <select
+                          className="input-field text-sm py-2 w-full"
+                          value={addFundSourceId}
+                          onChange={(e) => setAddFundSourceId(e.target.value)}
+                        >
+                          {fundSourceAccountsForProject(p, accountsWithBalance).length === 0 ? (
+                            <option value="">Aucun compte disponible (coffres verrouillés exclus)</option>
+                          ) : (
+                            fundSourceAccountsForProject(p, accountsWithBalance).map((a) => (
+                              <option key={a.id} value={String(a.id)}>
+                                {a.name} — {formatCFA(a.balance)}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                        <p className="text-[9px] text-neutral-600 mt-1">
+                          Les coffres bloqués ne peuvent pas servir de source.
+                        </p>
+                      </div>
                       <div className="flex gap-2">
                         <button onClick={() => handleAddFunds(p)} className="btn-primary px-4 py-2 rounded-lg text-sm font-medium flex-1">
                           Valider
                         </button>
                         <button
-                          onClick={() => { setAddingTo(null); setAddAmount(""); }}
+                          onClick={() => { setAddingTo(null); setAddAmount(""); setAddFundSourceId(""); }}
                           className="px-3 py-2 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm"
                         >
                           Annuler
@@ -541,7 +646,11 @@ export default function ProjectsView({
                   ) : (
                     <div className="flex flex-col sm:flex-row gap-2">
                       <button
-                        onClick={() => setAddingTo(p.id)}
+                        onClick={() => {
+                          setAddingTo(p.id);
+                          const sources = fundSourceAccountsForProject(p, accountsWithBalance);
+                          setAddFundSourceId(sources[0] ? String(sources[0].id) : "");
+                        }}
                         className="w-full sm:flex-1 py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
                         style={{ background: p.color + "20", color: p.color, border: `1px solid ${p.color}40` }}
                       >
@@ -589,7 +698,7 @@ export default function ProjectsView({
                                   <span className="font-mono text-xs font-semibold flex-1" style={{ color: p.color }}>{formatCFA(f.amount)}</span>
                                   <span className="text-[10px] text-slate-500">{new Date(f.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
                                   <button onClick={() => { setEditingFund(f); setEditFundAmount(String(f.amount)); setEditFundDate(f.date); }} className="text-slate-500 hover:text-emerald-400 p-1" title="Modifier"><Pencil size={12} /></button>
-                                  <button onClick={async () => { await removeProjectFund(f); showToast("Fond supprimé"); await fetchProjects(); }} className="text-slate-500 hover:text-red-400 p-1" title="Supprimer"><Trash2 size={12} /></button>
+                                  <button onClick={async () => { const ok = await removeProjectFund(f); if (ok) { showToast("Fond supprimé"); await fetchProjects(); } }} className="text-slate-500 hover:text-red-400 p-1" title="Supprimer"><Trash2 size={12} /></button>
                                 </>
                               )}
                             </div>
@@ -663,7 +772,7 @@ export default function ProjectsView({
                               <span className="font-mono font-semibold flex-1" style={{ color: p.color }}>{formatCFA(f.amount)}</span>
                               <span className="text-neutral-600">{new Date(f.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
                               <button onClick={() => { setEditingFund(f); setEditFundAmount(String(f.amount)); setEditFundDate(f.date); }} className="text-neutral-500 hover:text-emerald-400 p-0.5"><Pencil size={10} /></button>
-                              <button onClick={async () => { await removeProjectFund(f); showToast("Fond supprimé"); await fetchProjects(); }} className="text-neutral-500 hover:text-red-400 p-0.5"><Trash2 size={10} /></button>
+                              <button onClick={async () => { const ok = await removeProjectFund(f); if (ok) { showToast("Fond supprimé"); await fetchProjects(); } }} className="text-neutral-500 hover:text-red-400 p-0.5"><Trash2 size={10} /></button>
                             </>
                           )}
                         </div>
@@ -794,6 +903,24 @@ export default function ProjectsView({
               <div>
                 <label className="text-xs text-neutral-500 mb-1.5 block">Description (optionnel)</label>
                 <input className="input-field" placeholder="Détails du projet..." value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Compte d&apos;épargne du projet</label>
+                <select
+                  className="input-field text-sm"
+                  value={form.account_id}
+                  onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+                >
+                  <option value="">— Choisir un compte —</option>
+                  {accountsEligibleForProjectPocket(accountsWithBalance).map((a) => (
+                    <option key={a.id} value={String(a.id)}>
+                      {a.name} ({formatCFA(a.balance)})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-neutral-600 mt-1">
+                  Les fonds ajoutés seront transférés vers ce compte.
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

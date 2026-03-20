@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { getModalHref } from "@/lib/modal";
 import Link from "next/link";
 import { formatCFA, MONTHS_FULL, getSelectableYears } from "@/lib/constants";
 import { Plus, Trash2, X, Heart, Check, Pencil, ChevronDown, ChevronRight, ChevronLeft, MapPin, Phone, Store } from "lucide-react";
@@ -45,12 +46,8 @@ export default function WishesView({
   const [itemsByList, setItemsByList] = useState<Record<number, WishListItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
-  const [showAddListModal, setShowAddListModal] = useState(false);
   const [editingList, setEditingList] = useState<WishList | null>(null);
-  const [showAddItemModal, setShowAddItemModal] = useState<WishList | null>(null);
-  const [showPurchaseModal, setShowPurchaseModal] = useState<WishListItem | null>(null);
   const [editingItem, setEditingItem] = useState<WishListItem | null>(null);
-  const [purchaseAmount, setPurchaseAmount] = useState("");
   const searchParams = useSearchParams();
   const router = useRouter();
   const [highlightedId, setHighlightedId] = useState<number | null>(null);
@@ -66,21 +63,6 @@ export default function WishesView({
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-  const [listForm, setListForm] = useState({ name: "", scheduled_date: "" });
-  const [itemForm, setItemForm] = useState({
-    name: "",
-    target_date: "",
-    estimated_amount: "",
-    category: defaultCategory,
-    subcategory: "" as string | null,
-    notes: "",
-    shop_name: "",
-    shop_phone: "",
-    shop_address: "",
-    shop_lat: "" as string | number,
-    shop_lng: "" as string | number,
-  });
-
   const fetchLists = useCallback(async () => {
     try {
       const r = await fetch(`/api/wish-lists?month=${selectedMonth}&year=${selectedYear}`);
@@ -105,8 +87,6 @@ export default function WishesView({
   useEffect(() => {
     fetchLists();
   }, [fetchLists]);
-
-  const defaultScheduledDate = `${selectedYear}-${String(selectedMonth + 1).padStart(2, "0")}-15`;
 
   useEffect(() => {
     const id = searchParams.get("highlight");
@@ -154,109 +134,6 @@ export default function WishesView({
     if (diff === 1) return { text: "Demain", cls: "text-amber-300" };
     if (diff <= 7) return { text: `Dans ${diff}j`, cls: "text-blue-400" };
     return { text: `Dans ${diff}j`, cls: "text-slate-400" };
-  };
-
-  const resetItemForm = () => ({
-    name: "",
-    target_date: "",
-    estimated_amount: "",
-    category: defaultCategory,
-    subcategory: null as string | null,
-    notes: "",
-    shop_name: "",
-    shop_phone: "",
-    shop_address: "",
-    shop_lat: "" as string | number,
-    shop_lng: "" as string | number,
-  });
-
-  const handleAddList = async () => {
-    if (!listForm.name || !listForm.scheduled_date) {
-      showToast("Nom et date requis", "error");
-      return;
-    }
-    try {
-      const r = await fetch("/api/wish-lists", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(listForm),
-      });
-      if (r.ok) {
-        showToast("Liste créée !");
-        setListForm({ name: "", scheduled_date: "" });
-        setShowAddListModal(false);
-        await fetchLists();
-      } else {
-        const data = await r.json().catch(() => ({}));
-        showToast(data.error || "Erreur", "error");
-      }
-    } catch {
-      showToast("Erreur réseau", "error");
-    }
-  };
-
-  const handleAddItem = async () => {
-    if (!showAddItemModal) return;
-    if (!itemForm.name || !itemForm.target_date || itemForm.estimated_amount === "" || Number(itemForm.estimated_amount) < 0) {
-      showToast("Nom, date prévue et budget requis", "error");
-      return;
-    }
-    try {
-      const r = await fetch(`/api/wish-lists/${showAddItemModal.id}/items`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: itemForm.name,
-          target_date: itemForm.target_date,
-          estimated_amount: Number(itemForm.estimated_amount),
-          category: itemForm.category,
-          subcategory: itemForm.subcategory || null,
-          notes: itemForm.notes,
-          shop_name: itemForm.shop_name || null,
-          shop_phone: itemForm.shop_phone || null,
-          shop_address: itemForm.shop_address || null,
-          shop_lat: itemForm.shop_lat !== "" ? Number(itemForm.shop_lat) : null,
-          shop_lng: itemForm.shop_lng !== "" ? Number(itemForm.shop_lng) : null,
-        }),
-      });
-      if (r.ok) {
-        showToast("Envie ajoutée !");
-        setItemForm(resetItemForm());
-        setShowAddItemModal(null);
-        await fetchItems(showAddItemModal.id);
-      } else {
-        showToast("Erreur", "error");
-      }
-    } catch {
-      showToast("Erreur réseau", "error");
-    }
-  };
-
-  const handlePurchase = async () => {
-    if (!showPurchaseModal) return;
-    const amount = Number(purchaseAmount);
-    if (isNaN(amount) || amount < 0) {
-      showToast("Montant invalide", "error");
-      return;
-    }
-    try {
-      const r = await fetch(`/api/wish-lists/${showPurchaseModal.list_id}/items/${showPurchaseModal.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "purchase", actual_amount: amount }),
-      });
-      if (r.ok) {
-        showToast("Achat enregistré ! Dépense créée.");
-        setShowPurchaseModal(null);
-        setPurchaseAmount("");
-        await fetchItems(showPurchaseModal.list_id);
-        onPurchaseComplete?.();
-      } else {
-        showToast("Erreur", "error");
-      }
-    } catch {
-      showToast("Erreur réseau", "error");
-    }
   };
 
   const handleUpdateItem = async (listId: number, itemId: number, updates: Partial<WishListItem>) => {
@@ -379,7 +256,7 @@ export default function WishesView({
               ))}
             </select>
             <button
-          onClick={() => { setShowAddListModal(true); setListForm({ name: "", scheduled_date: defaultScheduledDate }); }}
+          onClick={() => router.push(getModalHref({ type: "new-wish-list", returnTo: "/wishes" }))}
           className="btn-primary px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 shrink-0"
         >
           <Plus size={18} strokeWidth={2.5} />
@@ -393,7 +270,7 @@ export default function WishesView({
           <Heart size={48} className="mx-auto mb-3 opacity-80" />
           <p className="text-sm">Aucune liste d&apos;envies</p>
           <button
-            onClick={() => { setShowAddListModal(true); setListForm({ name: "", scheduled_date: defaultScheduledDate }); }}
+            onClick={() => router.push(getModalHref({ type: "new-wish-list", returnTo: "/wishes" }))}
             className="mt-4 btn-primary px-5 py-2.5 rounded-lg text-sm font-medium inline-flex items-center gap-2"
           >
             <Plus size={16} />
@@ -429,7 +306,7 @@ export default function WishesView({
                   </div>
                   <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={(e) => { e.stopPropagation(); setShowAddItemModal(list); setItemForm(resetItemForm()); }}
+                      onClick={(e) => { e.stopPropagation(); router.push(getModalHref({ type: "new-wish-item", returnTo: "/wishes", listId: String(list.id), listName: list.name })); }}
                       className="px-3 py-1.5 rounded-lg bg-pink-500/20 text-pink-300 text-xs font-medium flex items-center gap-1"
                     >
                       <Plus size={14} />
@@ -491,7 +368,7 @@ export default function WishesView({
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                   <button
-                                    onClick={() => { setShowPurchaseModal(item); setPurchaseAmount(""); }}
+                                    onClick={() => router.push(getModalHref({ type: "purchase-wish", returnTo: "/wishes", listId: String(list.id), itemId: String(item.id) }))}
                                     className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-1"
                                   >
                                     <Check size={14} />
@@ -552,7 +429,7 @@ export default function WishesView({
 
                     {items.length === 0 && (
                       <p className="text-center text-slate-500 text-sm py-4">
-                        Aucun article. <button onClick={() => { setShowAddItemModal(list); setItemForm(resetItemForm()); }} className="text-pink-400 hover:underline">Ajouter</button>
+                        Aucun article. <button onClick={() => router.push(getModalHref({ type: "new-wish-item", returnTo: "/wishes", listId: String(list.id), listName: list.name }))} className="text-pink-400 hover:underline">Ajouter</button>
                       </p>
                     )}
 
@@ -569,146 +446,6 @@ export default function WishesView({
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Modal Nouvelle liste */}
-      {showAddListModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowAddListModal(false)}>
-          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-5">
-              <h2 className="text-base font-bold flex items-center gap-2">
-                <Heart size={18} className="text-pink-400" />
-                Nouvelle liste d&apos;envies
-              </h2>
-              <button onClick={() => setShowAddListModal(false)} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
-            </div>
-            <div className="grid gap-4">
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Nom de la liste *</label>
-                <input className="input-field" placeholder="Ex: Vêtements, Électronique" value={listForm.name} onChange={(e) => setListForm({ ...listForm, name: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Date prévue *</label>
-                <input type="date" className="input-field" value={listForm.scheduled_date} onChange={(e) => setListForm({ ...listForm, scheduled_date: e.target.value })} />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowAddListModal(false)} className="flex-1 min-h-[44px] py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium">Annuler</button>
-              <button onClick={handleAddList} className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
-                <Plus size={16} /> Créer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Ajouter article */}
-      {showAddItemModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowAddItemModal(null)}>
-          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-5">
-              <h2 className="text-base font-bold flex items-center gap-2">
-                <Plus size={18} className="text-pink-400" />
-                Ajouter une envie — {showAddItemModal.name}
-              </h2>
-              <button onClick={() => setShowAddItemModal(null)} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
-            </div>
-            <div className="grid gap-4">
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Article *</label>
-                <input className="input-field" placeholder="Ex: T-shirt, Casque" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Date prévisionnelle d&apos;achat *</label>
-                <input type="date" className="input-field" value={itemForm.target_date} onChange={(e) => setItemForm({ ...itemForm, target_date: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Catégorie *</label>
-                <select className="input-field" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })}>
-                  {wishCategories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Budget prévu (FCFA) *</label>
-                <input type="number" className="input-field font-mono" placeholder="0" value={itemForm.estimated_amount} onChange={(e) => setItemForm({ ...itemForm, estimated_amount: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Notes</label>
-                <input className="input-field" placeholder="Optionnel" value={itemForm.notes} onChange={(e) => setItemForm({ ...itemForm, notes: e.target.value })} />
-              </div>
-              <div className="border-t border-white/10 pt-4 mt-2">
-                <p className="text-xs font-medium text-slate-400 mb-3">Boutique cible</p>
-                <div className="grid gap-3">
-                  <div>
-                    <label className="text-[10px] text-neutral-500 mb-1 block">Nom de la boutique</label>
-                    <input className="input-field" placeholder="Ex: Zara, Apple Store" value={itemForm.shop_name} onChange={(e) => setItemForm({ ...itemForm, shop_name: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-neutral-500 mb-1 block">Téléphone</label>
-                    <input type="tel" className="input-field" placeholder="+225 07 00 00 00 00" value={itemForm.shop_phone} onChange={(e) => setItemForm({ ...itemForm, shop_phone: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-neutral-500 mb-1 block">Adresse</label>
-                    <input className="input-field" placeholder="Adresse ou lieu" value={itemForm.shop_address} onChange={(e) => setItemForm({ ...itemForm, shop_address: e.target.value })} />
-                  </div>
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <label className="text-[10px] text-neutral-500 mb-1 block">Latitude</label>
-                      <input type="number" step="any" className="input-field font-mono" placeholder="5.123" value={itemForm.shop_lat} onChange={(e) => setItemForm({ ...itemForm, shop_lat: e.target.value })} />
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-[10px] text-neutral-500 mb-1 block">Longitude</label>
-                      <input type="number" step="any" className="input-field font-mono" placeholder="-4.456" value={itemForm.shop_lng} onChange={(e) => setItemForm({ ...itemForm, shop_lng: e.target.value })} />
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => captureGeolocation((lat, lng) => setItemForm((f) => ({ ...f, shop_lat: lat, shop_lng: lng })))}
-                    className="text-xs text-pink-400 hover:text-pink-300 flex items-center gap-1"
-                  >
-                    <MapPin size={12} /> Utiliser ma position actuelle
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowAddItemModal(null)} className="flex-1 min-h-[44px] py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium">Annuler</button>
-              <button onClick={handleAddItem} className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
-                <Plus size={16} /> Ajouter
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Marquer acheté */}
-      {showPurchaseModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowPurchaseModal(null)}>
-          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-5">
-              <h2 className="text-base font-bold flex items-center gap-2">
-                <Check size={18} className="text-emerald-400" />
-                Marquer comme acheté
-              </h2>
-              <button onClick={() => setShowPurchaseModal(null)} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
-            </div>
-            <p className="text-sm text-slate-400 mb-4">{showPurchaseModal.name}</p>
-            <p className="text-xs text-slate-500 mb-2">Budget prévu : {formatCFA(showPurchaseModal.estimated_amount)}</p>
-            <div>
-              <label className="text-xs text-neutral-500 mb-1.5 block">Prix réel d&apos;achat *</label>
-              <input type="number" className="input-field font-mono" placeholder="0" value={purchaseAmount} onChange={(e) => setPurchaseAmount(e.target.value)} />
-            </div>
-            <p className="text-[10px] text-slate-500 mt-2">Une dépense sera créée et comptabilisée.</p>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowPurchaseModal(null)} className="flex-1 min-h-[44px] py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium">Annuler</button>
-              <button onClick={handlePurchase} className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
-                <Check size={16} /> Enregistrer
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

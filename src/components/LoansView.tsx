@@ -1,7 +1,8 @@
 "use client";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatCFA } from "@/lib/constants";
+import { formatCFA, isVaultAccountLocked, accountTypeLabel, isBankTreasuryDebitAccount } from "@/lib/constants";
+import type { AccountWithBalance } from "@/lib/types";
 import { Loan, LoanPayment } from "@/lib/types";
 import Icon from "./ui/Icon";
 import AnimatedProgressBar from "./ui/AnimatedProgressBar";
@@ -54,7 +55,7 @@ interface BudgetData {
   addLoan: (l: Omit<Loan, "id" | "created_at">, isExisting?: boolean, monthsPaid?: number, schedule?: import("@/lib/types").LoanScheduleInput[]) => Promise<Loan | false>;
   updateLoan: (id: number, u: Partial<Loan>) => Promise<void>;
   removeLoan: (id: number) => Promise<void>;
-  addLoanPayment: (p: Omit<LoanPayment, "id" | "created_at">) => Promise<boolean>;
+  addLoanPayment: (p: Omit<LoanPayment, "id" | "created_at">, opts?: { accountId?: number }) => Promise<boolean>;
   updateLoanPayment: (id: number, u: Partial<Pick<LoanPayment, "amount" | "fees" | "date" | "time" | "notes">>) => Promise<boolean>;
   removeLoanPayment: (id: number) => Promise<void>;
   fetchSchedule: (loanId: number) => Promise<import("@/lib/types").LoanScheduleRow[]>;
@@ -67,6 +68,7 @@ interface BudgetData {
   salaries: number[];
   selectedMonth: number;
   selectedYear: number;
+  accountsWithBalance?: AccountWithBalance[];
 }
 
 export default function LoansView({
@@ -81,6 +83,7 @@ export default function LoansView({
     addLoanPayment, updateLoanPayment, removeLoanPayment,
     fetchSchedule, markSchedulePaid, markScheduleUnpaid, updateScheduleRow,
     monthLoanPayments, totalDebt, config, salaries, selectedMonth, selectedYear,
+    accountsWithBalance = [],
   } = budget;
 
   const [showPayModal, setShowPayModal] = useState<Loan | null>(null);
@@ -128,6 +131,34 @@ export default function LoansView({
   }, [searchParams, loans, router]);
 
   useEffect(() => {
+    if (!showPayModal) return;
+    setPayForm((prev) => ({
+      ...prev,
+      accountId:
+        showPayModal.payment_account_id != null ? String(showPayModal.payment_account_id) : "",
+    }));
+  }, [showPayModal?.id]);
+
+  const accountsForLoanPay = useMemo(
+    () =>
+      accountsWithBalance.filter(
+        (a) => !a.is_archived && !isVaultAccountLocked(a.vault_unlocks_on)
+      ),
+    [accountsWithBalance]
+  );
+
+  const bankTreasuryOptions = useMemo(
+    () =>
+      accountsWithBalance.filter(
+        (a) =>
+          !a.is_archived &&
+          isBankTreasuryDebitAccount(a.kind) &&
+          !isVaultAccountLocked(a.vault_unlocks_on)
+      ),
+    [accountsWithBalance]
+  );
+
+  useEffect(() => {
     if (!analysisLoanId) {
       setAnalysisSchedule([]);
       return;
@@ -154,6 +185,7 @@ export default function LoansView({
     date: todayStr,
     time: nowTime,
     notes: "",
+    accountId: "",
   });
 
   const [editPayForm, setEditPayForm] = useState({
@@ -229,14 +261,21 @@ export default function LoansView({
       showToast("Montant requis", "error");
       return;
     }
-    const ok = await addLoanPayment({
-      loan_id: showPayModal.id,
-      amount: Number(payForm.amount),
-      fees: Number(payForm.fees) || 0,
-      date: payForm.date,
-      time: payForm.time,
-      notes: payForm.notes,
-    });
+    const acc =
+      payForm.accountId && !Number.isNaN(Number(payForm.accountId))
+        ? Number(payForm.accountId)
+        : undefined;
+    const ok = await addLoanPayment(
+      {
+        loan_id: showPayModal.id,
+        amount: Number(payForm.amount),
+        fees: Number(payForm.fees) || 0,
+        date: payForm.date,
+        time: payForm.time,
+        notes: payForm.notes,
+      },
+      acc != null ? { accountId: acc } : undefined
+    );
     if (ok) {
       const ti = typeInfo(showPayModal.type);
       showToast(`${ti.payLabel} de ${formatCFA(Number(payForm.amount))} enregistré`);
@@ -431,6 +470,7 @@ export default function LoansView({
                             date: n.toISOString().split("T")[0],
                             time: `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`,
                             notes: "",
+                            accountId: loan.payment_account_id != null ? String(loan.payment_account_id) : "",
                           });
                           setShowPayModal(loan);
                         }}
@@ -690,6 +730,52 @@ export default function LoansView({
                     <input className="input-field" placeholder="Virement, prélèvement..."
                       value={payForm.notes} onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })} />
                   </div>
+                )}
+                {(showPayModal.type === "personal_borrowed" || showPayModal.type === "personal_lent") && (
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">
+                      {showPayModal.type === "personal_lent" ? "Compte d’encaissement" : "Compte débité"}
+                    </label>
+                    <select
+                      className="input-field text-sm"
+                      value={payForm.accountId}
+                      onChange={(e) => setPayForm({ ...payForm, accountId: e.target.value })}
+                    >
+                      <option value="">Selon le prêt (réglages)</option>
+                      {accountsForLoanPay.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} · {accountTypeLabel(a.kind, a.subtype, a.institution_name)}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-slate-600 mt-1">
+                      Comptes coffre verrouillés exclus. Choix optionnel si déjà défini sur le prêt.
+                    </p>
+                  </div>
+                )}
+                {showPayModal.type === "bank" && bankTreasuryOptions.length > 1 && (
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Compte bancaire (trésorerie)</label>
+                    <select
+                      className="input-field text-sm"
+                      value={payForm.accountId}
+                      onChange={(e) => setPayForm({ ...payForm, accountId: e.target.value })}
+                    >
+                      <option value="">Compte enregistré sur le prêt</option>
+                      {bankTreasuryOptions.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                          {a.institution_name ? ` — ${a.institution_name}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {showPayModal.type === "bank" && bankTreasuryOptions.length === 0 && (
+                  <p className="text-[11px] text-amber-400 rounded-lg bg-amber-500/10 px-3 py-2">
+                    Ajoute un compte <strong>bancaire</strong> dans Réglages → Trésorerie pour enregistrer les
+                    échéances.
+                  </p>
                 )}
                 {payForm.amount && Number(payForm.amount) > 0 && (
                   <div className={`p-3 rounded-xl flex items-center gap-2 text-xs ${

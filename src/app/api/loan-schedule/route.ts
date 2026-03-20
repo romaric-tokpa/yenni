@@ -12,9 +12,27 @@ import {
   updateLoan,
   addExpense,
   updateScheduleExpenseId,
+  resolveLoanRepaymentDebitAccountId,
 } from "@/lib/db";
 import type { ScheduleRowUpdate } from "@/lib/types";
 import type { LoanScheduleInput } from "@/lib/types";
+
+function loanDebitAccountErrorResponse(err: unknown): NextResponse | null {
+  const msg = err instanceof Error ? err.message : "";
+  const map: Record<string, string> = {
+    NO_BANK_CURRENT_ACCOUNT:
+      "Ajoute au moins un compte bancaire dans Trésorerie pour débiter les échéances (courant, épargne non bloquée…).",
+    BANK_LOAN_PICK_CURRENT_ACCOUNT:
+      "Tu as plusieurs comptes bancaires : indique celui des prélèvements dans la fiche du prêt (Modifier le prêt).",
+    INVALID_BANK_CURRENT_ACCOUNT:
+      "Le compte débité doit être un compte bancaire de trésorerie actif (hors épargne bloquée).",
+    INVALID_REPAYMENT_ACCOUNT: "Compte de remboursement invalide ou non autorisé (coffre verrouillé ou archivé).",
+    LOAN_REPAYMENT_DEBIT_NOT_APPLICABLE: "Ce type de prêt ne correspond pas à une échéance à payer depuis un compte.",
+  };
+  const text = map[msg];
+  if (text) return NextResponse.json({ error: text }, { status: 400 });
+  return null;
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -86,6 +104,7 @@ export async function PUT(req: NextRequest) {
     const action = body.action as "pay" | "unpay" | "update" | undefined;
     const note = typeof body.note === "string" ? body.note : undefined;
     const amount = body.amount != null ? parseInt(String(body.amount), 10) : undefined;
+    const accountIdBody = body.account_id != null ? parseInt(String(body.account_id), 10) : undefined;
 
     if (!body.loan_id || isNaN(loanId)) {
       return NextResponse.json({ error: "loan_id requis" }, { status: 400 });
@@ -140,6 +159,27 @@ export async function PUT(req: NextRequest) {
 
     if (action === "pay" && updated) {
       const loan = await getLoan(loanId);
+      if (!loan) {
+        return NextResponse.json({ error: "Prêt introuvable" }, { status: 404 });
+      }
+      if (loan.type === "personal_lent") {
+        return NextResponse.json(
+          { error: "Les échéances planifiées s’appliquent aux remboursements (prêt bancaire ou emprunt personnel)." },
+          { status: 400 },
+        );
+      }
+      let expenseAccountId: number;
+      try {
+        expenseAccountId = await resolveLoanRepaymentDebitAccountId(
+          session.userId,
+          loan,
+          accountIdBody != null && !Number.isNaN(accountIdBody) ? accountIdBody : null,
+        );
+      } catch (e) {
+        const r = loanDebitAccountErrorResponse(e);
+        if (r) return r;
+        throw e;
+      }
       const paidAt = updated.paid_at ? new Date(updated.paid_at) : new Date();
       const dateStr = paidAt.toISOString().split("T")[0];
       const timeStr = paidAt.toTimeString().slice(0, 5);
@@ -148,10 +188,11 @@ export async function PUT(req: NextRequest) {
         {
           date: dateStr,
           time: timeStr,
-          description: `Échéance #${number} - ${loan?.label ?? "Prêt"}`,
+          description: `Échéance #${number} - ${loan.label}`,
           category: "loan_repayment",
           amount: expenseAmount,
           notes: note ?? "",
+          account_id: expenseAccountId,
         },
         session.userId
       );

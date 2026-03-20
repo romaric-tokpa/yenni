@@ -1,16 +1,48 @@
 "use client";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatCFA, MONTHS_FULL, VIRTUAL_LIST_THRESHOLD, getSelectableYears } from "@/lib/constants";
-import { BudgetConfig, Expense, FixedChargePayment, Category, PlannedExpense } from "@/lib/types";
-import { Plus, Trash2, X, FileText, Check, Landmark, CalendarClock, Clock, CircleCheck, Pencil, CirclePlay, History, Calendar, ChevronLeft, ChevronRight, FileSpreadsheet } from "lucide-react";
-import { exportExpensesCSV } from "@/lib/exportUtils";
+import { formatCFA, MONTHS_FULL, EXPENSES_PAGE_SIZE, getSelectableYears, suggestedTransactionFeePercentFromAccount, isVaultAccountLocked } from "@/lib/constants";
+import { BudgetConfig, Expense, FixedChargePayment, Category, PlannedExpense, AccountWithBalance, Income, AccountTransfer } from "@/lib/types";
+import { Plus, Trash2, X, FileText, Check, Landmark, CalendarClock, Clock, CircleCheck, Pencil, CirclePlay, History, Calendar, ChevronLeft, ChevronRight, FileSpreadsheet, List, CalendarDays, TrendingUp, ArrowRightLeft, Filter } from "lucide-react";
+import { exportTransactionsCSV } from "@/lib/exportUtils";
+import { getIncomeSourceLabel } from "@/lib/incomeSources";
+import { getModalHref } from "@/lib/modal";
 import Icon from "./ui/Icon";
-import VirtualList from "./VirtualList";
+import AccountSelect from "./AccountSelect";
 
 type HistoryItem =
   | { kind: "expense"; data: Expense }
-  | { kind: "fixed"; data: FixedChargePayment };
+  | { kind: "fixed"; data: FixedChargePayment }
+  | { kind: "income"; data: Income }
+  | { kind: "transfer"; data: AccountTransfer };
+
+type TxTypeFilter = "all" | HistoryItem["kind"];
+
+const TX_FILTER_OPTIONS: { key: TxTypeFilter; label: string }[] = [
+  { key: "all", label: "Tout" },
+  { key: "expense", label: "Dépenses variables" },
+  { key: "fixed", label: "Charges fixes" },
+  { key: "income", label: "Revenus" },
+  { key: "transfer", label: "Transferts" },
+];
+
+/** Horodatage local pour tri fiable (plus récent en premier). */
+function historyItemTimestamp(item: HistoryItem): number {
+  const d = item.data.date;
+  const rawT = item.data.time || "00:00";
+  const parts = rawT.split(":");
+  const h = parseInt(parts[0] ?? "0", 10) || 0;
+  const m = parseInt(parts[1] ?? "0", 10) || 0;
+  const [y, mo, day] = d.split("-").map((x) => parseInt(x, 10) || 0);
+  return new Date(y, mo - 1, day, h, m, 0, 0).getTime();
+}
+
+function compareHistoryNewestFirst(a: HistoryItem, b: HistoryItem): number {
+  const tb = historyItemTimestamp(b);
+  const ta = historyItemTimestamp(a);
+  if (tb !== ta) return tb - ta;
+  return b.data.id - a.data.id;
+}
 
 interface BudgetData {
   config: BudgetConfig;
@@ -32,6 +64,10 @@ interface BudgetData {
   totalMonthSpent: number;
   totalFixed: number;
   totalBudgetVar: number;
+  accountsWithBalance: AccountWithBalance[];
+  incomes: Income[];
+  removeIncome: (id: number) => Promise<void>;
+  refreshAll: () => Promise<void>;
 }
 
 export default function ExpenseTracker({
@@ -61,7 +97,36 @@ export default function ExpenseTracker({
     totalMonthSpent,
     totalFixed,
     totalBudgetVar,
+    accountsWithBalance,
+    incomes,
+    removeIncome,
+    refreshAll,
   } = budget;
+
+  const activeAccounts = useMemo(
+    () => accountsWithBalance.filter((a) => !a.is_archived),
+    [accountsWithBalance]
+  );
+  const debitAccounts = useMemo(
+    () => activeAccounts.filter((a) => !isVaultAccountLocked(a.vault_unlocks_on)),
+    [activeAccounts]
+  );
+  const firstDebitAccountId = debitAccounts[0]?.id;
+
+  const [transfers, setTransfers] = useState<AccountTransfer[]>([]);
+
+  const refetchTransfers = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/account-transfers?month=${selectedMonth}&year=${selectedYear}`);
+      if (r.ok) setTransfers(await r.json());
+    } catch {
+      /* ignore */
+    }
+  }, [selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    refetchTransfers();
+  }, [refetchTransfers]);
 
   const getCategoryDisplay = useCallback((categoryId: string) => {
     const cat = config.categories.find((c: Category) => c.id === categoryId);
@@ -71,18 +136,63 @@ export default function ExpenseTracker({
     return { label: categoryId, icon: "wrench", color: "#6366f1" };
   }, [config.categories, config.wishCategories]);
 
-  const allHistory: HistoryItem[] = [
-    ...expenses.map((e) => ({ kind: "expense" as const, data: e })),
-    ...fixedPayments.map((p) => ({ kind: "fixed" as const, data: p })),
-  ].sort((a, b) => {
-    const da = `${a.data.date} ${a.data.time}`;
-    const db = `${b.data.date} ${b.data.time}`;
-    return db.localeCompare(da);
-  });
+  const allHistory = useMemo(() => {
+    const items: HistoryItem[] = [
+      ...expenses.map((e) => ({ kind: "expense" as const, data: e })),
+      ...fixedPayments.map((p) => ({ kind: "fixed" as const, data: p })),
+      ...incomes.map((i) => ({ kind: "income" as const, data: i })),
+      ...transfers.map((t) => ({ kind: "transfer" as const, data: t })),
+    ];
+    items.sort(compareHistoryNewestFirst);
+    return items;
+  }, [expenses, fixedPayments, incomes, transfers]);
+
   const totalAllSpent = totalMonthSpent + totalFixed;
+  const totalManualIncomes = useMemo(() => incomes.reduce((s, i) => s + i.amount, 0), [incomes]);
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "byDay">("list");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [typeFilter, setTypeFilter] = useState<TxTypeFilter>("all");
+
+  const typeCounts = useMemo(() => {
+    const c = { all: allHistory.length, expense: 0, fixed: 0, income: 0, transfer: 0 };
+    for (const item of allHistory) {
+      c[item.kind] += 1;
+    }
+    return c;
+  }, [allHistory]);
+
+  const filteredHistory = useMemo(() => {
+    if (typeFilter === "all") return allHistory;
+    return allHistory.filter((item) => item.kind === typeFilter);
+  }, [allHistory, typeFilter]);
+
+  const groupedByDay = useMemo(() => {
+    const map = new Map<string, HistoryItem[]>();
+    for (const item of filteredHistory) {
+      const date = item.data.date;
+      if (!map.has(date)) map.set(date, []);
+      map.get(date)!.push(item);
+    }
+    return Array.from(map.entries())
+      .map(([dateStr, items]) => [dateStr, [...items].sort(compareHistoryNewestFirst)] as const)
+      .sort((a, b) => b[0].localeCompare(a[0]));
+  }, [filteredHistory]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredHistory.length / EXPENSES_PAGE_SIZE));
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * EXPENSES_PAGE_SIZE;
+    return filteredHistory.slice(start, start + EXPENSES_PAGE_SIZE);
+  }, [filteredHistory, currentPage]);
+
+  const listRangeStart = filteredHistory.length === 0 ? 0 : (currentPage - 1) * EXPENSES_PAGE_SIZE + 1;
+  const listRangeEnd = Math.min(currentPage * EXPENSES_PAGE_SIZE, filteredHistory.length);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedMonth, selectedYear, viewMode, typeFilter]);
 
   const pendingPlanned = useMemo(() => plannedExpenses.filter((p) => p.status === "pending"), [plannedExpenses]);
   const executedPlanned = useMemo(() => plannedExpenses.filter((p) => p.status === "executed"), [plannedExpenses]);
@@ -100,20 +210,24 @@ export default function ExpenseTracker({
       if (p && p.status === "pending") {
         setHighlightedPlannedId(id);
         plannedSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-        router.replace("/expenses", { scroll: false });
+        router.replace("/transactions", { scroll: false });
         const t = setTimeout(() => setHighlightedPlannedId(null), 3000);
         return () => clearTimeout(t);
       }
     }
   }, [searchParams, plannedExpenses, router]);
 
-  const planDefault = {
-    due_date: "",
-    description: "",
-    category: config.categories[0]?.id || "food",
-    amount: "",
-    notes: "",
-  };
+  const planDefault = useMemo(
+    () => ({
+      due_date: "",
+      description: "",
+      category: config.categories[0]?.id || "food",
+      amount: "",
+      notes: "",
+      account_id: 0 as number,
+    }),
+    [config.categories]
+  );
   const [planForm, setPlanForm] = useState(planDefault);
   const [editingPlanned, setEditingPlanned] = useState<PlannedExpense | null>(null);
   const now = new Date();
@@ -124,14 +238,39 @@ export default function ExpenseTracker({
     category: config.categories[0]?.id || "food",
     amount: "",
     notes: "",
+    transaction_fee: "",
+    account_id: "" as string,
   });
+
+  const expenseAccountOptions = useMemo(() => {
+    const base = debitAccounts;
+    if (editingExpense?.account_id) {
+      const cur = activeAccounts.find((a) => a.id === editingExpense.account_id);
+      if (cur && !base.some((b) => b.id === cur.id)) return [...base, cur];
+    }
+    return base;
+  }, [debitAccounts, activeAccounts, editingExpense]);
+
+  const expenseModalAccountId = form.account_id ? Number(form.account_id) : firstDebitAccountId;
+  const expenseModalSelectedAccount =
+    expenseAccountOptions.find((a) => a.id === expenseModalAccountId) ?? expenseAccountOptions[0];
+  const expenseModalFeePct = suggestedTransactionFeePercentFromAccount(
+    expenseModalSelectedAccount?.kind,
+    expenseModalSelectedAccount?.subtype,
+  );
 
   const handleSubmit = async () => {
     if (!form.description || !form.amount || Number(form.amount) <= 0) {
       showToast("Remplis tous les champs", "error");
       return;
     }
+    if (!editingExpense && !firstDebitAccountId) {
+      showToast("Aucun compte débitable (tous coffres verrouillés ?).", "error");
+      return;
+    }
     if (editingExpense) {
+      const fee = form.transaction_fee ? Number(form.transaction_fee) : 0;
+      const accId = form.account_id ? Number(form.account_id) : firstDebitAccountId;
       const ok = await updateExpense(editingExpense.id, {
         date: form.date,
         time: form.time || "00:00",
@@ -139,13 +278,25 @@ export default function ExpenseTracker({
         category: form.category,
         amount: Number(form.amount),
         notes: form.notes,
+        payment_method: "cash",
+        transaction_fee: fee,
+        account_id: accId,
       });
       if (ok) {
         showToast("Dépense modifiée !");
         closeExpenseModal();
       }
     } else {
-      const ok = await addExpense({ ...form, amount: Number(form.amount), time: form.time || "00:00" });
+      const fee = form.transaction_fee ? Number(form.transaction_fee) : 0;
+      const accId = form.account_id ? Number(form.account_id) : firstDebitAccountId;
+      const ok = await addExpense({
+        ...form,
+        amount: Number(form.amount),
+        time: form.time || "00:00",
+        payment_method: "cash",
+        transaction_fee: fee,
+        account_id: accId,
+      });
       if (ok) {
         showToast("Dépense enregistrée !");
         closeExpenseModal();
@@ -162,9 +313,43 @@ export default function ExpenseTracker({
       category: config.categories[0]?.id || "food",
       amount: "",
       notes: "",
+      transaction_fee: "",
+      account_id: firstDebitAccountId ? String(firstDebitAccountId) : "",
     });
     setEditingExpense(null);
     setShowModal(false);
+  };
+
+  const getAccountName = (id: number | null | undefined) =>
+    accountsWithBalance.find((a) => a.id === id)?.name ?? (id ? `Compte #${id}` : "—");
+  const getExpenseTotal = (exp: Expense) => exp.amount + (exp.transaction_fee ?? 0);
+  const getExpenseTotalLabel = (exp: Expense) => {
+    const total = getExpenseTotal(exp);
+    const fee = exp.transaction_fee ?? 0;
+    if (fee > 0) return `${formatCFA(total)} (dont ${formatCFA(fee)} frais)`;
+    return formatCFA(total);
+  };
+  const getOutflowAmount = (item: HistoryItem) => {
+    if (item.kind === "expense") return getExpenseTotal(item.data);
+    if (item.kind === "fixed") return item.data.amount;
+    return 0;
+  };
+  const getInflowAmount = (item: HistoryItem) => (item.kind === "income" ? item.data.amount : 0);
+
+  const handleDeleteIncome = async (id: number) => {
+    await removeIncome(id);
+    showToast("Revenu supprimé", "info");
+  };
+
+  const handleDeleteTransfer = async (id: number) => {
+    const r = await fetch(`/api/account-transfers?id=${id}`, { method: "DELETE" });
+    if (r.ok) {
+      showToast("Transfert supprimé", "info");
+      await refetchTransfers();
+      await refreshAll();
+    } else {
+      showToast("Impossible de supprimer le transfert", "error");
+    }
   };
 
   const handleEditExpense = (exp: Expense) => {
@@ -175,6 +360,8 @@ export default function ExpenseTracker({
       category: exp.category,
       amount: String(exp.amount),
       notes: exp.notes || "",
+      transaction_fee: exp.transaction_fee ? String(exp.transaction_fee) : "",
+      account_id: exp.account_id ? String(exp.account_id) : firstDebitAccountId ? String(firstDebitAccountId) : "",
     });
     setEditingExpense(exp);
     setShowModal(true);
@@ -191,6 +378,12 @@ export default function ExpenseTracker({
     else showToast("Erreur lors de la validation", "error");
   };
 
+  const openNewPlanModal = useCallback(() => {
+    setPlanForm({ ...planDefault, account_id: firstDebitAccountId ?? 0 });
+    setEditingPlanned(null);
+    setShowPlanModal(true);
+  }, [planDefault, firstDebitAccountId]);
+
   const handleEditPlanned = (p: PlannedExpense) => {
     setPlanForm({
       due_date: p.due_date,
@@ -198,6 +391,8 @@ export default function ExpenseTracker({
       category: p.category,
       amount: String(p.amount),
       notes: p.notes,
+      account_id:
+        p.account_id != null && Number(p.account_id) > 0 ? Number(p.account_id) : firstDebitAccountId ?? 0,
     });
     setEditingPlanned(p);
     setShowPlanModal(true);
@@ -208,6 +403,12 @@ export default function ExpenseTracker({
       showToast("Remplis tous les champs", "error");
       return;
     }
+    const acc =
+      planForm.account_id > 0 ? planForm.account_id : firstDebitAccountId ?? 0;
+    if (!acc) {
+      showToast("Choisis un compte de paiement", "error");
+      return;
+    }
     if (editingPlanned) {
       await updatePlannedExpense(editingPlanned.id, {
         due_date: planForm.due_date,
@@ -215,6 +416,7 @@ export default function ExpenseTracker({
         category: planForm.category,
         amount: Number(planForm.amount),
         notes: planForm.notes,
+        account_id: acc,
       });
       showToast("Dépense planifiée modifiée !");
     } else {
@@ -225,6 +427,7 @@ export default function ExpenseTracker({
         amount: Number(planForm.amount),
         notes: planForm.notes,
         status: "pending",
+        account_id: acc,
       });
       if (ok) showToast("Dépense planifiée !");
     }
@@ -236,7 +439,7 @@ export default function ExpenseTracker({
   const closePlanModal = () => {
     setShowPlanModal(false);
     setEditingPlanned(null);
-    setPlanForm(planDefault);
+    setPlanForm({ ...planDefault, account_id: firstDebitAccountId ?? 0 });
   };
 
   const getDueLabel = (dateStr: string) => {
@@ -257,9 +460,17 @@ export default function ExpenseTracker({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-xl lg:text-2xl font-bold tracking-tight">Suivi des Dépenses</h1>
+          <h1 className="text-xl lg:text-2xl font-bold tracking-tight">Transactions</h1>
           <p className="text-neutral-500 text-xs lg:text-sm mt-1">
-            {allHistory.length} transaction{allHistory.length !== 1 ? "s" : ""} — {MONTHS_FULL[selectedMonth]} {selectedYear}
+            {allHistory.length} mouvement{allHistory.length !== 1 ? "s" : ""} enregistré{allHistory.length !== 1 ? "s" : ""}
+            {typeFilter !== "all" && (
+              <span className="text-emerald-400/90">
+                {" "}
+                · {filteredHistory.length} après filtre
+              </span>
+            )}{" "}
+            — {MONTHS_FULL[selectedMonth]} {selectedYear}
+            <span className="text-neutral-600"> · Dépenses, charges, revenus, transferts</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -282,15 +493,26 @@ export default function ExpenseTracker({
             ))}
           </select>
           <button
-            onClick={() => exportExpensesCSV(expenses, fixedPayments, selectedMonth, selectedYear, config.categories)}
+            onClick={() =>
+              exportTransactionsCSV(
+                expenses,
+                fixedPayments,
+                incomes,
+                transfers,
+                selectedMonth,
+                selectedYear,
+                config.categories,
+                getAccountName
+              )
+            }
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-neutral-400 hover:text-white hover:border-white/20 text-xs font-medium transition-colors"
-            title="Exporter en CSV/Excel"
+            title="Exporter toutes les transactions du mois (CSV)"
           >
             <FileSpreadsheet size={14} />
             CSV
           </button>
           <button
-            onClick={() => setShowModal(true)}
+            onClick={() => router.push(getModalHref({ type: "new-expense", returnTo: "/transactions" }))}
             className="btn-primary px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 shrink-0"
           >
             <Plus size={18} strokeWidth={2.5} />
@@ -301,12 +523,18 @@ export default function ExpenseTracker({
 
       {/* Stats bar */}
       <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
             { label: "Dépenses variables", value: formatCFA(totalMonthSpent), color: "text-amber-400" },
             { label: "Charges fixes", value: formatCFA(totalFixed), color: "text-orange-400" },
             { label: "Total sorties", value: formatCFA(totalAllSpent), color: "text-red-300" },
-            { label: "Reste budget", value: formatCFA(totalBudgetVar - totalMonthSpent), color: totalBudgetVar - totalMonthSpent >= 0 ? "text-emerald-400" : "text-red-400" },
+            { label: "Revenus (entrées)", value: formatCFA(totalManualIncomes), color: "text-emerald-400" },
+            { label: "Transferts", value: String(transfers.length), color: "text-cyan-400/90" },
+            {
+              label: "Reste budget var.",
+              value: formatCFA(totalBudgetVar - totalMonthSpent),
+              color: totalBudgetVar - totalMonthSpent >= 0 ? "text-emerald-400" : "text-red-400",
+            },
           ].map((s, i) => (
             <div key={i} className="text-center">
               <div className="text-[10px] lg:text-xs text-neutral-500">{s.label}</div>
@@ -315,6 +543,99 @@ export default function ExpenseTracker({
           ))}
         </div>
       </div>
+
+      {/* Filtre par type + vue + pagination */}
+      {allHistory.length > 0 && (
+        <div className="space-y-3 mb-4">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+              <Filter size={14} className="text-neutral-400" />
+              Type de transaction
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {TX_FILTER_OPTIONS.map(({ key, label }) => {
+                const count = typeCounts[key === "all" ? "all" : key];
+                const active = typeFilter === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setTypeFilter(key)}
+                    className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      active
+                        ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                        : "border-white/10 bg-white/[0.02] text-neutral-400 hover:border-white/20 hover:text-neutral-200"
+                    }`}
+                  >
+                    {label}
+                    <span className="ml-1.5 font-mono text-[10px] opacity-80">({count})</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex rounded-lg border border-white/10 p-0.5 bg-white/[0.02] w-fit">
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  viewMode === "list" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                <List size={16} /> Liste
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("byDay")}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  viewMode === "byDay" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                <CalendarDays size={16} /> Par jour
+              </button>
+            </div>
+
+            {viewMode === "list" && filteredHistory.length > 0 && (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                <span className="text-xs text-neutral-500">
+                  <span className="text-neutral-400">{listRangeStart}–{listRangeEnd}</span> sur {filteredHistory.length}
+                  {totalPages > 1 && (
+                    <span className="text-neutral-600">
+                      {" "}
+                      · page {currentPage}/{totalPages}
+                    </span>
+                  )}
+                  <span className="text-neutral-600"> · {EXPENSES_PAGE_SIZE} par page</span>
+                </span>
+                {totalPages > 1 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={currentPage <= 1}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+                    >
+                      <ChevronLeft size={16} />
+                      Précédent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={currentPage >= totalPages}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+                    >
+                      Suivant
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Desktop table */}
       <div className="hidden md:block rounded-xl border border-white/5 bg-white/[0.02] overflow-x-auto">
@@ -333,65 +654,166 @@ export default function ExpenseTracker({
             </div>
             <p className="text-neutral-500 text-sm">Aucune transaction pour {MONTHS_FULL[selectedMonth]} {selectedYear}</p>
             <button
-              onClick={() => setShowModal(true)}
+              onClick={() => router.push(getModalHref({ type: "new-expense", returnTo: "/transactions" }))}
               className="mt-4 btn-primary px-5 py-2.5 rounded-lg text-sm font-medium inline-flex items-center gap-2"
             >
               <Plus size={16} />
               Ajouter une dépense
             </button>
           </div>
-        ) : allHistory.length > VIRTUAL_LIST_THRESHOLD ? (
-          <VirtualList
-            items={allHistory}
-            estimateSize={48}
-            maxHeight="50vh"
-            getItemKey={(item) => (item.kind === "expense" ? `e-${item.data.id}` : `f-${item.data.id}`)}
-            renderItem={(item) => {
-              if (item.kind === "expense") {
-                const exp = item.data;
-                const cat = getCategoryDisplay(exp.category);
-                return (
-                  <div className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03]">
-                    <div className="font-mono text-xs text-slate-400">
-                      <div>{new Date(exp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
-                      {exp.time && exp.time !== "00:00" && <div className="text-[10px] text-slate-500">{exp.time}</div>}
-                    </div>
-                    <div className="text-[13px]">{exp.description}</div>
-                    <div>
-                      <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1"
-                        style={{ background: cat.color + "22", color: cat.color }}>
-                        <Icon name={cat.icon} size={12} />{cat.label}
-                      </span>
-                    </div>
-                    <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{formatCFA(exp.amount)}</div>
-                    <div className="flex justify-end gap-0.5">
-                      <button onClick={() => handleEditExpense(exp)} className="text-slate-600 hover:text-emerald-400 transition-colors p-1" title="Modifier"><Pencil size={14} /></button>
-                      <button onClick={() => handleDelete(exp.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
-                    </div>
-                  </div>
-                );
-              }
-              const fp = item.data;
-              return (
-                <div className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03] bg-orange-500/[0.03]">
-                  <div className="font-mono text-xs text-slate-400">
-                    <div>{new Date(fp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
-                    {fp.time && fp.time !== "00:00" && <div className="text-[10px] text-slate-500">{fp.time}</div>}
-                  </div>
-                  <div className="text-[13px]">{fp.label}{fp.notes && <span className="text-[10px] text-slate-500 ml-2">— {fp.notes}</span>}</div>
-                  <div>
-                    <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 bg-orange-500/20 text-orange-400"><Landmark size={12} /> Charge fixe</span>
-                  </div>
-                  <div className="font-mono text-[13px] font-semibold text-orange-300 text-right">-{formatCFA(fp.amount)}</div>
-                  <div className="flex justify-end">
-                    <button onClick={async () => { await removeFixedPayment(fp.id); showToast("Paiement supprimé", "info"); }} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+        ) : filteredHistory.length === 0 ? (
+          <div className="py-16 text-center">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-white/5 mb-4">
+              <Filter size={28} className="text-neutral-500" />
+            </div>
+            <p className="text-neutral-400 text-sm font-medium">Aucun résultat pour ce type</p>
+            <p className="text-neutral-500 text-xs mt-1">Essaie « Tout » ou un autre filtre.</p>
+            <button
+              type="button"
+              onClick={() => setTypeFilter("all")}
+              className="mt-4 rounded-lg border border-white/15 px-4 py-2 text-sm text-neutral-300 hover:bg-white/[0.05] transition-colors"
+            >
+              Afficher tout
+            </button>
+          </div>
+        ) : viewMode === "byDay" ? (
+          groupedByDay.map(([dateStr, items]) => {
+            const dayOut = items.reduce((s, i) => s + getOutflowAmount(i), 0);
+            const dayIn = items.reduce((s, i) => s + getInflowAmount(i), 0);
+            const nXfer = items.filter((i) => i.kind === "transfer").length;
+            const dateLabel = new Date(dateStr + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+            return (
+              <div key={dateStr} className="border-b border-white/5 last:border-b-0">
+                <div className="px-5 py-2.5 bg-white/[0.02] flex flex-wrap justify-between items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-300 capitalize">{dateLabel}</span>
+                  <div className="text-right text-xs leading-tight">
+                    {dayOut > 0 && (
+                      <span className="font-mono font-semibold text-amber-400">−{formatCFA(dayOut)} sorties</span>
+                    )}
+                    {dayOut > 0 && dayIn > 0 && <span className="text-neutral-600 mx-2">·</span>}
+                    {dayIn > 0 && (
+                      <span className="font-mono font-semibold text-emerald-400">+{formatCFA(dayIn)} entrées</span>
+                    )}
+                    {nXfer > 0 && (
+                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">
+                        {nXfer} transfert{nXfer > 1 ? "s" : ""}
+                      </div>
+                    )}
                   </div>
                 </div>
-              );
-            }}
-          />
+                {items.map((item) => {
+                  if (item.kind === "expense") {
+                    const exp = item.data;
+                    const cat = getCategoryDisplay(exp.category);
+                    return (
+                      <div key={`e-${exp.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.02] pl-8">
+                        <div className="font-mono text-xs text-slate-500">
+                          {exp.time && exp.time !== "00:00" ? exp.time : "—"}
+                        </div>
+                        <div className="text-[13px]">{exp.description}</div>
+                        <div className="flex flex-col gap-0.5">
+                          <span
+                            className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit"
+                            style={{ background: cat.color + "22", color: cat.color }}
+                          >
+                            <Icon name={cat.icon} size={12} />
+                            {cat.label}
+                          </span>
+                          <span className="text-[9px] text-slate-500">{getAccountName(exp.account_id)}</span>
+                        </div>
+                        <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{getExpenseTotalLabel(exp)}</div>
+                        <div className="flex justify-end gap-0.5">
+                          <button onClick={() => handleEditExpense(exp)} className="text-slate-600 hover:text-emerald-400 transition-colors p-1" title="Modifier">
+                            <Pencil size={14} />
+                          </button>
+                          <button onClick={() => handleDelete(exp.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (item.kind === "fixed") {
+                    const fp = item.data;
+                    return (
+                      <div key={`f-${fp.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.02] pl-8 bg-orange-500/[0.03]">
+                        <div className="font-mono text-xs text-slate-500">{fp.time && fp.time !== "00:00" ? fp.time : "—"}</div>
+                        <div className="text-[13px]">
+                          {fp.label}
+                          {fp.notes && <span className="text-[10px] text-slate-500 ml-2">— {fp.notes}</span>}
+                        </div>
+                        <div>
+                          <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 bg-orange-500/20 text-orange-400">
+                            <Landmark size={12} /> Charge fixe
+                          </span>
+                        </div>
+                        <div className="font-mono text-[13px] font-semibold text-orange-300 text-right">-{formatCFA(fp.amount)}</div>
+                        <div className="flex justify-end">
+                          <button
+                            onClick={async () => {
+                              await removeFixedPayment(fp.id);
+                              showToast("Paiement supprimé", "info");
+                            }}
+                            className="text-slate-600 hover:text-red-400 transition-colors p-1"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (item.kind === "income") {
+                    const inc = item.data;
+                    return (
+                      <div key={`i-${inc.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.02] pl-8 bg-emerald-500/[0.04]">
+                        <div className="font-mono text-xs text-slate-500">{inc.time && inc.time !== "00:00" ? inc.time : "—"}</div>
+                        <div className="text-[13px]">{inc.description}</div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit bg-emerald-500/20 text-emerald-400">
+                            <TrendingUp size={12} /> Revenu · {getIncomeSourceLabel(inc.source)}
+                          </span>
+                          <span className="text-[9px] text-slate-500">{getAccountName(inc.account_id)}</span>
+                        </div>
+                        <div className="font-mono text-[13px] font-semibold text-emerald-400 text-right">+{formatCFA(inc.amount)}</div>
+                        <div className="flex justify-end">
+                          <button onClick={() => handleDeleteIncome(inc.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  const xfer = item.data;
+                  const fee = xfer.fee ?? 0;
+                  return (
+                    <div key={`t-${xfer.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.02] pl-8 bg-slate-500/[0.06]">
+                      <div className="font-mono text-xs text-slate-500">{xfer.time && xfer.time !== "00:00" ? xfer.time : "—"}</div>
+                      <div className="text-[13px]">{xfer.notes?.trim() ? xfer.notes : "Transfert entre comptes"}</div>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit bg-cyan-500/15 text-cyan-300">
+                          <ArrowRightLeft size={12} /> Transfert
+                        </span>
+                        <span className="text-[9px] text-slate-500">
+                          {getAccountName(xfer.from_account_id)} → {getAccountName(xfer.to_account_id)}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-mono text-[13px] font-semibold text-cyan-200/90">↔ {formatCFA(xfer.amount)}</div>
+                        {fee > 0 && <div className="text-[10px] text-slate-500">frais {formatCFA(fee)}</div>}
+                      </div>
+                      <div className="flex justify-end">
+                        <button onClick={() => handleDeleteTransfer(xfer.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })
         ) : (
-          allHistory.map((item) => {
+          paginatedItems.map((item) => {
             if (item.kind === "expense") {
               const exp = item.data;
               const cat = getCategoryDisplay(exp.category);
@@ -402,34 +824,109 @@ export default function ExpenseTracker({
                     {exp.time && exp.time !== "00:00" && <div className="text-[10px] text-slate-500">{exp.time}</div>}
                   </div>
                   <div className="text-[13px]">{exp.description}</div>
-                  <div>
-                    <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1"
-                      style={{ background: cat.color + "22", color: cat.color }}>
-                      <Icon name={cat.icon} size={12} />{cat.label}
+                  <div className="flex flex-col gap-0.5">
+                    <span
+                      className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit"
+                      style={{ background: cat.color + "22", color: cat.color }}
+                    >
+                      <Icon name={cat.icon} size={12} />
+                      {cat.label}
                     </span>
+                    <span className="text-[9px] text-slate-500">{getAccountName(exp.account_id)}</span>
                   </div>
-                  <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{formatCFA(exp.amount)}</div>
+                  <div className="font-mono text-[13px] font-semibold text-amber-400 text-right">-{getExpenseTotalLabel(exp)}</div>
                   <div className="flex justify-end gap-0.5">
-                    <button onClick={() => handleEditExpense(exp)} className="text-slate-600 hover:text-emerald-400 transition-colors p-1" title="Modifier"><Pencil size={14} /></button>
-                    <button onClick={() => handleDelete(exp.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                    <button onClick={() => handleEditExpense(exp)} className="text-slate-600 hover:text-emerald-400 transition-colors p-1" title="Modifier">
+                      <Pencil size={14} />
+                    </button>
+                    <button onClick={() => handleDelete(exp.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
               );
             }
-            const fp = item.data;
+            if (item.kind === "fixed") {
+              const fp = item.data;
+              return (
+                <div key={`f-${fp.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03] bg-orange-500/[0.03]">
+                  <div className="font-mono text-xs text-slate-400">
+                    <div>{new Date(fp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
+                    {fp.time && fp.time !== "00:00" && <div className="text-[10px] text-slate-500">{fp.time}</div>}
+                  </div>
+                  <div className="text-[13px]">
+                    {fp.label}
+                    {fp.notes && <span className="text-[10px] text-slate-500 ml-2">— {fp.notes}</span>}
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 bg-orange-500/20 text-orange-400">
+                      <Landmark size={12} /> Charge fixe
+                    </span>
+                  </div>
+                  <div className="font-mono text-[13px] font-semibold text-orange-300 text-right">-{formatCFA(fp.amount)}</div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={async () => {
+                        await removeFixedPayment(fp.id);
+                        showToast("Paiement supprimé", "info");
+                      }}
+                      className="text-slate-600 hover:text-red-400 transition-colors p-1"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            if (item.kind === "income") {
+              const inc = item.data;
+              return (
+                <div key={`i-${inc.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03] bg-emerald-500/[0.04]">
+                  <div className="font-mono text-xs text-slate-400">
+                    <div>{new Date(inc.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
+                    {inc.time && inc.time !== "00:00" && <div className="text-[10px] text-slate-500">{inc.time}</div>}
+                  </div>
+                  <div className="text-[13px]">{inc.description}</div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit bg-emerald-500/20 text-emerald-400">
+                      <TrendingUp size={12} /> Revenu · {getIncomeSourceLabel(inc.source)}
+                    </span>
+                    <span className="text-[9px] text-slate-500">{getAccountName(inc.account_id)}</span>
+                  </div>
+                  <div className="font-mono text-[13px] font-semibold text-emerald-400 text-right">+{formatCFA(inc.amount)}</div>
+                  <div className="flex justify-end">
+                    <button onClick={() => handleDeleteIncome(inc.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            const xfer = item.data;
+            const fee = xfer.fee ?? 0;
             return (
-              <div key={`f-${fp.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03] bg-orange-500/[0.03]">
+              <div key={`t-${xfer.id}`} className="expense-row grid grid-cols-[100px_1fr_160px_120px_70px] px-5 py-3.5 items-center border-b border-white/[0.03] bg-slate-500/[0.06]">
                 <div className="font-mono text-xs text-slate-400">
-                  <div>{new Date(fp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
-                  {fp.time && fp.time !== "00:00" && <div className="text-[10px] text-slate-500">{fp.time}</div>}
+                  <div>{new Date(xfer.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</div>
+                  {xfer.time && xfer.time !== "00:00" && <div className="text-[10px] text-slate-500">{xfer.time}</div>}
                 </div>
-                <div className="text-[13px]">{fp.label}{fp.notes && <span className="text-[10px] text-slate-500 ml-2">— {fp.notes}</span>}</div>
-                <div>
-                  <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 bg-orange-500/20 text-orange-400"><Landmark size={12} /> Charge fixe</span>
+                <div className="text-[13px]">{xfer.notes?.trim() ? xfer.notes : "Transfert entre comptes"}</div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[11px] font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1 w-fit bg-cyan-500/15 text-cyan-300">
+                    <ArrowRightLeft size={12} /> Transfert
+                  </span>
+                  <span className="text-[9px] text-slate-500">
+                    {getAccountName(xfer.from_account_id)} → {getAccountName(xfer.to_account_id)}
+                  </span>
                 </div>
-                <div className="font-mono text-[13px] font-semibold text-orange-300 text-right">-{formatCFA(fp.amount)}</div>
+                <div className="text-right">
+                  <div className="font-mono text-[13px] font-semibold text-cyan-200/90">↔ {formatCFA(xfer.amount)}</div>
+                  {fee > 0 && <div className="text-[10px] text-slate-500">frais {formatCFA(fee)}</div>}
+                </div>
                 <div className="flex justify-end">
-                  <button onClick={async () => { await removeFixedPayment(fp.id); showToast("Paiement supprimé", "info"); }} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={14} /></button>
+                  <button onClick={() => handleDeleteTransfer(xfer.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1">
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </div>
             );
@@ -447,42 +944,231 @@ export default function ExpenseTracker({
             </div>
             <p className="text-neutral-500 text-sm">Aucune transaction pour {MONTHS_FULL[selectedMonth]}</p>
             <button
-              onClick={() => setShowModal(true)}
+              onClick={() => router.push(getModalHref({ type: "new-expense", returnTo: "/transactions" }))}
               className="mt-4 btn-primary px-5 py-2.5 rounded-lg text-sm font-medium inline-flex items-center gap-2"
             >
               <Plus size={16} />
               Ajouter une dépense
             </button>
           </div>
-        ) : allHistory.length > VIRTUAL_LIST_THRESHOLD ? (
-          <VirtualList
-            items={allHistory}
-            estimateSize={88}
-            maxHeight="55vh"
-            getItemKey={(item) => (item.kind === "expense" ? `e-${item.data.id}` : `f-${item.data.id}`)}
-            renderItem={(item) => {
+        ) : filteredHistory.length === 0 ? (
+          <div className="rounded-xl border border-white/5 bg-white/[0.02] py-12 text-center">
+            <Filter size={28} className="mx-auto mb-3 text-neutral-500" />
+            <p className="text-neutral-400 text-sm font-medium">Aucun résultat pour ce type</p>
+            <button type="button" onClick={() => setTypeFilter("all")} className="mt-4 text-sm text-emerald-400 hover:underline">
+              Afficher tout
+            </button>
+          </div>
+        ) : viewMode === "byDay" ? (
+          <div className="space-y-4">
+            {groupedByDay.map(([dateStr, items]) => {
+              const dayOut = items.reduce((s, i) => s + getOutflowAmount(i), 0);
+              const dayIn = items.reduce((s, i) => s + getInflowAmount(i), 0);
+              const nXfer = items.filter((i) => i.kind === "transfer").length;
+              const dateLabel = new Date(dateStr + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+              return (
+                <div key={dateStr} className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
+                  <div className="px-4 py-2.5 bg-white/[0.03] flex flex-col gap-1 border-b border-white/5 sm:flex-row sm:justify-between sm:items-center">
+                    <span className="text-sm font-semibold text-slate-300 capitalize">{dateLabel}</span>
+                    <div className="text-xs text-right">
+                      {dayOut > 0 && <span className="font-mono font-semibold text-amber-400">−{formatCFA(dayOut)} </span>}
+                      {dayIn > 0 && <span className="font-mono font-semibold text-emerald-400">+{formatCFA(dayIn)}</span>}
+                      {nXfer > 0 && (
+                        <div className="text-[10px] text-slate-500">
+                          {nXfer} transfert{nXfer > 1 ? "s" : ""}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="p-2 space-y-2">
+                    {items.map((item) => {
+                      if (item.kind === "fixed") {
+                        const fp = item.data;
+                        return (
+                          <div key={`f-${fp.id}`} className="rounded-lg border border-white/5 p-3" style={{ borderLeft: "3px solid rgb(249 115 22 / 0.6)" }}>
+                            <div className="flex justify-between items-start">
+                              <div className="text-[13px] font-medium">{fp.label}</div>
+                              <div className="font-mono text-sm font-bold text-orange-300">-{formatCFA(fp.amount)}</div>
+                            </div>
+                            <div className="flex justify-between items-center mt-1">
+                              <span className="text-[9px] text-slate-500">
+                                {fp.time && fp.time !== "00:00" ? fp.time : ""}
+                                {fp.notes && ` — ${fp.notes}`}
+                              </span>
+                              <button
+                                onClick={async () => {
+                                  await removeFixedPayment(fp.id);
+                                  showToast("Paiement supprimé", "info");
+                                }}
+                                className="text-slate-600 hover:text-red-400 p-1"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (item.kind === "income") {
+                        const inc = item.data;
+                        return (
+                          <div key={`i-${inc.id}`} className="rounded-lg border border-white/5 p-3" style={{ borderLeft: "3px solid rgb(52 211 153 / 0.7)" }}>
+                            <div className="flex justify-between items-start">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-medium truncate">{inc.description}</div>
+                                <div className="text-[10px] text-emerald-400/90 mt-1">Revenu · {getIncomeSourceLabel(inc.source)}</div>
+                                <div className="text-[9px] text-slate-500 mt-0.5">{getAccountName(inc.account_id)}</div>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                <span className="font-mono text-sm font-bold text-emerald-400">+{formatCFA(inc.amount)}</span>
+                                <button onClick={() => handleDeleteIncome(inc.id)} className="p-1.5 text-slate-500 active:text-red-400">
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (item.kind === "transfer") {
+                        const xfer = item.data;
+                        const fee = xfer.fee ?? 0;
+                        return (
+                          <div key={`t-${xfer.id}`} className="rounded-lg border border-white/5 p-3" style={{ borderLeft: "3px solid rgb(34 211 238 / 0.5)" }}>
+                            <div className="flex justify-between items-start gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-medium truncate">{xfer.notes?.trim() ? xfer.notes : "Transfert"}</div>
+                                <div className="text-[9px] text-slate-500 mt-1">
+                                  {getAccountName(xfer.from_account_id)} → {getAccountName(xfer.to_account_id)}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="font-mono text-sm font-bold text-cyan-200/90">↔ {formatCFA(xfer.amount)}</div>
+                                {fee > 0 && <div className="text-[10px] text-slate-500">frais {formatCFA(fee)}</div>}
+                                <button onClick={() => handleDeleteTransfer(xfer.id)} className="p-1 text-slate-600 hover:text-red-400 mt-1">
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      const exp = item.data;
+                      const cat = getCategoryDisplay(exp.category);
+                      return (
+                        <div key={`e-${exp.id}`} className="rounded-lg border border-white/5 p-3" style={{ borderLeft: `3px solid ${cat.color}` }}>
+                          <div className="flex justify-between items-start">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium truncate">{exp.description}</div>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: cat.color + "22", color: cat.color }}>
+                                  <Icon name={cat.icon} size={10} />
+                                  {cat.label}
+                                </span>
+                                <span className="text-[9px] text-slate-500">{getAccountName(exp.account_id)}</span>
+                                {exp.time && exp.time !== "00:00" && <span className="text-[10px] text-slate-500">{exp.time}</span>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                              <span className="font-mono text-sm font-bold text-amber-400">-{getExpenseTotalLabel(exp)}</span>
+                              <button onClick={() => handleEditExpense(exp)} className="p-1.5 text-slate-500 active:text-emerald-400">
+                                <Pencil size={14} />
+                              </button>
+                              <button onClick={() => handleDelete(exp.id)} className="p-1.5 text-slate-500 active:text-red-400">
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {paginatedItems.map((item) => {
               if (item.kind === "fixed") {
                 const fp = item.data;
                 return (
-                  <div className="mb-2">
-                    <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(249 115 22 / 0.6)" }}>
-                      <div className="flex justify-between items-start mb-1.5">
-                        <div>
-                          <div className="text-[13px] font-medium flex items-center gap-1.5">
-                            <Icon name={fp.icon} size={14} className="text-orange-400" />
-                            {fp.label}
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            {new Date(fp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
-                            {fp.time && fp.time !== "00:00" && ` à ${fp.time}`}
-                            {fp.notes && ` — ${fp.notes}`}
-                          </div>
+                  <div key={`f-${fp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(249 115 22 / 0.6)" }}>
+                    <div className="flex justify-between items-start mb-1.5">
+                      <div>
+                        <div className="text-[13px] font-medium flex items-center gap-1.5">
+                          <Icon name={fp.icon} size={14} className="text-orange-400" />
+                          {fp.label}
                         </div>
-                        <div className="font-mono text-sm font-bold text-orange-300">-{formatCFA(fp.amount)}</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          {new Date(fp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
+                          {fp.time && fp.time !== "00:00" && ` à ${fp.time}`}
+                          {fp.notes && ` — ${fp.notes}`}
+                        </div>
                       </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 inline-flex items-center gap-1"><Landmark size={10} /> Charge fixe</span>
-                        <button onClick={async () => { await removeFixedPayment(fp.id); showToast("Paiement supprimé", "info"); }} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={13} /></button>
+                      <div className="font-mono text-sm font-bold text-orange-300">-{formatCFA(fp.amount)}</div>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 inline-flex items-center gap-1">
+                        <Landmark size={10} /> Charge fixe
+                      </span>
+                      <button
+                        onClick={async () => {
+                          await removeFixedPayment(fp.id);
+                          showToast("Paiement supprimé", "info");
+                        }}
+                        className="text-slate-600 hover:text-red-400 transition-colors p-1"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+              if (item.kind === "income") {
+                const inc = item.data;
+                return (
+                  <div key={`i-${inc.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(52 211 153 / 0.7)" }}>
+                    <div className="flex justify-between items-start mb-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{inc.description}</div>
+                        <div className="text-[10px] text-emerald-400/90 mt-1">Revenu · {getIncomeSourceLabel(inc.source)}</div>
+                        <div className="text-[9px] text-slate-500 mt-0.5">{getAccountName(inc.account_id)}</div>
+                        <div className="font-mono text-[10px] text-slate-500 mt-1">
+                          {new Date(inc.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
+                          {inc.time && inc.time !== "00:00" && ` ${inc.time}`}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="font-mono text-sm font-bold text-emerald-400">+{formatCFA(inc.amount)}</span>
+                        <button onClick={() => handleDeleteIncome(inc.id)} className="text-slate-500 active:text-red-400 p-1.5">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              if (item.kind === "transfer") {
+                const xfer = item.data;
+                const fee = xfer.fee ?? 0;
+                return (
+                  <div key={`t-${xfer.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(34 211 238 / 0.5)" }}>
+                    <div className="flex justify-between items-start mb-1.5 gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{xfer.notes?.trim() ? xfer.notes : "Transfert entre comptes"}</div>
+                        <div className="text-[9px] text-slate-500 mt-1">
+                          {getAccountName(xfer.from_account_id)} → {getAccountName(xfer.to_account_id)}
+                        </div>
+                        <div className="font-mono text-[10px] text-slate-500 mt-1">
+                          {new Date(xfer.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
+                          {xfer.time && xfer.time !== "00:00" && ` ${xfer.time}`}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-mono text-sm font-bold text-cyan-200/90">↔ {formatCFA(xfer.amount)}</div>
+                        {fee > 0 && <div className="text-[10px] text-slate-500">frais {formatCFA(fee)}</div>}
+                        <button onClick={() => handleDeleteTransfer(xfer.id)} className="text-slate-500 active:text-red-400 p-1.5 mt-1">
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -491,98 +1177,73 @@ export default function ExpenseTracker({
               const exp = item.data;
               const cat = getCategoryDisplay(exp.category);
               return (
-                <div className="mb-2">
-                  <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: `3px solid ${cat.color}` }}>
-                    <div className="flex justify-between items-start mb-1.5">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium truncate">{exp.description}</div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1"
-                            style={{ background: cat.color + "22", color: cat.color }}>
-                            <Icon name={cat.icon} size={10} />{cat.label}
-                          </span>
-                          <span className="font-mono text-[10px] text-slate-500">
-                            {new Date(exp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
-                            {exp.time && exp.time !== "00:00" && ` ${exp.time}`}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0 ml-2">
-                        <span className="font-mono text-sm font-bold text-amber-400">-{formatCFA(exp.amount)}</span>
-                        <button onClick={() => handleEditExpense(exp)} className="text-slate-500 active:text-emerald-400 p-1.5" title="Modifier"><Pencil size={14} /></button>
-                        <button onClick={() => handleDelete(exp.id)} className="text-slate-500 active:text-red-400 p-1.5"><Trash2 size={14} /></button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            }}
-          />
-        ) : (
-          <div className="space-y-2">
-          {allHistory.map((item) => {
-            if (item.kind === "fixed") {
-              const fp = item.data;
-              return (
-                <div key={`f-${fp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: "3px solid rgb(249 115 22 / 0.6)" }}>
+                <div key={`e-${exp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: `3px solid ${cat.color}` }}>
                   <div className="flex justify-between items-start mb-1.5">
-                    <div>
-                      <div className="text-[13px] font-medium flex items-center gap-1.5">
-                        <Icon name={fp.icon} size={14} className="text-orange-400" />
-                        {fp.label}
-                      </div>
-                      <div className="text-[10px] text-slate-500 mt-0.5">
-                        {new Date(fp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
-                        {fp.time && fp.time !== "00:00" && ` à ${fp.time}`}
-                        {fp.notes && ` — ${fp.notes}`}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium truncate">{exp.description}</div>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <span
+                          className="text-[10px] font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+                          style={{ background: cat.color + "22", color: cat.color }}
+                        >
+                          <Icon name={cat.icon} size={10} />
+                          {cat.label}
+                        </span>
+                        <span className="text-[9px] text-slate-500">{getAccountName(exp.account_id)}</span>
+                        <span className="font-mono text-[10px] text-slate-500">
+                          {new Date(exp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
+                          {exp.time && exp.time !== "00:00" && ` ${exp.time}`}
+                        </span>
                       </div>
                     </div>
-                    <div className="font-mono text-sm font-bold text-orange-300">-{formatCFA(fp.amount)}</div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 inline-flex items-center gap-1">
-                      <Landmark size={10} /> Charge fixe
-                    </span>
-                    <button onClick={async () => { await removeFixedPayment(fp.id); showToast("Paiement supprimé", "info"); }}
-                      className="text-slate-600 hover:text-red-400 transition-colors p-1">
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      <span className="font-mono text-sm font-bold text-amber-400">-{getExpenseTotalLabel(exp)}</span>
+                      <button onClick={() => handleEditExpense(exp)} className="text-slate-500 active:text-emerald-400 p-1.5" title="Modifier">
+                        <Pencil size={14} />
+                      </button>
+                      <button onClick={() => handleDelete(exp.id)} className="text-slate-500 active:text-red-400 p-1.5">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
-            }
-            const exp = item.data;
-            const cat = getCategoryDisplay(exp.category);
-            return (
-              <div key={`e-${exp.id}`} className="rounded-xl border border-white/5 bg-white/[0.03] p-3.5" style={{ borderLeft: `3px solid ${cat.color}` }}>
-                <div className="flex justify-between items-start mb-1.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium truncate">{exp.description}</div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span
-                        className="text-[10px] font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1"
-                        style={{ background: cat.color + "22", color: cat.color }}
-                      >
-                        <Icon name={cat.icon} size={10} />
-                        {cat.label}
-                      </span>
-                      <span className="font-mono text-[10px] text-slate-500">
-                        {new Date(exp.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
-                        {exp.time && exp.time !== "00:00" && ` ${exp.time}`}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                    <span className="font-mono text-sm font-bold text-amber-400">
-                      -{formatCFA(exp.amount)}
-                    </span>
-                    <button onClick={() => handleEditExpense(exp)} className="text-slate-500 active:text-emerald-400 p-1.5" title="Modifier"><Pencil size={14} /></button>
-                    <button onClick={() => handleDelete(exp.id)} className="text-slate-500 active:text-red-400 p-1.5"><Trash2 size={14} /></button>
-                  </div>
+            })}
+            {totalPages > 1 && (
+              <div className="flex flex-col gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-4 mt-2">
+                <p className="text-center text-xs text-neutral-500">
+                  <span className="text-neutral-300 font-mono">
+                    {listRangeStart}–{listRangeEnd}
+                  </span>{" "}
+                  sur {filteredHistory.length}
+                  <span className="text-neutral-600">
+                    {" "}
+                    · page {currentPage}/{totalPages}
+                  </span>
+                  <span className="block text-[10px] text-neutral-600 mt-1">{EXPENSES_PAGE_SIZE} par page</span>
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                    className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg border border-white/10 py-2.5 text-xs font-medium text-neutral-300 disabled:opacity-40"
+                  >
+                    <ChevronLeft size={16} />
+                    Précédent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg border border-white/10 py-2.5 text-xs font-medium text-neutral-300 disabled:opacity-40"
+                  >
+                    Suivant
+                    <ChevronRight size={16} />
+                  </button>
                 </div>
               </div>
-            );
-          })}
+            )}
           </div>
         )}
       </div>
@@ -594,8 +1255,10 @@ export default function ExpenseTracker({
             <h3 className="text-sm font-semibold flex items-center gap-2">
               <CalendarClock size={16} className="text-emerald-400" /> Dépenses planifiées
             </h3>
-            <button onClick={() => setShowPlanModal(true)}
-              className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 transition-colors">
+            <button
+              onClick={openNewPlanModal}
+              className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 transition-colors"
+            >
               <Plus size={14} /> Planifier
             </button>
           </div>
@@ -684,8 +1347,10 @@ export default function ExpenseTracker({
       {/* Bouton planifier si aucune planification */}
       {pendingPlanned.length === 0 && executedPlanned.length === 0 && (
         <div className="mt-6">
-          <button onClick={() => setShowPlanModal(true)}
-            className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-6 text-center hover:bg-white/[0.04] transition-colors group">
+          <button
+            onClick={openNewPlanModal}
+            className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-6 text-center hover:bg-white/[0.04] transition-colors group"
+          >
             <CalendarClock size={28} className="mx-auto mb-2 text-neutral-500 group-hover:text-emerald-400 transition-colors" />
             <p className="text-sm text-neutral-500 group-hover:text-neutral-400">Planifier une dépense à venir</p>
           </button>
@@ -738,6 +1403,22 @@ export default function ExpenseTracker({
                     value={planForm.amount} onChange={(e) => setPlanForm({ ...planForm, amount: e.target.value })} />
                 </div>
               </div>
+              <AccountSelect
+                accounts={accountsWithBalance}
+                value={
+                  planForm.account_id > 0
+                    ? planForm.account_id
+                    : firstDebitAccountId ?? 0
+                }
+                onChange={(id) => setPlanForm({ ...planForm, account_id: id })}
+                label="Payer depuis (à l’exécution)"
+                filterType="debit"
+                excludeVault
+                debitAmount={
+                  Number(planForm.amount) > 0 ? Number(planForm.amount) : undefined
+                }
+                id="planned-expense-account"
+              />
               <div>
                 <label className="text-xs text-neutral-500 mb-1.5 block">Notes (optionnel)</label>
                 <input className="input-field" placeholder="Détails..."
@@ -757,11 +1438,11 @@ export default function ExpenseTracker({
       {/* Modal — Nouvelle dépense */}
       {showModal && (
         <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
+          className="fixed inset-0 flex items-center justify-center z-50 p-4"
           onClick={closeExpenseModal}
         >
           <div
-            className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up"
+            className="w-full max-w-md rounded-2xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl flex-shrink-0"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-5">
@@ -802,9 +1483,55 @@ export default function ExpenseTracker({
                 </div>
                 <div>
                   <label className="text-xs text-neutral-500 mb-1.5 block">Montant (FCFA)</label>
-                  <input type="number" className="input-field font-mono" placeholder="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+                  <input
+                    type="number"
+                    className="input-field font-mono"
+                    placeholder="0"
+                    value={form.amount}
+                    onChange={(e) => {
+                      const amt = e.target.value;
+                      const feePct = expenseModalFeePct;
+                      const suggested = feePct > 0 && amt ? Math.round(Number(amt) * feePct / 100) : "";
+                      setForm({ ...form, amount: amt, transaction_fee: String(suggested) });
+                    }}
+                  />
                 </div>
               </div>
+              <div>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Compte débité</label>
+                <select
+                  className="input-field"
+                  value={form.account_id || (firstDebitAccountId ? String(firstDebitAccountId) : "")}
+                  onChange={(e) => {
+                    const account_id = e.target.value;
+                    const nextId = account_id ? Number(account_id) : firstDebitAccountId;
+                    const accRow =
+                      expenseAccountOptions.find((a) => a.id === nextId) ?? expenseAccountOptions[0];
+                    const feePct = suggestedTransactionFeePercentFromAccount(accRow?.kind, accRow?.subtype);
+                    const suggested =
+                      feePct > 0 && form.amount ? Math.round((Number(form.amount) * feePct) / 100) : "";
+                    setForm({ ...form, account_id, transaction_fee: String(suggested) });
+                  }}
+                >
+                  {expenseAccountOptions.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+              {expenseModalFeePct > 0 && (
+                <div>
+                  <label className="text-xs text-neutral-500 mb-1.5 block">Frais de transaction (FCFA)</label>
+                  <input
+                    type="number"
+                    className="input-field font-mono"
+                    placeholder="0"
+                    min="0"
+                    value={form.transaction_fee}
+                    onChange={(e) => setForm({ ...form, transaction_fee: e.target.value })}
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">~{expenseModalFeePct}% du montant (selon le type de compte). Modifiable si tes frais diffèrent.</p>
+                </div>
+              )}
               <div>
                 <label className="text-xs text-neutral-500 mb-1.5 block">Notes (optionnel)</label>
                 <input className="input-field" placeholder="Notes..." value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
@@ -953,7 +1680,7 @@ function HistoryByPeriod({
         className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-4 flex items-center justify-between hover:bg-white/[0.04] transition-colors"
       >
         <span className="text-sm font-bold flex items-center gap-2">
-          <History size={16} className="text-emerald-400" /> Historique des dépenses
+          <History size={16} className="text-emerald-400" /> Dépenses variables (autre période)
         </span>
         <ChevronRight size={16} className={`text-neutral-500 transition-transform ${expanded ? "rotate-90" : ""}`} />
       </button>
@@ -1037,7 +1764,7 @@ function HistoryByPeriod({
                               <div className="text-[9px] text-neutral-500">{e.time}</div>
                             )}
                           </div>
-                          <span className="font-mono text-xs font-semibold text-red-300 shrink-0">-{formatCFA(e.amount)}</span>
+                          <span className="font-mono text-xs font-semibold text-red-300 shrink-0">-{formatCFA(e.amount + (e.transaction_fee ?? 0))}</span>
                         </div>
                       );
                     })}

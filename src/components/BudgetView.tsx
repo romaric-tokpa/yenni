@@ -29,6 +29,9 @@ interface BudgetData {
   totalFixed: number;
   totalExpenses: number;
   soldeNet: number;
+  soldeDisponibleLiquide: number;
+  totalActifsKpi: number;
+  totalTreasuryBalances: number;
   totalBudgetVar: number;
   totalMonthSpent: number;
   monthSaving: number;
@@ -146,6 +149,9 @@ export default function BudgetView({ budget }: { budget: BudgetData }) {
     totalFixed,
     totalExpenses,
     soldeNet,
+    soldeDisponibleLiquide,
+    totalActifsKpi,
+    totalTreasuryBalances,
     totalBudgetVar,
     totalMonthSpent,
     monthSaving,
@@ -187,6 +193,9 @@ export default function BudgetView({ budget }: { budget: BudgetData }) {
         totalExpenses,
         soldeNet,
         dailyBudget,
+        totalActifsKpi,
+        soldeDisponibleLiquide,
+        totalTreasuryBalances,
         totalSaved,
         totalProjectSaved,
         catSpending,

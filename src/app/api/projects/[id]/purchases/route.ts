@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/apiError";
+import { getSessionFromCookies } from "@/lib/auth";
 import {
   getProjectPurchases,
   addProjectPurchase,
@@ -42,8 +43,10 @@ export async function POST(
     if (!project || project.status !== "completed") {
       return NextResponse.json({ error: "Projet non trouvé ou non réalisé" }, { status: 400 });
     }
+    const session = await getSessionFromCookies();
+    if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
     const body = await req.json();
-    const { description, amount, date, expense_id } = body;
+    const { description, amount, date, expense_id, account_id } = body;
     if (!description || !amount || amount <= 0) {
       return NextResponse.json({ error: "Description et montant requis" }, { status: 400 });
     }
@@ -54,13 +57,23 @@ export async function POST(
         { status: 400 }
       );
     }
-    const purchase = await addProjectPurchase({
-      project_id: projectId,
-      description: String(description),
-      amount: Number(amount),
-      date: date || new Date().toISOString().split("T")[0],
-      expense_id: expense_id ?? null,
-    });
+    const expId = expense_id != null ? Number(expense_id) : null;
+    const acc =
+      account_id != null && account_id !== "" ? parseInt(String(account_id), 10) : NaN;
+    if ((!expId || expId <= 0) && (!Number.isFinite(acc) || acc <= 0)) {
+      return NextResponse.json({ error: "Compte requis (account_id) si aucune dépense liée" }, { status: 400 });
+    }
+    const purchase = await addProjectPurchase(
+      {
+        project_id: projectId,
+        description: String(description),
+        amount: Number(amount),
+        date: date || new Date().toISOString().split("T")[0],
+        expense_id: expId && expId > 0 ? expId : null,
+        account_id: Number.isFinite(acc) && acc > 0 ? acc : undefined,
+      },
+      session.userId,
+    );
     return NextResponse.json(purchase, { status: 201 });
   } catch (err) {
     console.error("[API ERROR]", err);

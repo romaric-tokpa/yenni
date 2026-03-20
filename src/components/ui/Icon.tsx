@@ -2,8 +2,9 @@
 import {
   Landmark, Shield, House, PiggyBank, Globe, Flame, Bus, Bot,
   Monitor, Paperclip, Utensils, Car, Shirt, PartyPopper, Users,
-  HeartPulse, Smartphone, BookOpen, Wrench, Target, Home, Truck,
+  HeartPulse, Smartphone, CreditCard, BookOpen, Wrench, Target, Home, Truck,
   Laptop, Plane, GraduationCap, Gem, Hospital, Package, Gift,
+  Banknote,
   CircleHelp,
   type LucideProps,
 } from "lucide-react";
@@ -27,6 +28,7 @@ const iconMap: Record<string, ComponentType<LucideProps>> = {
   users: Users,
   "heart-pulse": HeartPulse,
   smartphone: Smartphone,
+  "credit-card": CreditCard,
   "book-open": BookOpen,
   wrench: Wrench,
   target: Target,
@@ -39,6 +41,7 @@ const iconMap: Record<string, ComponentType<LucideProps>> = {
   hospital: Hospital,
   package: Package,
   gift: Gift,
+  banknote: Banknote,
 };
 
 interface IconProps extends LucideProps {

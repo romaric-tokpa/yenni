@@ -1,5 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { getModalHref } from "@/lib/modal";
 import { formatCFA } from "@/lib/constants";
 import { Plus, Trash2, X, ShoppingCart, Check, Pencil, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react";
 import Icon from "./ui/Icon";
@@ -28,25 +30,19 @@ export default function ShoppingListsView({
   showToast: (m: string, t?: string) => void;
   onPurchaseComplete?: () => void;
 }) {
+  const router = useRouter();
   const categories = config.categories ?? [];
   const defaultCategory = categories[0]?.id || "food";
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [itemsByList, setItemsByList] = useState<Record<number, ShoppingListItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
-  const [showAddListModal, setShowAddListModal] = useState(false);
   const [editingList, setEditingList] = useState<ShoppingList | null>(null);
-  const [showAddItemModal, setShowAddItemModal] = useState<ShoppingList | null>(null);
-  const [showPurchaseModal, setShowPurchaseModal] = useState<ShoppingListItem | null>(null);
   const [editingItem, setEditingItem] = useState<ShoppingListItem | null>(null);
-  const [purchaseAmount, setPurchaseAmount] = useState("");
 
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-  const [listForm, setListForm] = useState({ name: "", scheduled_date: "" });
-  const [itemForm, setItemForm] = useState({ name: "", estimated_amount: "", category: defaultCategory });
-
   const fetchLists = useCallback(async () => {
     try {
       const r = await fetch(`/api/shopping-lists?month=${selectedMonth}&year=${selectedYear}`);
@@ -87,89 +83,6 @@ export default function ShoppingListsView({
       else next.add(id);
       return next;
     });
-  };
-
-  const defaultScheduledDate = `${selectedYear}-${String(selectedMonth + 1).padStart(2, "0")}-15`;
-
-  const handleAddList = async () => {
-    if (!listForm.name || !listForm.scheduled_date) {
-      showToast("Nom et date requis", "error");
-      return;
-    }
-    try {
-      const r = await fetch("/api/shopping-lists", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(listForm),
-      });
-      if (r.ok) {
-        showToast("Liste créée !");
-        setListForm({ name: "", scheduled_date: "" });
-        setShowAddListModal(false);
-        await fetchLists();
-      } else {
-        const data = await r.json().catch(() => ({}));
-        showToast(data.error || "Erreur", "error");
-      }
-    } catch {
-      showToast("Erreur réseau", "error");
-    }
-  };
-
-  const handleAddItem = async () => {
-    if (!showAddItemModal) return;
-    if (!itemForm.name || itemForm.estimated_amount === "" || Number(itemForm.estimated_amount) < 0) {
-      showToast("Nom et budget requis", "error");
-      return;
-    }
-    try {
-      const r = await fetch(`/api/shopping-lists/${showAddItemModal.id}/items`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: itemForm.name,
-          estimated_amount: Number(itemForm.estimated_amount),
-          category: itemForm.category,
-        }),
-      });
-      if (r.ok) {
-        showToast("Article ajouté !");
-        setItemForm({ name: "", estimated_amount: "", category: defaultCategory });
-        setShowAddItemModal(null);
-        await fetchItems(showAddItemModal.id);
-      } else {
-        showToast("Erreur", "error");
-      }
-    } catch {
-      showToast("Erreur réseau", "error");
-    }
-  };
-
-  const handlePurchase = async () => {
-    if (!showPurchaseModal) return;
-    const amount = Number(purchaseAmount);
-    if (isNaN(amount) || amount < 0) {
-      showToast("Montant invalide", "error");
-      return;
-    }
-    try {
-      const r = await fetch(`/api/shopping-lists/${showPurchaseModal.list_id}/items/${showPurchaseModal.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "purchase", actual_amount: amount }),
-      });
-      if (r.ok) {
-        showToast("Achat enregistré ! Dépense créée.");
-        setShowPurchaseModal(null);
-        setPurchaseAmount("");
-        await fetchItems(showPurchaseModal.list_id);
-        onPurchaseComplete?.();
-      } else {
-        showToast("Erreur", "error");
-      }
-    } catch {
-      showToast("Erreur réseau", "error");
-    }
   };
 
   const handleUpdateItem = async (listId: number, itemId: number, updates: Partial<ShoppingListItem>) => {
@@ -271,7 +184,7 @@ export default function ShoppingListsView({
               ))}
             </select>
             <button
-          onClick={() => { setShowAddListModal(true); setListForm({ name: "", scheduled_date: defaultScheduledDate }); }}
+          onClick={() => router.push(getModalHref({ type: "new-shopping-list", returnTo: "/shopping-lists" }))}
           className="btn-primary px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 shrink-0"
         >
           <Plus size={18} strokeWidth={2.5} />
@@ -286,7 +199,7 @@ export default function ShoppingListsView({
           <ShoppingCart size={48} className="mx-auto mb-3 opacity-80" />
           <p className="text-sm">Aucune liste de courses</p>
           <button
-            onClick={() => { setShowAddListModal(true); setListForm({ name: "", scheduled_date: defaultScheduledDate }); }}
+            onClick={() => router.push(getModalHref({ type: "new-shopping-list", returnTo: "/shopping-lists" }))}
             className="mt-4 btn-primary px-5 py-2.5 rounded-lg text-sm font-medium inline-flex items-center gap-2"
           >
             <Plus size={16} />
@@ -322,7 +235,7 @@ export default function ShoppingListsView({
                   </div>
                   <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={(e) => { e.stopPropagation(); setShowAddItemModal(list); setItemForm({ name: "", estimated_amount: "", category: defaultCategory }); }}
+                      onClick={(e) => { e.stopPropagation(); router.push(getModalHref({ type: "new-shopping-item", returnTo: "/shopping-lists", listId: String(list.id), listName: list.name })); }}
                       className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 text-xs font-medium flex items-center gap-1"
                     >
                       <Plus size={14} />
@@ -363,7 +276,7 @@ export default function ShoppingListsView({
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
                                 <button
-                                  onClick={() => { setShowPurchaseModal(item); setPurchaseAmount(""); }}
+                                  onClick={() => router.push(getModalHref({ type: "purchase-shopping", returnTo: "/shopping-lists", listId: String(list.id), itemId: String(item.id) }))}
                                   className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-1"
                                 >
                                   <Check size={14} />
@@ -424,7 +337,7 @@ export default function ShoppingListsView({
 
                     {items.length === 0 && (
                       <p className="text-center text-slate-500 text-sm py-4">
-                        Aucun article. <button onClick={() => { setShowAddItemModal(list); setItemForm({ name: "", estimated_amount: "", category: defaultCategory }); }} className="text-amber-400 hover:underline">Ajouter</button>
+                        Aucun article. <button onClick={() => router.push(getModalHref({ type: "new-shopping-item", returnTo: "/shopping-lists", listId: String(list.id), listName: list.name }))} className="text-amber-400 hover:underline">Ajouter</button>
                       </p>
                     )}
 
@@ -441,104 +354,6 @@ export default function ShoppingListsView({
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Modal Nouvelle liste */}
-      {showAddListModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowAddListModal(false)}>
-          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-5">
-              <h2 className="text-base font-bold flex items-center gap-2">
-                <ShoppingCart size={18} className="text-amber-400" />
-                Nouvelle liste
-              </h2>
-              <button onClick={() => setShowAddListModal(false)} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
-            </div>
-            <div className="grid gap-4">
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Nom de la liste *</label>
-                <input className="input-field" placeholder="Ex: Course nourriture, Course maison" value={listForm.name} onChange={(e) => setListForm({ ...listForm, name: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Date prévue *</label>
-                <input type="date" className="input-field" value={listForm.scheduled_date} onChange={(e) => setListForm({ ...listForm, scheduled_date: e.target.value })} />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowAddListModal(false)} className="flex-1 min-h-[44px] py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium">Annuler</button>
-              <button onClick={handleAddList} className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
-                <Plus size={16} /> Créer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Ajouter article */}
-      {showAddItemModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowAddItemModal(null)}>
-          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-5">
-              <h2 className="text-base font-bold flex items-center gap-2">
-                <Plus size={18} className="text-amber-400" />
-                Ajouter un article — {showAddItemModal.name}
-              </h2>
-              <button onClick={() => setShowAddItemModal(null)} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
-            </div>
-            <div className="grid gap-4">
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Article *</label>
-                <input className="input-field" placeholder="Ex: Riz, Lait, Pain" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Catégorie *</label>
-                <select className="input-field" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })}>
-                  {categories.length === 0 ? <option value="food">Alimentation</option> : categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-neutral-500 mb-1.5 block">Budget prévu (FCFA) *</label>
-                <input type="number" className="input-field font-mono" placeholder="0" value={itemForm.estimated_amount} onChange={(e) => setItemForm({ ...itemForm, estimated_amount: e.target.value })} />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowAddItemModal(null)} className="flex-1 min-h-[44px] py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium">Annuler</button>
-              <button onClick={handleAddItem} className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
-                <Plus size={16} /> Ajouter
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Marquer acheté */}
-      {showPurchaseModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowPurchaseModal(null)}>
-          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-xl popup-panel p-6 sm:p-8 max-h-[90dvh] overflow-y-auto shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-5">
-              <h2 className="text-base font-bold flex items-center gap-2">
-                <Check size={18} className="text-emerald-400" />
-                Marquer comme acheté
-              </h2>
-              <button onClick={() => setShowPurchaseModal(null)} className="text-neutral-400 hover:text-white p-1"><X size={20} /></button>
-            </div>
-            <p className="text-sm text-slate-400 mb-4">{showPurchaseModal.name}</p>
-            <p className="text-xs text-slate-500 mb-2">Budget prévu : {formatCFA(showPurchaseModal.estimated_amount)}</p>
-            <div>
-              <label className="text-xs text-neutral-500 mb-1.5 block">Prix réel d&apos;achat *</label>
-              <input type="number" className="input-field font-mono" placeholder="0" value={purchaseAmount} onChange={(e) => setPurchaseAmount(e.target.value)} />
-            </div>
-            <p className="text-[10px] text-slate-500 mt-2">Une dépense sera créée et comptabilisée.</p>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowPurchaseModal(null)} className="flex-1 min-h-[44px] py-3 rounded-lg border border-white/10 text-neutral-400 hover:text-white text-sm font-medium">Annuler</button>
-              <button onClick={handlePurchase} className="btn-primary flex-1 min-h-[44px] py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
-                <Check size={16} /> Enregistrer
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

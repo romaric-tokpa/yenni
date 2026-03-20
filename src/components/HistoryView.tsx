@@ -1,7 +1,13 @@
 "use client";
 import { useState, useMemo, useCallback } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { formatCFA, MONTHS_FULL, MONTHS_SHORT, getSelectableYears } from "@/lib/constants";
+import {
+  formatCFA,
+  MONTHS_FULL,
+  MONTHS_SHORT,
+  getSelectableYears,
+  INCOME_SOURCE_SALARY_SETTINGS,
+} from "@/lib/constants";
 
 const fetcher = (url: string) => fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : Promise.reject(new Error("Fetch failed"))));
 import { Expense, Income, FixedChargePayment, LoanPayment, Loan, Project, PlannedExpense, WishListItem, ShoppingListItem } from "@/lib/types";
@@ -177,7 +183,7 @@ export default function HistoryView() {
 
     expenses.forEach((e) => items.push({
       id: `exp-${e.id}`, date: e.date, time: e.time,
-      description: e.description, amount: e.amount,
+      description: e.description, amount: e.amount + (e.transaction_fee ?? 0),
       type: "expense", detail: e.category, sign: "out",
     }));
 
@@ -219,12 +225,19 @@ export default function HistoryView() {
         }
         const salAmt = salaries[m] || 0;
         if (salAmt > 0) {
-          const dateStr = `${year}-${String(m + 1).padStart(2, "0")}-01`;
-          items.push({
-            id: `sal-${m}`, date: dateStr, time: "00:00",
-            description: `Salaire net ${MONTHS_SHORT[m]}`,
-            amount: salAmt, type: "income", detail: "salaire", sign: "in",
+          const hasSyncedSalaryIncome = incomes.some((i) => {
+            if (i.source !== INCOME_SOURCE_SALARY_SETTINGS) return false;
+            const parts = i.date.split("-").map(Number);
+            return parts[0] === year && parts[1] === m + 1;
           });
+          if (!hasSyncedSalaryIncome) {
+            const dateStr = `${year}-${String(m + 1).padStart(2, "0")}-01`;
+            items.push({
+              id: `sal-${m}`, date: dateStr, time: "00:00",
+              description: `Salaire net ${MONTHS_SHORT[m]}`,
+              amount: salAmt, type: "income", detail: "salaire", sign: "in",
+            });
+          }
         }
         const othAmt = otherIncomes[m] || 0;
         if (othAmt > 0) {

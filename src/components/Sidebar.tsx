@@ -6,7 +6,7 @@ import { formatCFA } from "@/lib/constants";
 import Avatar from "./ui/Avatar";
 import {
   LayoutDashboard,
-  Receipt,
+  ArrowRightLeft,
   CalendarDays,
   PieChart,
   Landmark,
@@ -23,7 +23,7 @@ import {
 
 const tabs = [
   { href: "/dashboard", label: "Accueil", Icon: LayoutDashboard },
-  { href: "/expenses", label: "Dépenses", Icon: Receipt },
+  { href: "/transactions", label: "Transactions", Icon: ArrowRightLeft },
   { href: "/calendar", label: "Calendrier", Icon: CalendarDays },
   { href: "/budget", label: "Budget", Icon: PieChart },
   { href: "/savings", label: "Épargne", Icon: Landmark },
@@ -62,23 +62,25 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
 
         <nav className="flex flex-col gap-1 shrink-0">
           {tabs.map(({ href, label, Icon }) => {
-            const active = pathname === href;
+            const active =
+              pathname === href || (href === "/settings" && pathname.startsWith("/settings"));
             return (
               <Link
                 key={href}
                 href={href}
                 prefetch={false}
                 title={collapsed ? label : undefined}
-                className={`relative flex items-center ${collapsed ? "justify-center px-2" : "gap-3 px-3"} py-2.5 rounded-lg text-[13px] font-medium transition-all
+                aria-current={active ? "page" : undefined}
+                className={`relative flex items-center min-h-[44px] ${collapsed ? "justify-center px-2" : "gap-3 px-3"} py-2 rounded-xl text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]
                   ${active
-                    ? "bg-emerald-500/15 text-emerald-400"
-                    : "text-neutral-500 hover:bg-white/5 hover:text-neutral-300"
+                    ? "bg-emerald-500/[0.12] text-emerald-400 shadow-[inset_0_0_0_1px_rgba(34,197,94,0.15)]"
+                    : "text-neutral-500 hover:bg-white/[0.04] hover:text-neutral-200"
                   }`}
               >
                 {active && (
-                  <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-emerald-500" />
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-[3px] rounded-r-full bg-emerald-500" />
                 )}
-                <Icon size={18} className="shrink-0" strokeWidth={2} />
+                <Icon size={18} className="shrink-0 opacity-90" strokeWidth={2} aria-hidden />
                 {!collapsed && <span className="truncate">{label}</span>}
               </Link>
             );
@@ -90,12 +92,17 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
       <div className={`flex-shrink-0 pt-4 border-t border-white/5 ${collapsed ? "space-y-2" : "space-y-3"}`}>
         <div className={`rounded-lg border border-white/5 bg-white/[0.02] ${collapsed ? "p-2 text-center" : "p-3"}`}>
           {collapsed ? (
-            <div className="font-mono text-xs font-bold text-emerald-400" title={`${formatCFA(dailyBudget)} / jour`}>
+            <div
+              className="font-mono text-xs font-bold text-emerald-400"
+              title={`${formatCFA(dailyBudget)} / jour (liquide espèces + Mobile Money)`}
+            >
               {formatCFA(dailyBudget)}
             </div>
           ) : (
             <>
-              <div className="text-[10px] text-neutral-500 mb-0.5">Budget / jour</div>
+              <div className="text-[10px] text-neutral-500 mb-0.5" title="Espèces + Mobile Money, divisé par les jours restants du mois">
+                Budget / jour
+              </div>
               <div className="font-mono text-base font-bold text-emerald-400">{formatCFA(dailyBudget)}</div>
             </>
           )}
@@ -112,9 +119,10 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
             )}
           </div>
           <button
+            type="button"
             onClick={onLogout}
             title="Déconnexion"
-            className="p-1.5 rounded-lg text-neutral-500 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0"
+            className="p-2 rounded-lg text-neutral-500 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0 min-w-[40px] min-h-[40px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50"
           >
             <LogOut size={14} strokeWidth={2} />
           </button>
@@ -131,14 +139,16 @@ export default function Sidebar({ dailyBudget, user, onLogout }: { dailyBudget: 
       <div className={`hidden lg:block shrink-0 ${widthClass} transition-all duration-200`} aria-hidden />
       {/* Sidebar fixe : ne défile pas, footer toujours visible */}
       <aside
-        className={`hidden lg:flex flex-col fixed top-0 left-0 h-screen p-3 transition-all duration-200 bg-[#171717] border-r border-white/5 z-30 ${widthClass}`}
+        className={`hidden lg:flex flex-col fixed top-0 left-0 h-screen p-3 transition-[width] duration-200 bg-[var(--bg-surface)] border-r border-white/[0.06] z-30 shadow-[4px_0_24px_rgba(0,0,0,0.25)] ${widthClass}`}
       >
         <button
+          type="button"
           onClick={() => setCollapsed(!collapsed)}
-          className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-[#171717] border border-white/10 flex items-center justify-center text-neutral-500 hover:text-white hover:border-white/20 shadow-lg transition-colors"
-          title={collapsed ? "Agrandir" : "Réduire"}
+          className="absolute -right-3 top-6 z-10 w-7 h-7 rounded-full bg-[var(--bg-surface)] border border-white/12 flex items-center justify-center text-neutral-400 hover:text-white hover:border-emerald-500/30 shadow-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+          title={collapsed ? "Agrandir le menu" : "Réduire le menu"}
+          aria-expanded={!collapsed}
         >
-          {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+          {collapsed ? <ChevronRight size={14} strokeWidth={2.5} /> : <ChevronLeft size={14} strokeWidth={2.5} />}
         </button>
         {navContent}
       </aside>

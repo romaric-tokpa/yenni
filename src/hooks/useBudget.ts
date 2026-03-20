@@ -1,8 +1,16 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+
+/** Synchronisation des comptes entre onglets (même origine). */
+const ACCOUNTS_BROADCAST_CHANNEL = "monbudget-accounts-sync-v1";
 import { mutate } from "swr";
-import { BudgetConfig, Expense, Income, Project, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput } from "@/lib/types";
-import { DEFAULT_CONFIG } from "@/lib/constants";
+import { BudgetConfig, Expense, Income, Project, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput, AccountWithBalance } from "@/lib/types";
+import {
+  DEFAULT_CONFIG,
+  INCOME_SOURCE_SALARY_SETTINGS,
+  sumActiveAccountBalances,
+  sumLiquideCashAndMobileMoney,
+} from "@/lib/constants";
 
 /** Invalide le cache de l'historique pour forcer un rafraîchissement */
 function invalidateHistoryCache() {
@@ -33,16 +41,24 @@ export function useBudget() {
   const [totalSavedManualCumulative, setTotalSavedManualCumulative] = useState(0);
   const [savedInPeriod, setSavedInPeriod] = useState<number | null>(null);
   const [salaries, setSalaries] = useState<number[]>(Array(12).fill(0));
+  /** Compte de versement du salaire par mois (0–11), année = selectedYear */
+  const [salaryAccountIds, setSalaryAccountIds] = useState<(number | null)[]>(() => Array(12).fill(null));
   const [otherIncomes, setOtherIncomes] = useState<number[]>(Array(12).fill(0));
   const [projects, setProjects] = useState<Project[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loanPayments, setLoanPayments] = useState<LoanPayment[]>([]);
   const [plannedExpenses, setPlannedExpenses] = useState<PlannedExpense[]>([]);
+  /** Soldes tels que renvoyés par l’API (écritures par compte) */
+  const [accountsFromApi, setAccountsFromApi] = useState<AccountWithBalance[]>([]);
   const [monthProjectFunds, setMonthProjectFunds] = useState(0);
   const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>({});
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(true);
+  /** Incrémenté après chaque rechargement des comptes (sauf tout premier chargement) — pour réagir côté UI (ex. mouvements). */
+  const [accountsRevision, setAccountsRevision] = useState(0);
+  const accountsHydratedRef = useRef(false);
+  const lastAccountsBroadcastTsRef = useRef(0);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -115,8 +131,26 @@ export function useBudget() {
   const fetchSalaries = useCallback(async () => {
     try {
       const r = await fetch(`/api/salaries?year=${selectedYear}`);
-      if (r.ok) setSalaries(await r.json());
-    } catch { /* ignore */ }
+      if (!r.ok) return;
+      const data = await r.json();
+      if (data && Array.isArray(data.amounts) && Array.isArray(data.accountIds)) {
+        const amounts = data.amounts.map((x: unknown) => Number(x) || 0);
+        const ids = (data.accountIds as unknown[]).map((x) =>
+          x == null || x === "" ? null : Number(x),
+        ) as (number | null)[];
+        while (amounts.length < 12) amounts.push(0);
+        while (ids.length < 12) ids.push(null);
+        setSalaries(amounts.slice(0, 12));
+        setSalaryAccountIds(ids.slice(0, 12));
+      } else if (Array.isArray(data)) {
+        const arr = data.map((x: unknown) => Number(x) || 0);
+        while (arr.length < 12) arr.push(0);
+        setSalaries(arr.slice(0, 12));
+        setSalaryAccountIds(Array(12).fill(null));
+      }
+    } catch {
+      /* ignore */
+    }
   }, [selectedYear]);
 
   const fetchOtherIncomes = useCallback(async () => {
@@ -180,6 +214,69 @@ export function useBudget() {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchAccounts = useCallback(async (opts?: { fromBroadcast?: boolean }) => {
+    try {
+      const r = await fetch("/api/accounts");
+      if (r.ok) {
+        const data = await r.json();
+        setAccountsFromApi(Array.isArray(data) ? data : []);
+        if (accountsHydratedRef.current) {
+          setAccountsRevision((v) => v + 1);
+        } else {
+          accountsHydratedRef.current = true;
+        }
+        if (!opts?.fromBroadcast && typeof BroadcastChannel !== "undefined") {
+          try {
+            const ts = Date.now();
+            lastAccountsBroadcastTsRef.current = ts;
+            const bc = new BroadcastChannel(ACCOUNTS_BROADCAST_CHANNEL);
+            bc.postMessage({ type: "accounts-invalidate", ts });
+            bc.close();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  /** Autres onglets : recharger les comptes sans rebroadcaster (évite les boucles). */
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const bc = new BroadcastChannel(ACCOUNTS_BROADCAST_CHANNEL);
+    const handler = (ev: MessageEvent<{ type?: string; ts?: number }>) => {
+      const d = ev.data;
+      if (d?.type !== "accounts-invalidate") return;
+      if (d.ts === lastAccountsBroadcastTsRef.current) return;
+      void fetchAccounts({ fromBroadcast: true });
+    };
+    bc.addEventListener("message", handler);
+    return () => {
+      bc.removeEventListener("message", handler);
+      bc.close();
+    };
+  }, [fetchAccounts]);
+
+  /** Retour sur l’onglet / l’app : resynchroniser les soldes comptes. */
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        t = null;
+        void fetchAccounts({ fromBroadcast: true });
+      }, 350);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      if (t) clearTimeout(t);
+    };
+  }, [fetchAccounts]);
+
   useEffect(() => {
     Promise.all([
       fetchConfig(),
@@ -195,8 +292,9 @@ export function useBudget() {
       fetchLoans(),
       fetchLoanPayments(),
       fetchPlannedExpenses(),
+      fetchAccounts(),
     ]).then(() => setLoading(false));
-  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchOtherIncomes, fetchProjects, fetchMonthProjectFunds, fetchCategoryBudgets, fetchLoans, fetchLoanPayments, fetchPlannedExpenses]);
+  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchOtherIncomes, fetchProjects, fetchMonthProjectFunds, fetchCategoryBudgets, fetchLoans, fetchLoanPayments, fetchPlannedExpenses, fetchAccounts]);
 
   useEffect(() => {
     fetchExpenses();
@@ -233,9 +331,10 @@ export function useBudget() {
       fetchLoans(),
       fetchLoanPayments(),
       fetchPlannedExpenses(),
+      fetchAccounts(),
     ]);
     await fetchSavedInPeriod();
-  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchOtherIncomes, fetchProjects, fetchMonthProjectFunds, fetchCategoryBudgets, fetchLoans, fetchLoanPayments, fetchPlannedExpenses, fetchSavedInPeriod]);
+  }, [fetchConfig, fetchExpenses, fetchIncomes, fetchFixedPayments, fetchSavings, fetchSalaries, fetchOtherIncomes, fetchProjects, fetchMonthProjectFunds, fetchCategoryBudgets, fetchLoans, fetchLoanPayments, fetchPlannedExpenses, fetchAccounts, fetchSavedInPeriod]);
 
   const updateCategoryBudget = useCallback(
     async (categoryId: string, amount: number) => {
@@ -266,22 +365,22 @@ export function useBudget() {
         body: JSON.stringify(exp),
       });
       if (r.ok) {
-        await fetchExpenses();
+        await Promise.all([fetchExpenses(), fetchAccounts()]);
         invalidateHistoryCache();
         return true;
       }
       return false;
     },
-    [fetchExpenses]
+    [fetchExpenses, fetchAccounts]
   );
 
   const removeExpense = useCallback(async (id: number) => {
     const r = await fetch(`/api/expenses?id=${id}`, { method: "DELETE" });
     if (r.ok) {
-      await Promise.all([fetchExpenses(), fetchPlannedExpenses(), fetchLoans(), fetchLoanPayments()]);
+      await Promise.all([fetchExpenses(), fetchPlannedExpenses(), fetchLoans(), fetchLoanPayments(), fetchAccounts()]);
       invalidateHistoryCache();
     }
-  }, [fetchExpenses, fetchPlannedExpenses, fetchLoans, fetchLoanPayments]);
+  }, [fetchExpenses, fetchPlannedExpenses, fetchLoans, fetchLoanPayments, fetchAccounts]);
 
   const updateExpense = useCallback(
     async (id: number, updates: Partial<Omit<Expense, "id" | "created_at">>) => {
@@ -291,13 +390,13 @@ export function useBudget() {
         body: JSON.stringify({ id, ...updates }),
       });
       if (r.ok) {
-        await fetchExpenses();
+        await Promise.all([fetchExpenses(), fetchAccounts()]);
         invalidateHistoryCache();
         return true;
       }
       return false;
     },
-    [fetchExpenses]
+    [fetchExpenses, fetchAccounts]
   );
 
   const addIncome = useCallback(
@@ -308,22 +407,22 @@ export function useBudget() {
         body: JSON.stringify(inc),
       });
       if (r.ok) {
-        await fetchIncomes();
+        await Promise.all([fetchIncomes(), fetchAccounts()]);
         invalidateHistoryCache();
         return true;
       }
       return false;
     },
-    [fetchIncomes]
+    [fetchIncomes, fetchAccounts]
   );
 
   const removeIncome = useCallback(async (id: number) => {
     const r = await fetch(`/api/incomes?id=${id}`, { method: "DELETE" });
     if (r.ok) {
-      await Promise.all([fetchIncomes(), fetchLoans(), fetchLoanPayments()]);
+      await Promise.all([fetchIncomes(), fetchLoans(), fetchLoanPayments(), fetchAccounts()]);
       invalidateHistoryCache();
     }
-  }, [fetchIncomes, fetchLoans, fetchLoanPayments]);
+  }, [fetchIncomes, fetchLoans, fetchLoanPayments, fetchAccounts]);
 
   const addFixedPayment = useCallback(
     async (p: Omit<FixedChargePayment, "id" | "created_at">) => {
@@ -333,13 +432,13 @@ export function useBudget() {
         body: JSON.stringify(p),
       });
       if (r.ok) {
-        await fetchFixedPayments();
+        await Promise.all([fetchFixedPayments(), fetchAccounts()]);
         invalidateHistoryCache();
         return true;
       }
       return false;
     },
-    [fetchFixedPayments]
+    [fetchFixedPayments, fetchAccounts]
   );
 
   const removeFixedPayment = useCallback(async (id: number) => {
@@ -355,7 +454,9 @@ export function useBudget() {
       l: Omit<Loan, "id" | "created_at">,
       isExisting = false,
       monthsPaid = 0,
-      schedule?: LoanScheduleInput[]
+      schedule?: LoanScheduleInput[],
+      /** Si true, ne crée pas la dépense/revenu initial (ex: monnaie laissée chez le commerçant) */
+      skipInitialTransaction = false
     ): Promise<Loan | false> => {
       const r = await fetch("/api/loans", {
         method: "POST",
@@ -392,7 +493,7 @@ export function useBudget() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ batch: true, loan_id: newLoan.id, payments }),
       });
-    } else if (!isExisting) {
+    } else if (!isExisting && !skipInitialTransaction) {
       const now = new Date();
       const date = l.start_date || now.toISOString().split("T")[0];
       const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -407,6 +508,7 @@ export function useBudget() {
             category: "misc",
             amount: l.total_amount,
             notes: `Prêt personnel: ${l.label}`,
+            account_id: l.payment_account_id ?? undefined,
           }),
         });
         await fetchExpenses();
@@ -422,17 +524,18 @@ export function useBudget() {
             source: "other",
             amount: l.total_amount,
             notes: l.type === "bank" ? `Prêt bancaire: ${l.label}` : `Emprunt personnel: ${l.label}`,
+            account_id: l.payment_account_id ?? undefined,
           }),
         });
         await fetchIncomes();
       }
     }
 
-    await Promise.all([fetchLoans(), fetchLoanPayments()]);
+    await Promise.all([fetchLoans(), fetchLoanPayments(), fetchAccounts()]);
     invalidateHistoryCache();
     return newLoan;
   },
-    [fetchLoans, fetchLoanPayments, fetchExpenses, fetchIncomes]
+    [fetchLoans, fetchLoanPayments, fetchExpenses, fetchIncomes, fetchAccounts]
   );
 
   const updateLoan = useCallback(async (id: number, updates: Partial<Loan>) => {
@@ -461,33 +564,52 @@ export function useBudget() {
     }
   }, [fetchLoans, fetchLoanPayments]);
 
-  const addLoanPayment = useCallback(async (p: Omit<LoanPayment, "id" | "created_at">) => {
-    const r = await fetch("/api/loan-payments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+  const addLoanPayment = useCallback(async (p: Omit<LoanPayment, "id" | "created_at">, opts?: { accountId?: number }) => {
+    const body = { ...p, ...(opts?.accountId != null ? { account_id: opts.accountId } : {}) };
+    const r = await fetch("/api/loan-payments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (r.ok) {
-      await Promise.all([fetchLoanPayments(), fetchLoans(), fetchExpenses(), fetchIncomes()]);
+      await Promise.all([
+        fetchLoanPayments(),
+        fetchLoans(),
+        fetchExpenses(),
+        fetchIncomes(),
+        fetchAccounts(),
+      ]);
       invalidateHistoryCache();
       return true;
     }
     return false;
-  }, [fetchLoanPayments, fetchLoans, fetchExpenses, fetchIncomes]);
+  }, [fetchLoanPayments, fetchLoans, fetchExpenses, fetchIncomes, fetchAccounts]);
 
   const updateLoanPayment = useCallback(async (id: number, updates: Partial<Pick<LoanPayment, "amount" | "fees" | "date" | "time" | "notes">>) => {
     const r = await fetch(`/api/loan-payments?id=${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates) });
     if (r.ok) {
-      await Promise.all([fetchLoanPayments(), fetchLoans(), fetchExpenses(), fetchIncomes()]);
+      await Promise.all([
+        fetchLoanPayments(),
+        fetchLoans(),
+        fetchExpenses(),
+        fetchIncomes(),
+        fetchAccounts(),
+      ]);
       invalidateHistoryCache();
       return true;
     }
     return false;
-  }, [fetchLoanPayments, fetchLoans, fetchExpenses, fetchIncomes]);
+  }, [fetchLoanPayments, fetchLoans, fetchExpenses, fetchIncomes, fetchAccounts]);
 
   const removeLoanPayment = useCallback(async (id: number) => {
     const r = await fetch(`/api/loan-payments?id=${id}`, { method: "DELETE" });
     if (r.ok) {
-      await Promise.all([fetchLoanPayments(), fetchLoans(), fetchExpenses(), fetchIncomes()]);
+      await Promise.all([
+        fetchLoanPayments(),
+        fetchLoans(),
+        fetchExpenses(),
+        fetchIncomes(),
+        fetchAccounts(),
+      ]);
       invalidateHistoryCache();
     }
-  }, [fetchLoanPayments, fetchLoans, fetchExpenses, fetchIncomes]);
+  }, [fetchLoanPayments, fetchLoans, fetchExpenses, fetchIncomes, fetchAccounts]);
 
   const fetchSchedule = useCallback(async (loanId: number): Promise<LoanScheduleRow[]> => {
     const r = await fetch(`/api/loan-schedule?loan_id=${loanId}`);
@@ -503,13 +625,13 @@ export function useBudget() {
         body: JSON.stringify({ loan_id: loanId, number, action: "pay", note, amount }),
       });
       if (r.ok) {
-        await Promise.all([fetchLoans(), fetchLoanPayments(), fetchExpenses()]);
+        await Promise.all([fetchLoans(), fetchLoanPayments(), fetchExpenses(), fetchAccounts()]);
         invalidateHistoryCache();
         return true;
       }
       return false;
     },
-    [fetchLoans, fetchLoanPayments, fetchExpenses]
+    [fetchLoans, fetchLoanPayments, fetchExpenses, fetchAccounts]
   );
 
   const markScheduleUnpaid = useCallback(
@@ -520,13 +642,13 @@ export function useBudget() {
         body: JSON.stringify({ loan_id: loanId, number, action: "unpay" }),
       });
       if (r.ok) {
-        await Promise.all([fetchLoans(), fetchLoanPayments(), fetchExpenses()]);
+        await Promise.all([fetchLoans(), fetchLoanPayments(), fetchExpenses(), fetchAccounts()]);
         invalidateHistoryCache();
         return true;
       }
       return false;
     },
-    [fetchLoans, fetchLoanPayments, fetchExpenses]
+    [fetchLoans, fetchLoanPayments, fetchExpenses, fetchAccounts]
   );
 
   const updateScheduleRow = useCallback(
@@ -541,13 +663,13 @@ export function useBudget() {
         body: JSON.stringify({ loan_id: loanId, number, action: "update", updates }),
       });
       if (r.ok) {
-        await Promise.all([fetchLoans(), fetchExpenses()]);
+        await Promise.all([fetchLoans(), fetchExpenses(), fetchAccounts()]);
         invalidateHistoryCache();
         return r.json();
       }
       return null;
     },
-    [fetchLoans, fetchExpenses]
+    [fetchLoans, fetchExpenses, fetchAccounts]
   );
 
   const addPlannedExpense = useCallback(async (p: Omit<PlannedExpense, "id" | "created_at" | "expense_id">) => {
@@ -579,18 +701,18 @@ export function useBudget() {
   const executePlannedExpense = useCallback(async (id: number) => {
     const r = await fetch(`/api/planned-expenses?execute_id=${id}`);
     if (r.ok) {
-      await Promise.all([fetchPlannedExpenses(), fetchExpenses()]);
+      await Promise.all([fetchPlannedExpenses(), fetchExpenses(), fetchAccounts()]);
       invalidateHistoryCache();
       return true;
     }
     return false;
-  }, [fetchPlannedExpenses, fetchExpenses]);
+  }, [fetchPlannedExpenses, fetchExpenses, fetchAccounts]);
 
   const executeAllDuePlanned = useCallback(async () => {
     await fetch("/api/planned-expenses?execute=true");
-    await Promise.all([fetchPlannedExpenses(), fetchExpenses()]);
+    await Promise.all([fetchPlannedExpenses(), fetchExpenses(), fetchAccounts()]);
     invalidateHistoryCache();
-  }, [fetchPlannedExpenses, fetchExpenses]);
+  }, [fetchPlannedExpenses, fetchExpenses, fetchAccounts]);
 
   const updateConfig = useCallback(
     async (newConfig: BudgetConfig) => {
@@ -606,34 +728,61 @@ export function useBudget() {
 
   const updateSaving = useCallback(
     async (month: number, amount: number) => {
-      const ns = [...savings];
-      ns[month] = amount;
-      setSavings(ns);
-      await fetch("/api/savings", {
+      let previous = 0;
+      setSavings((prev) => {
+        previous = prev[month] ?? 0;
+        const ns = [...prev];
+        ns[month] = amount;
+        return ns;
+      });
+      const r = await fetch("/api/savings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month, year: selectedYear, amount }),
       });
-      await fetchSavings();
-      await fetchSavedInPeriod();
+      if (!r.ok) {
+        setSavings((prev) => {
+          const ns = [...prev];
+          ns[month] = previous;
+          return ns;
+        });
+        return;
+      }
+      await Promise.all([fetchSavings(), fetchSavedInPeriod(), fetchAccounts()]);
       invalidateHistoryCache();
     },
-    [savings, selectedYear, fetchSavings, fetchSavedInPeriod]
+    [selectedYear, fetchSavings, fetchSavedInPeriod, fetchAccounts]
   );
 
   const updateSalary = useCallback(
-    async (month: number, amount: number) => {
+    async (month: number, amount: number, accountOverride?: number | null) => {
+      const year = selectedYear ?? new Date().getFullYear();
+      const accountId =
+        accountOverride !== undefined ? accountOverride : salaryAccountIds[month] ?? null;
       const ns = [...salaries];
       ns[month] = amount;
       setSalaries(ns);
-      await fetch("/api/salaries", {
+      if (accountOverride !== undefined) {
+        const na = [...salaryAccountIds];
+        na[month] = accountOverride;
+        setSalaryAccountIds(na);
+      }
+      const r = await fetch("/api/salaries", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month, year: selectedYear, amount }),
+        body: JSON.stringify({
+          month,
+          year,
+          amount: Math.max(0, amount),
+          account_id: accountId,
+        }),
       });
+      if (r.ok) {
+        await Promise.all([fetchIncomes(), fetchAccounts()]);
+      }
       invalidateHistoryCache();
     },
-    [salaries, selectedYear]
+    [salaries, salaryAccountIds, selectedYear, fetchIncomes, fetchAccounts]
   );
 
   const updateOtherIncome = useCallback(
@@ -698,8 +847,13 @@ export function useBudget() {
 
   // Revenus saisis (hors fonds projet : ceux-ci sont prélevés du solde, comme l'épargne)
   const totalMonthIncomes = useMemo(
-    () => incomes.filter((i) => i.source !== "project").reduce((s, i) => s + i.amount, 0),
-    [incomes]
+    () =>
+      incomes
+        .filter(
+          (i) => i.source !== "project" && i.source !== INCOME_SOURCE_SALARY_SETTINGS,
+        )
+        .reduce((s, i) => s + i.amount, 0),
+    [incomes],
   );
 
   const catSpending = useMemo(() => {
@@ -708,7 +862,8 @@ export function useBudget() {
       map[c.id] = 0;
     });
     expenses.forEach((e) => {
-      map[e.category] = (map[e.category] || 0) + e.amount;
+      const total = e.amount + (e.transaction_fee ?? 0);
+      map[e.category] = (map[e.category] || 0) + total;
     });
     return map;
   }, [expenses, config.categories]);
@@ -768,10 +923,27 @@ export function useBudget() {
   const totalIncome = monthSalary + monthOtherIncome + totalMonthIncomes + monthLoanRecovered;
   // Passifs : charges fixes + dépenses + épargne + fonds projet (prélevés du solde) + remboursements dettes
   const totalExpenses = totalFixed + totalMonthSpent + monthSaving + monthProjectFunds + monthLoanRepayments;
-  // Solde net = Actifs - Passifs
+  // Solde net du mois (flux) = entrées déclarées − sorties budgétées
   const soldeNet = totalIncome - totalExpenses;
   // Reste à vivre budgété (avant dépenses variables et épargne)
   const resteAVivre = totalIncome - totalFixed;
+
+  /** Soldes par compte (trésorerie réelle). */
+  const accountsWithBalance = useMemo(() => accountsFromApi, [accountsFromApi]);
+
+  const totalTreasuryBalances = useMemo(
+    () => sumActiveAccountBalances(accountsFromApi),
+    [accountsFromApi],
+  );
+
+  const soldeDisponibleLiquide = useMemo(
+    () => sumLiquideCashAndMobileMoney(accountsFromApi),
+    [accountsFromApi],
+  );
+
+  /** Actifs affichés = trésorerie seule (soldes comptes) ; les entrées du mois sont déjà dans ces soldes. */
+  const totalActifsKpi = totalTreasuryBalances;
+
   /** Budget effectif par catégorie pour le mois sélectionné (override mensuel ou défaut config) */
   const effectiveCategoryBudgets = useMemo(() => {
     const map: Record<string, number> = {};
@@ -786,7 +958,11 @@ export function useBudget() {
     [effectiveCategoryBudgets]
   );
   const daysLeft = getDaysLeftInMonth(selectedMonth, selectedYear);
-  const dailyBudget = soldeNet > 0 ? Math.round(soldeNet / Math.max(1, daysLeft)) : 0;
+  /** Budget / jour basé sur le liquide espèces + mobile money (pas le solde net mensuel). */
+  const dailyBudget =
+    soldeDisponibleLiquide > 0
+      ? Math.round(soldeDisponibleLiquide / Math.max(1, daysLeft))
+      : 0;
 
   return {
     config,
@@ -797,6 +973,7 @@ export function useBudget() {
     loanPayments,
     savings,
     salaries,
+    salaryAccountIds,
     otherIncomes,
     updateOtherIncome,
     projects,
@@ -841,6 +1018,9 @@ export function useBudget() {
     totalIncome,
     totalExpenses,
     soldeNet,
+    soldeDisponibleLiquide,
+    totalTreasuryBalances,
+    totalActifsKpi,
     resteAVivre,
     totalBudgetVar,
     effectiveCategoryBudgets,
@@ -867,5 +1047,8 @@ export function useBudget() {
     removePlannedExpense,
     executePlannedExpense,
     executeAllDuePlanned,
+    accountsWithBalance,
+    accountsRevision,
+    fetchAccounts,
   };
 }

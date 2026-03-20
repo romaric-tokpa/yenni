@@ -1,7 +1,8 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { formatCFA } from "@/lib/constants";
+import { formatCFA, isVaultAccountLocked, accountTypeLabel, isBankTreasuryDebitAccount } from "@/lib/constants";
+import { useBudgetContext } from "@/contexts/BudgetContext";
 import { generateAmortizationSchedule } from "@/lib/loan-calculator";
 import { Loan } from "@/lib/types";
 import Icon from "./ui/Icon";
@@ -61,6 +62,7 @@ export default function LoanFormView({
   loan?: Loan;
 }) {
   const { addLoan, updateLoan, regenerateLoanSchedule } = budget;
+  const { accountsWithBalance } = useBudgetContext();
   const isEdit = !!initialLoan;
   const router = useRouter();
   const now = new Date();
@@ -90,7 +92,28 @@ export default function LoanFormView({
     isExisting: false,
     months_paid: "",
   });
+  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  /** Comptes bancaires trésorerie utilisables pour prélèvement d’échéances (hors ép. bloquée). */
+  const bankTreasuryAccounts = useMemo(
+    () =>
+      accountsWithBalance.filter(
+        (a) =>
+          !a.is_archived &&
+          isBankTreasuryDebitAccount(a.kind) &&
+          !isVaultAccountLocked(a.vault_unlocks_on)
+      ),
+    [accountsWithBalance]
+  );
+
+  const repaymentChoiceAccounts = useMemo(
+    () =>
+      accountsWithBalance.filter(
+        (a) => !a.is_archived && !isVaultAccountLocked(a.vault_unlocks_on)
+      ),
+    [accountsWithBalance]
+  );
 
   const isBank = type === "bank";
   const isLent = type === "personal_lent";
@@ -122,8 +145,39 @@ export default function LoanFormView({
         isExisting: false,
         months_paid: "",
       });
+      setPaymentAccountId(
+        initialLoan.payment_account_id != null ? String(initialLoan.payment_account_id) : ""
+      );
     }
   }, [initialLoan]);
+
+  /** Prêts existants sans compte : pré-sélection si un seul compte éligible */
+  useEffect(() => {
+    if (!initialLoan) return;
+    if (initialLoan.payment_account_id != null) return;
+    if (initialLoan.type === "bank" && bankTreasuryAccounts.length === 1) {
+      setPaymentAccountId(String(bankTreasuryAccounts[0].id));
+    } else if (initialLoan.type !== "bank" && repaymentChoiceAccounts.length === 1) {
+      setPaymentAccountId(String(repaymentChoiceAccounts[0].id));
+    }
+  }, [
+    initialLoan?.id,
+    initialLoan?.payment_account_id,
+    initialLoan?.type,
+    bankTreasuryAccounts,
+    repaymentChoiceAccounts,
+  ]);
+
+  useEffect(() => {
+    if (isEdit) return;
+    if (type === "bank") {
+      const first = bankTreasuryAccounts[0];
+      setPaymentAccountId(first ? String(first.id) : "");
+    } else {
+      const first = repaymentChoiceAccounts[0];
+      setPaymentAccountId(first ? String(first.id) : "");
+    }
+  }, [type, isEdit, bankTreasuryAccounts, repaymentChoiceAccounts]);
 
   const estimatedMonthly =
     Number(form.total_amount) > 0 &&
@@ -172,6 +226,19 @@ export default function LoanFormView({
         updates.insurance_rate = Number(form.insurance_rate) || 0;
         updates.tax_rate = Number(form.tax_rate) || 0;
         updates.fees_amount = Number(form.fees_amount) || 0;
+        const bid = paymentAccountId ? parseInt(paymentAccountId, 10) : NaN;
+        if (!Number.isFinite(bid) || !bankTreasuryAccounts.some((a) => a.id === bid)) {
+          showToast("Choisis un compte bancaire (trésorerie) pour les échéances", "error");
+          return;
+        }
+        updates.payment_account_id = bid;
+      } else {
+        const pid = paymentAccountId ? parseInt(paymentAccountId, 10) : NaN;
+        if (!Number.isFinite(pid) || !repaymentChoiceAccounts.some((a) => a.id === pid)) {
+          showToast("Choisis un compte pour les mouvements de trésorerie", "error");
+          return;
+        }
+        updates.payment_account_id = pid;
       }
       setSubmitting(true);
       await updateLoan(initialLoan.id, updates);
@@ -246,6 +313,21 @@ export default function LoanFormView({
       (loanData as Loan).insurance_rate = Number(form.insurance_rate) || 0;
       (loanData as Loan).tax_rate = Number(form.tax_rate) || 0;
       (loanData as Loan).fees_amount = Number(form.fees_amount) || 0;
+    }
+
+    const payAccNew = paymentAccountId ? parseInt(paymentAccountId, 10) : NaN;
+    if (isBank) {
+      if (!Number.isFinite(payAccNew) || !bankTreasuryAccounts.some((a) => a.id === payAccNew)) {
+        showToast("Choisis un compte bancaire (trésorerie) pour les échéances", "error");
+        return;
+      }
+      (loanData as Loan).payment_account_id = payAccNew;
+    } else {
+      if (!Number.isFinite(payAccNew) || !repaymentChoiceAccounts.some((a) => a.id === payAccNew)) {
+        showToast("Choisis un compte pour les mouvements de trésorerie", "error");
+        return;
+      }
+      (loanData as Loan).payment_account_id = payAccNew;
     }
 
     setSubmitting(true);
@@ -415,6 +497,80 @@ export default function LoanFormView({
               </>
             )}
           </div>
+        </Section>
+
+        {/* Compte trésorerie */}
+        <Section title="Compte trésorerie" icon={Banknote}>
+          {isBank ? (
+            <>
+              <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
+                Chaque échéance est une <strong>dépense</strong> débitée sur le{" "}
+                <strong>compte bancaire</strong> de ta trésorerie choisi (courant, épargne non bloquée, etc. — pas
+                d&apos;épargne bloquée, ni coffre, ni espèces / mobile money).
+              </p>
+              <Field label="Compte bancaire (trésorerie) — prélèvement des mensualités">
+                <select
+                  className={inputClass}
+                  value={paymentAccountId}
+                  onChange={(e) => setPaymentAccountId(e.target.value)}
+                >
+                  <option value="">— Choisir un compte —</option>
+                  {bankTreasuryAccounts.map((a) => (
+                    <option key={a.id} value={String(a.id)}>
+                      {a.name} · {accountTypeLabel(a.kind, a.subtype, a.institution_name)}
+                    </option>
+                  ))}
+                </select>
+                {bankTreasuryAccounts.length === 0 && (
+                  <p className="text-amber-400 text-[11px] mt-2">
+                    Aucun compte bancaire : ajoute-en un dans <strong>Réglages → Trésorerie</strong> (type banque).
+                  </p>
+                )}
+              </Field>
+            </>
+          ) : isLent ? (
+            <>
+              <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
+                Le montant prêté est <strong>débité</strong> de ce compte à la création. Les encaissements
+                utilisent ce compte par défaut (modifiable à chaque encaissement).
+              </p>
+              <Field label="Compte (sortie du prêt / encaissements par défaut)">
+                <select
+                  className={inputClass}
+                  value={paymentAccountId}
+                  onChange={(e) => setPaymentAccountId(e.target.value)}
+                >
+                  <option value="">— Choisir un compte —</option>
+                  {repaymentChoiceAccounts.map((a) => (
+                    <option key={a.id} value={String(a.id)}>
+                      {a.name} · {accountTypeLabel(a.kind, a.subtype, a.institution_name)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
+                Chaque remboursement est une <strong>dépense</strong> sur le compte choisi (espèces, mobile
+                money, compte courant, etc.). Les comptes coffre <strong>verrouillés</strong> ne sont pas proposés.
+              </p>
+              <Field label="Compte pour les remboursements">
+                <select
+                  className={inputClass}
+                  value={paymentAccountId}
+                  onChange={(e) => setPaymentAccountId(e.target.value)}
+                >
+                  <option value="">— Choisir un compte —</option>
+                  {repaymentChoiceAccounts.map((a) => (
+                    <option key={a.id} value={String(a.id)}>
+                      {a.name} · {accountTypeLabel(a.kind, a.subtype, a.institution_name)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </>
+          )}
         </Section>
 
         {/* Conditions financières */}

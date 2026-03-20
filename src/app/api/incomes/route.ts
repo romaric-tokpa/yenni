@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/apiError";
+import { getSessionFromCookies } from "@/lib/auth";
 import { getIncomes, getIncomesByDateRange, addIncome, deleteIncome } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
@@ -25,14 +26,28 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSessionFromCookies();
+    if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
     const body = await req.json();
-    if (!body.date || !body.description || !body.amount || body.amount <= 0) {
-      return NextResponse.json({ error: "Données invalides" }, { status: 400 });
+    const acc = body.account_id != null ? parseInt(String(body.account_id), 10) : NaN;
+    if (
+      !body.date ||
+      !body.description ||
+      !body.amount ||
+      body.amount <= 0 ||
+      !Number.isFinite(acc) ||
+      acc <= 0
+    ) {
+      return NextResponse.json({ error: "Données invalides : compte requis" }, { status: 400 });
     }
-    const income = await addIncome(body);
+    const income = await addIncome({ ...body, account_id: acc }, session.userId);
     return NextResponse.json(income, { status: 201 });
   } catch (err) {
     console.error("[API ERROR]", err);
+    const msg = err instanceof Error ? err.message : "";
+    if (msg === "ACCOUNT_ID_REQUIRED" || msg === "ACCOUNT_NOT_FOUND") {
+      return NextResponse.json({ error: "Compte requis ou introuvable" }, { status: 400 });
+    }
     return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }
 }

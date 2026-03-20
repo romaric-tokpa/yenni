@@ -1,7 +1,7 @@
 "use client";
 import { useState, useMemo } from "react";
-import { formatCFA, MONTHS_FULL } from "@/lib/constants";
-import { BudgetConfig, Expense, Income, FixedChargePayment, LoanPayment, Loan, CalendarEvent } from "@/lib/types";
+import { formatCFA, MONTHS_FULL, isVaultAccountLocked } from "@/lib/constants";
+import { BudgetConfig, Expense, Income, FixedChargePayment, LoanPayment, Loan, CalendarEvent, AccountWithBalance } from "@/lib/types";
 import Icon from "./ui/Icon";
 import {
   ChevronLeft, ChevronRight, Plus, X, Check, Wallet, HandCoins,
@@ -42,8 +42,10 @@ interface BudgetData {
   totalFixed: number;
   totalMonthIncomes: number;
   monthLoanPayments: number;
-  soldeNet: number;
+  soldeDisponibleLiquide: number;
+  totalActifsKpi: number;
   totalIncome: number;
+  accountsWithBalance: AccountWithBalance[];
 }
 
 function getDaysInMonth(month: number, year: number) {
@@ -53,6 +55,12 @@ function getDaysInMonth(month: number, year: number) {
 function getFirstDayOfWeek(month: number, year: number) {
   const day = new Date(year, month, 1).getDay();
   return day === 0 ? 6 : day - 1;
+}
+
+function formatShort(n: number): string {
+  if (n >= 1_000_000) return `${Math.round(n / 1_000_000)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(Math.round(n));
 }
 
 export default function CalendarView({
@@ -65,8 +73,23 @@ export default function CalendarView({
   const {
     config, expenses, incomes, fixedPayments, loanPayments, loans, selectedMonth, selectedYear, setSelectedYear,
     setSelectedMonth, addExpense, addIncome, removeIncome, removeExpense, removeFixedPayment, removeLoanPayment,
-    totalMonthSpent, totalFixed, totalMonthIncomes, monthLoanPayments, soldeNet, totalIncome,
+    totalMonthSpent,
+    totalFixed,
+    totalMonthIncomes,
+    monthLoanPayments,
+    soldeDisponibleLiquide,
+    totalActifsKpi,
+    totalIncome,
+    accountsWithBalance,
   } = budget;
+
+  const activeAccounts = useMemo(() => accountsWithBalance.filter((a) => !a.is_archived), [accountsWithBalance]);
+  const debitAccounts = useMemo(
+    () => activeAccounts.filter((a) => !isVaultAccountLocked(a.vault_unlocks_on)),
+    [activeAccounts],
+  );
+  const defaultAccountId = activeAccounts[0]?.id;
+  const defaultExpenseAccountId = debitAccounts[0]?.id;
 
   const loansById = useMemo(() => {
     const map: Record<number, Loan> = {};
@@ -85,6 +108,7 @@ export default function CalendarView({
     source: "other",
     amount: "",
     notes: "",
+    account_id: "" as string,
   });
   const [expenseForm, setExpenseForm] = useState({
     date: now.toISOString().split("T")[0],
@@ -93,16 +117,18 @@ export default function CalendarView({
     category: config.categories[0]?.id || "",
     amount: "",
     notes: "",
+    account_id: "" as string,
   });
 
-  const events = useMemo<Record<string, CalendarEvent[]>>(() => {
-    const map: Record<string, CalendarEvent[]> = {};
+  const events = useMemo<Record<string, (CalendarEvent & { eventKey: string })[]>>(() => {
+    const map: Record<string, (CalendarEvent & { eventKey: string })[]> = {};
     expenses.forEach((e) => {
       const key = e.date;
       if (!map[key]) map[key] = [];
       map[key].push({
         id: e.id, type: "expense", date: e.date, time: e.time || "00:00",
-        description: e.description, amount: e.amount, category: e.category,
+        description: e.description, amount: e.amount + (e.transaction_fee ?? 0), category: e.category,
+        eventKey: `expense-${e.id}`,
       });
     });
     incomes.forEach((i) => {
@@ -111,6 +137,7 @@ export default function CalendarView({
       map[key].push({
         id: i.id, type: "income", date: i.date, time: i.time || "00:00",
         description: i.description, amount: i.amount, source: i.source,
+        eventKey: `income-${i.id}`,
       });
     });
     fixedPayments.forEach((fp) => {
@@ -119,6 +146,7 @@ export default function CalendarView({
       map[key].push({
         id: fp.id, type: "fixed", date: fp.date, time: fp.time || "00:00",
         description: fp.label, amount: fp.amount, icon: fp.icon,
+        eventKey: `fixed-${fp.id}`,
       });
     });
     loanPayments.forEach((lp) => {
@@ -137,6 +165,7 @@ export default function CalendarView({
         amount: lp.amount + lp.fees,
         icon: isRecovery ? "arrow-down-left" : "hand-coins",
         source: isRecovery ? "loan_recovery" : undefined,
+        eventKey: isRecovery ? `loan_recovery-${lp.id}` : `loan-${lp.id}`,
       });
     });
     Object.values(map).forEach((arr) =>
@@ -159,15 +188,18 @@ export default function CalendarView({
   };
 
   const dayTotals = useMemo(() => {
-    const map: Record<string, { income: number; expense: number; fixed: number; loan: number }> = {};
+    const map: Record<string, { income: number; expense: number; fixed: number; loan: number; totalIn: number; totalOut: number }> = {};
     for (let d = 1; d <= daysInMonth; d++) {
       const key = `${selectedYear}-${String(selectedMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
       const dayEvents = events[key] || [];
+      const income = dayEvents.filter((e) => e.type === "income").reduce((s, e) => s + e.amount, 0);
+      const expense = dayEvents.filter((e) => e.type === "expense").reduce((s, e) => s + e.amount, 0);
+      const fixed = dayEvents.filter((e) => e.type === "fixed").reduce((s, e) => s + e.amount, 0);
+      const loan = dayEvents.filter((e) => e.type === "loan").reduce((s, e) => s + e.amount, 0);
       map[key] = {
-        income: dayEvents.filter((e) => e.type === "income").reduce((s, e) => s + e.amount, 0),
-        expense: dayEvents.filter((e) => e.type === "expense").reduce((s, e) => s + e.amount, 0),
-        fixed: dayEvents.filter((e) => e.type === "fixed").reduce((s, e) => s + e.amount, 0),
-        loan: dayEvents.filter((e) => e.type === "loan").reduce((s, e) => s + e.amount, 0),
+        income, expense, fixed, loan,
+        totalIn: income,
+        totalOut: expense + fixed + loan,
       };
     }
     return map;
@@ -180,7 +212,8 @@ export default function CalendarView({
       showToast("Remplis tous les champs", "error");
       return;
     }
-    const ok = await addIncome({ ...incomeForm, amount: Number(incomeForm.amount), time: incomeForm.time || "00:00" });
+    const acc = incomeForm.account_id ? Number(incomeForm.account_id) : defaultAccountId;
+    const ok = await addIncome({ ...incomeForm, amount: Number(incomeForm.amount), time: incomeForm.time || "00:00", account_id: acc });
     if (ok) {
       showToast("Revenu enregistré !");
       const n = new Date();
@@ -188,6 +221,7 @@ export default function CalendarView({
         date: n.toISOString().split("T")[0],
         time: n.toTimeString().slice(0, 5),
         description: "", source: "other", amount: "", notes: "",
+        account_id: defaultAccountId ? String(defaultAccountId) : "",
       });
       setShowIncomeModal(false);
     }
@@ -202,7 +236,12 @@ export default function CalendarView({
       showToast("Ajoute d'abord une catégorie dans les réglages", "error");
       return;
     }
-    const ok = await addExpense({ ...expenseForm, amount: Number(expenseForm.amount), time: expenseForm.time || "00:00" });
+    if (!defaultExpenseAccountId) {
+      showToast("Aucun compte utilisable pour une dépense (coffres verrouillés ?).", "error");
+      return;
+    }
+    const acc = expenseForm.account_id ? Number(expenseForm.account_id) : defaultExpenseAccountId;
+    const ok = await addExpense({ ...expenseForm, amount: Number(expenseForm.amount), time: expenseForm.time || "00:00", account_id: acc });
     if (ok) {
       showToast("Dépense enregistrée !");
       const n = new Date();
@@ -210,21 +249,23 @@ export default function CalendarView({
         date: n.toISOString().split("T")[0],
         time: n.toTimeString().slice(0, 5),
         description: "", category: config.categories[0]?.id || "", amount: "", notes: "",
+        account_id: defaultExpenseAccountId ? String(defaultExpenseAccountId) : "",
       });
       setShowExpenseModal(false);
     }
   };
 
-  const handleDeleteEvent = async (ev: CalendarEvent) => {
+  const handleDeleteEvent = async (ev: CalendarEvent & { eventKey?: string }) => {
+    const key = ev.eventKey ?? `${ev.type}-${ev.id}`;
     if (ev.type === "expense") {
       await removeExpense(ev.id);
       showToast("Dépense supprimée", "info");
     } else if (ev.type === "fixed") {
       await removeFixedPayment(ev.id);
       showToast("Paiement supprimé", "info");
-    } else if (ev.type === "loan") {
+    } else if (ev.type === "loan" || key.startsWith("loan_recovery-")) {
       await removeLoanPayment(ev.id);
-      showToast("Remboursement supprimé", "info");
+      showToast(key.startsWith("loan_recovery-") ? "Encaissement supprimé" : "Remboursement supprimé", "info");
     } else {
       await removeIncome(ev.id);
       showToast("Revenu supprimé", "info");
@@ -261,13 +302,19 @@ export default function CalendarView({
 
       {/* Monthly summary */}
       <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 mb-6">
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
-            { label: "Revenus", value: `+${formatCFA(totalIncome)}`, color: "text-emerald-400", icon: ArrowUpCircle },
+            { label: "Actifs", value: `+${formatCFA(totalActifsKpi)}`, color: "text-emerald-400", icon: ArrowUpCircle },
+            { label: "Revenus (mois)", value: `+${formatCFA(totalIncome)}`, color: "text-emerald-400/90", icon: ArrowUpCircle },
             { label: "Charges fixes", value: `-${formatCFA(totalFixed)}`, color: "text-orange-400", icon: ArrowDownCircle },
             { label: "Prêts", value: `-${formatCFA(monthLoanPayments)}`, color: "text-teal-400", icon: HandCoins },
             { label: "Dépenses", value: `-${formatCFA(totalMonthSpent)}`, color: "text-amber-400", icon: ArrowDownCircle },
-            { label: "Solde", value: `${soldeNet >= 0 ? "+" : "-"}${formatCFA(Math.abs(soldeNet))}`, color: soldeNet >= 0 ? "text-emerald-400" : "text-red-400", icon: Wallet },
+            {
+              label: "Liquide dispo.",
+              value: `${soldeDisponibleLiquide >= 0 ? "+" : "-"}${formatCFA(Math.abs(soldeDisponibleLiquide))}`,
+              color: soldeDisponibleLiquide >= 0 ? "text-emerald-400" : "text-red-400",
+              icon: Wallet,
+            },
           ].map((s, i) => (
             <div key={i} className="flex items-center gap-2">
               <s.icon size={16} className={`shrink-0 ${s.color}`} />
@@ -322,7 +369,7 @@ export default function CalendarView({
             const day = i + 1;
             const dateStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
             const totals = dayTotals[dateStr];
-            const hasEvents = totals && (totals.income > 0 || totals.expense > 0 || totals.fixed > 0 || totals.loan > 0);
+            const hasEvents = totals && (totals.totalIn > 0 || totals.totalOut > 0);
             const isToday = dateStr === todayStr;
             const isSelected = dateStr === selectedDate;
 
@@ -343,33 +390,23 @@ export default function CalendarView({
                   {day}
                 </span>
                 {hasEvents && (
-                  <div className="flex flex-col items-center gap-0.5 mt-auto">
-                    {totals.income > 0 && (
-                      <div className="text-[7px] lg:text-[8px] font-mono text-emerald-400 leading-tight">
-                        +{totals.income >= 1000 ? `${Math.round(totals.income / 1000)}k` : totals.income}
+                  <div className="flex flex-col items-center gap-0.5 mt-auto w-full">
+                    {totals.totalIn > 0 && (
+                      <div className="text-[8px] lg:text-[9px] font-mono text-emerald-400 leading-tight" title={`Revenus: ${formatCFA(totals.totalIn)}`}>
+                        +{formatShort(totals.totalIn)}
                       </div>
                     )}
-                    {totals.fixed > 0 && (
-                      <div className="text-[7px] lg:text-[8px] font-mono text-orange-400 leading-tight">
-                        -{totals.fixed >= 1000 ? `${Math.round(totals.fixed / 1000)}k` : totals.fixed}
-                      </div>
-                    )}
-                    {totals.loan > 0 && (
-                      <div className="text-[7px] lg:text-[8px] font-mono text-teal-400 leading-tight">
-                        -{totals.loan >= 1000 ? `${Math.round(totals.loan / 1000)}k` : totals.loan}
-                      </div>
-                    )}
-                    {totals.expense > 0 && (
-                      <div className="text-[7px] lg:text-[8px] font-mono text-red-400 leading-tight">
-                        -{totals.expense >= 1000 ? `${Math.round(totals.expense / 1000)}k` : totals.expense}
+                    {totals.totalOut > 0 && (
+                      <div className="text-[8px] lg:text-[9px] font-mono text-amber-400 leading-tight" title={`Dépenses: ${formatCFA(totals.totalOut)}`}>
+                        -{formatShort(totals.totalOut)}
                       </div>
                     )}
                   </div>
                 )}
                 {hasEvents && (
                   <div className="absolute bottom-1 flex gap-0.5">
-                    {totals.income > 0 && <span className="w-1 h-1 rounded-full bg-emerald-400" />}
-                    {totals.expense > 0 && <span className="w-1 h-1 rounded-full bg-red-400" />}
+                    {totals.totalIn > 0 && <span className="w-1 h-1 rounded-full bg-emerald-400" />}
+                    {totals.totalOut > 0 && <span className="w-1 h-1 rounded-full bg-amber-400" />}
                   </div>
                 )}
               </button>
@@ -381,12 +418,37 @@ export default function CalendarView({
       {/* Selected day detail */}
       {selectedDate && (
         <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 lg:p-6 animate-slide-up">
-          <h3 className="text-sm lg:text-base font-semibold mb-3 lg:mb-4 flex items-center gap-2">
+          <h3 className="text-sm lg:text-base font-semibold mb-2 flex items-center gap-2">
             <Clock size={16} className="text-emerald-400" />
             {new Date(selectedDate + "T00:00:00").toLocaleDateString("fr-FR", {
               weekday: "long", day: "numeric", month: "long",
             })}
           </h3>
+          {selectedEvents.length > 0 && (() => {
+            const t = dayTotals[selectedDate];
+            if (!t || (t.totalIn === 0 && t.totalOut === 0)) return null;
+            return (
+              <div className="flex flex-wrap gap-4 mb-4 py-3 px-4 rounded-lg bg-white/[0.02] border border-white/5">
+                <div className="flex items-center gap-2">
+                  <ArrowUpCircle size={16} className="text-emerald-400" />
+                  <span className="text-xs text-neutral-500">Revenus</span>
+                  <span className="font-mono text-sm font-bold text-emerald-400">+{formatCFA(t.totalIn)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ArrowDownCircle size={16} className="text-amber-400" />
+                  <span className="text-xs text-neutral-500">Dépenses</span>
+                  <span className="font-mono text-sm font-bold text-amber-400">-{formatCFA(t.totalOut)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Wallet size={16} className="text-slate-400" />
+                  <span className="text-xs text-neutral-500">Solde jour</span>
+                  <span className={`font-mono text-sm font-bold ${t.totalIn - t.totalOut >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {t.totalIn - t.totalOut >= 0 ? "+" : "-"}{formatCFA(Math.abs(t.totalIn - t.totalOut))}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
           {selectedEvents.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-neutral-500 text-sm mb-3">Aucune transaction ce jour</p>
@@ -418,7 +480,7 @@ export default function CalendarView({
                   ? "rgba(168,85,247,0.15)"
                   : "rgba(16,185,129,0.15)";
                 return (
-                  <div key={`${ev.type}-${ev.id}`}
+                  <div key={ev.eventKey ?? `${ev.type}-${ev.id}`}
                     className="flex items-center gap-3 p-3 rounded-lg border border-white/5 bg-white/[0.02]">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
                       style={{ background: bgColor }}>
@@ -510,6 +572,18 @@ export default function CalendarView({
                 <input className="input-field" placeholder="Ex: Salaire mars, Freelance..."
                   value={incomeForm.description} onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })} />
               </div>
+              <div>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Compte crédité</label>
+                <select
+                  className="input-field"
+                  value={incomeForm.account_id || (defaultAccountId ? String(defaultAccountId) : "")}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, account_id: e.target.value })}
+                >
+                  {activeAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-neutral-500 mb-1.5 block">Source</label>
@@ -575,6 +649,18 @@ export default function CalendarView({
                 <label className="text-xs text-neutral-500 mb-1.5 block">Description</label>
                 <input className="input-field" placeholder="Ex: Courses marché..."
                   value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-500 mb-1.5 block">Compte débité</label>
+                <select
+                  className="input-field"
+                  value={expenseForm.account_id || (defaultExpenseAccountId ? String(defaultExpenseAccountId) : "")}
+                  onChange={(e) => setExpenseForm({ ...expenseForm, account_id: e.target.value })}
+                >
+                  {debitAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

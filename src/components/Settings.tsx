@@ -1,7 +1,17 @@
 "use client";
-import { useState, useRef, useCallback, useEffect } from "react";
-import { formatCFA, AVAILABLE_ICONS, CATEGORY_COLORS, MONTHS_SHORT } from "@/lib/constants";
-import { BudgetConfig, FixedCharge, FixedChargePayment, Category, WishCategory, WishSubcategory } from "@/lib/types";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import Link from "next/link";
+import { formatCFA, AVAILABLE_ICONS, CATEGORY_COLORS, MONTHS_SHORT, isVaultAccountLocked } from "@/lib/constants";
+import AccountSelect from "./AccountSelect";
+import {
+  BudgetConfig,
+  FixedCharge,
+  FixedChargePayment,
+  Category,
+  WishCategory,
+  WishSubcategory,
+  AccountWithBalance,
+} from "@/lib/types";
 import Icon from "./ui/Icon";
 import { Coins, ClipboardList, FolderOpen, Plus, Trash2, X, Banknote, Check, Clock, Heart } from "lucide-react";
 
@@ -9,7 +19,8 @@ interface BudgetData {
   config: BudgetConfig;
   updateConfig: (c: BudgetConfig) => Promise<void>;
   salaries: number[];
-  updateSalary: (month: number, amount: number) => Promise<void>;
+  salaryAccountIds?: (number | null)[];
+  updateSalary: (month: number, amount: number, accountId?: number | null) => Promise<void>;
   otherIncomes: number[];
   updateOtherIncome: (month: number, amount: number) => Promise<void>;
   fixedPayments: FixedChargePayment[];
@@ -20,49 +31,89 @@ interface BudgetData {
   totalFixed: number;
   resteAVivre: number;
   totalBudgetVar: number;
+  accountsWithBalance?: AccountWithBalance[];
 }
 
 function SalarySection({
   salaries,
+  salaryAccountIds,
   selectedMonth,
   updateSalary,
+  accounts,
 }: {
   salaries: number[];
+  salaryAccountIds: (number | null)[];
   selectedMonth: number;
-  updateSalary: (month: number, amount: number) => Promise<void>;
+  updateSalary: (month: number, amount: number, accountId?: number | null) => Promise<void>;
+  accounts: AccountWithBalance[];
 }) {
   const totalAnnual = salaries.reduce((a, b) => a + b, 0);
+  const accountOptions = useMemo(
+    () => accounts.filter((a) => !a.is_archived),
+    [accounts],
+  );
 
   return (
-    <div className="rounded-lg border border-white/5 p-4 mb-4">
-      <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+    <div id="revenus-salaire" className="scroll-mt-24 rounded-lg border border-white/5 p-4 mb-4">
+      <h3 className="text-sm font-medium mb-1 flex items-center gap-2">
         <Banknote size={14} className="text-green-500" /> Salaire
       </h3>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
-        {MONTHS_SHORT.map((m, i) => (
-          <div
-            key={i}
-            className={`flex items-center gap-2 p-2 rounded-xl transition-all ${
-              i === selectedMonth
-                ? "bg-emerald-500/15 ring-1 ring-emerald-500/40"
-                : salaries[i] > 0
-                ? "bg-white/[0.03]"
-                : "bg-white/[0.02]"
-            }`}
-          >
-            <span className={`text-[10px] lg:text-xs font-medium w-8 ${i === selectedMonth ? "text-emerald-300" : "text-slate-500"}`}>
-              {m}
-            </span>
-            <input
-              type="number"
-              className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 flex-1 min-w-0"
-              placeholder="0"
-              defaultValue={salaries[i] || ""}
-              key={`sal-s-${i}`}
-              onChange={(e) => updateSalary(i, Number(e.target.value) || 0)}
-            />
-          </div>
-        ))}
+      <p className="text-[10px] text-neutral-500 mb-3 leading-relaxed">
+        Montant + <strong className="text-neutral-400">compte de versement</strong> : un revenu{" "}
+        <strong className="text-neutral-400">« Salaire (réglages) »</strong> est créé automatiquement (date du 1
+        <sup>er</sup> du mois) — le <strong className="text-neutral-400">solde du compte</strong>, les{" "}
+        <strong className="text-neutral-400">mouvements</strong> et l&apos;<strong className="text-neutral-400">historique</strong>{" "}
+        sont mis à jour. Tu peux toujours ajouter d&apos;autres revenus dans Transactions.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+        {MONTHS_SHORT.map((m, i) => {
+          const accId = salaryAccountIds[i] ?? null;
+          return (
+            <div
+              key={i}
+              className={`flex flex-col gap-1.5 p-2.5 rounded-xl transition-all border border-transparent ${
+                i === selectedMonth
+                  ? "bg-emerald-500/15 ring-1 ring-emerald-500/40"
+                  : salaries[i] > 0 || accId != null
+                    ? "bg-white/[0.03]"
+                    : "bg-white/[0.02]"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-[10px] lg:text-xs font-medium w-8 shrink-0 ${i === selectedMonth ? "text-emerald-300" : "text-slate-500"}`}
+                >
+                  {m}
+                </span>
+                <input
+                  type="number"
+                  className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 flex-1 min-w-0"
+                  placeholder="0"
+                  defaultValue={salaries[i] || ""}
+                  key={`sal-s-${i}`}
+                  onChange={(e) => updateSalary(i, Number(e.target.value) || 0)}
+                />
+              </div>
+              <select
+                className="input-field text-[11px] py-1.5 px-2 w-full"
+                value={accId ?? ""}
+                aria-label={`Compte de versement du salaire — ${m}`}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const aid = v === "" ? null : parseInt(v, 10);
+                  void updateSalary(i, salaries[i], aid);
+                }}
+              >
+                <option value="">Compte de versement…</option>
+                {accountOptions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          );
+        })}
       </div>
       {totalAnnual > 0 && (
         <div className="flex justify-between mt-2 px-2.5 py-1.5 rounded-lg bg-white/4 text-xs">
@@ -133,8 +184,37 @@ export default function Settings({
   budget: BudgetData;
   showToast: (m: string, t?: string) => void;
 }) {
-  const { config, updateConfig, salaries, updateSalary, otherIncomes, updateOtherIncome, fixedPayments, addFixedPayment, removeFixedPayment, selectedMonth, selectedYear, totalFixed, resteAVivre, totalBudgetVar } = budget;
+  const {
+    config,
+    updateConfig,
+    salaries,
+    salaryAccountIds = Array(12).fill(null),
+    updateSalary,
+    otherIncomes,
+    updateOtherIncome,
+    fixedPayments,
+    addFixedPayment,
+    removeFixedPayment,
+    selectedMonth,
+    selectedYear,
+    totalFixed,
+    resteAVivre,
+    totalBudgetVar,
+    accountsWithBalance = [],
+  } = budget;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const vaultAccounts = useMemo(
+    () => accountsWithBalance.filter((a) => !a.is_archived && a.kind === "vault"),
+    [accountsWithBalance],
+  );
+
+  const defaultDebitAccountId = useMemo(() => {
+    const unlocked = accountsWithBalance.find(
+      (x) =>
+        !x.is_archived && !(x.kind === "vault" && isVaultAccountLocked(x.vault_unlocks_on)),
+    );
+    return unlocked?.id ?? accountsWithBalance.find((x) => !x.is_archived)?.id ?? 0;
+  }, [accountsWithBalance]);
 
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [newCharge, setNewCharge] = useState({ label: "", amount: "", icon: "house" });
@@ -151,6 +231,7 @@ export default function Settings({
     date: now.toISOString().split("T")[0],
     time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
     notes: "",
+    account_id: 0,
   });
 
   const save = useCallback(
@@ -289,8 +370,10 @@ export default function Settings({
 
       <SalarySection
         salaries={salaries}
+        salaryAccountIds={salaryAccountIds}
         selectedMonth={selectedMonth}
         updateSalary={updateSalary}
+        accounts={accountsWithBalance}
       />
 
       {/* Autres revenus par mois */}
@@ -322,6 +405,40 @@ export default function Settings({
               <input type="date" className="input-field"
                 defaultValue={config.savingsGoalDeadline || ""}
                 onChange={(e) => save({ ...config, savingsGoalDeadline: e.target.value || undefined })} />
+            </div>
+            <div>
+              <label className="text-[10px] text-neutral-500 mb-0.5 block">Compte coffre lié (fonds d&apos;urgence)</label>
+              <select
+                className="input-field"
+                value={config.emergency_fund_account_id != null ? String(config.emergency_fund_account_id) : ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  saveImmediate({
+                    ...config,
+                    emergency_fund_account_id: v === "" ? undefined : Number(v),
+                  });
+                }}
+              >
+                <option value="">— Non lié (progression = épargne saisie sur la page Épargne) —</option>
+                {vaultAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                    {typeof a.balance === "number" ? ` · ${formatCFA(a.balance)}` : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-neutral-500 mt-1 leading-relaxed">
+                Si tu lies un <strong className="text-neutral-400">coffre</strong>, l’objectif fonds d’urgence utilise son{" "}
+                <strong className="text-neutral-400">solde réel</strong> (revenus et transferts vers ce compte).
+              </p>
+              {vaultAccounts.length === 0 && (
+                <Link
+                  href="/settings/accounts/new"
+                  className="text-[10px] text-emerald-400 hover:text-emerald-300 mt-1 inline-block font-medium"
+                >
+                  Créer un compte coffre →
+                </Link>
+              )}
             </div>
           </div>
         </div>
@@ -370,6 +487,7 @@ export default function Settings({
                             date: n.toISOString().split("T")[0],
                             time: `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`,
                             notes: "",
+                            account_id: defaultDebitAccountId,
                           });
                           setShowPayCharge(ch);
                         }}
@@ -723,6 +841,16 @@ export default function Settings({
                 <input type="number" className="input-field font-mono" placeholder="0"
                   value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} />
               </div>
+              <AccountSelect
+                accounts={accountsWithBalance}
+                value={accountsWithBalance.some((a) => a.id === payForm.account_id) ? payForm.account_id : defaultDebitAccountId}
+                onChange={(id) => setPayForm({ ...payForm, account_id: id })}
+                label="Payer depuis"
+                filterType="debit"
+                excludeVault
+                debitAmount={Number(payForm.amount) > 0 ? Number(payForm.amount) : undefined}
+                id="pay-charge-account"
+              />
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Notes (optionnel)</label>
                 <input className="input-field" placeholder="Ex: Paiement mars, retard..."
@@ -735,6 +863,9 @@ export default function Settings({
                 onClick={async () => {
                   const amt = Number(payForm.amount);
                   if (!amt || amt <= 0) { showToast("Montant requis", "error"); return; }
+                  const acc =
+                    payForm.account_id > 0 ? payForm.account_id : defaultDebitAccountId;
+                  if (!acc) { showToast("Choisis un compte de paiement", "error"); return; }
                   const payDate = new Date(payForm.date);
                   const ok = await addFixedPayment({
                     charge_id: showPayCharge.id,
@@ -746,6 +877,7 @@ export default function Settings({
                     month: payDate.getMonth(),
                     year: payDate.getFullYear(),
                     notes: payForm.notes,
+                    account_id: acc,
                   });
                   if (ok) {
                     showToast(`${showPayCharge.label} payé — ${formatCFA(amt)} FCFA`);

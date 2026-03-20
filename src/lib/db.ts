@@ -2,9 +2,16 @@ import path from "path";
 import fs from "fs";
 import type { InStatement } from "@libsql/client";
 import { getDbClient, isTurso } from "./db/client";
-import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, MonthlySaving, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput, Wish, ShoppingList, ShoppingListItem, WishList, WishListItem } from "./types";
+import { Expense, Income, Project, ProjectFund, ProjectPurchase, BudgetConfig, MonthlySaving, FixedChargePayment, Loan, LoanPayment, PlannedExpense, LoanScheduleRow, LoanScheduleInput, Wish, ShoppingList, ShoppingListItem, WishList, WishListItem, Account, AccountTransfer, AccountWithBalance } from "./types";
 import type { ScheduleRowUpdate } from "./types";
-import { DEFAULT_CONFIG } from "./constants";
+import {
+  DEFAULT_CONFIG,
+  isVaultAccountLocked,
+  isBankTreasuryDebitAccount,
+  INCOME_SOURCE_SALARY_SETTINGS,
+  salarySettingsIncomeNote,
+} from "./constants";
+import { calculateAccountBalance, checkSufficientBalance } from "./account-balance";
 
 // ── Helpers ──
 
@@ -24,7 +31,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -55,7 +62,9 @@ async function runMigrations(): Promise<void> {
         await db.execute({ sql: stmt });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes("duplicate column name")) continue;
+        const causeMsg = e instanceof Error && e.cause instanceof Error ? String((e.cause as Error).message) : "";
+        const fullMsg = msg + causeMsg;
+        if (fullMsg.includes("duplicate column name") || fullMsg.includes("duplicate column")) continue;
         throw e;
       }
     }
@@ -71,6 +80,36 @@ async function runMigrations(): Promise<void> {
       if (msg.includes("UNIQUE constraint") || causeMsg.includes("UNIQUE constraint")) continue;
       throw e;
     }
+  }
+}
+
+async function ensurePaymentMethodColumn(): Promise<void> {
+  const db = getDbClient();
+  try {
+    await db.execute({
+      sql: "ALTER TABLE expenses ADD COLUMN payment_method TEXT DEFAULT 'cash'",
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const causeMsg = e instanceof Error && e.cause instanceof Error ? String((e.cause as Error).message) : "";
+    const full = msg + causeMsg;
+    if (full.includes("duplicate column") || full.includes("already exists")) return;
+    throw e;
+  }
+}
+
+async function ensureTransactionFeeColumn(): Promise<void> {
+  const db = getDbClient();
+  try {
+    await db.execute({
+      sql: "ALTER TABLE expenses ADD COLUMN transaction_fee REAL DEFAULT 0",
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const causeMsg = e instanceof Error && e.cause instanceof Error ? String((e.cause as Error).message) : "";
+    const full = msg + causeMsg;
+    if (full.includes("duplicate column") || full.includes("already exists")) return;
+    throw e;
   }
 }
 
@@ -97,6 +136,8 @@ async function ensureMigrations(): Promise<void> {
       await db.execute({ sql: stmt });
     }
     await runMigrations();
+    await ensurePaymentMethodColumn();
+    await ensureTransactionFeeColumn();
     await ensureLogoSvg();
     migrationsRun = true;
   })();
@@ -164,6 +205,369 @@ async function ensureProjectFundsMigration(): Promise<void> {
   }
 }
 
+// ── Comptes (trésorerie) ──
+
+export async function ensureUserDefaultAccount(userId: number): Promise<number> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const existing = await db.execute({
+    sql: "SELECT id FROM accounts WHERE user_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1",
+    args: [userId],
+  });
+  if (existing.rows.length > 0) {
+    return Number((existing.rows[0] as Row).id);
+  }
+  const ins = await db.execute({
+    sql: `INSERT INTO accounts (user_id, name, kind, subtype, institution_name, notes, icon, color, logo_url, opening_balance, sort_order) VALUES (?, 'Espèces', 'cash', '', '', 'Compte créé automatiquement', 'banknote', '#10B981', '', 0, 0) RETURNING id`,
+    args: [userId],
+  });
+  const id = Number((ins.rows[0] as Row).id);
+  await db.execute({ sql: "UPDATE expenses SET account_id = ? WHERE user_id = ? AND account_id IS NULL", args: [id, userId] });
+  return id;
+}
+
+export async function getDefaultAccountId(userId: number): Promise<number> {
+  return ensureUserDefaultAccount(userId);
+}
+
+export async function getAccounts(userId: number): Promise<Account[]> {
+  await ensureMigrations();
+  await ensureUserDefaultAccount(userId);
+  const db = getDbClient();
+  const rs = await db.execute({
+    sql: "SELECT * FROM accounts WHERE user_id = ? ORDER BY is_archived ASC, sort_order ASC, id ASC",
+    args: [userId],
+  });
+  return rowsToObjs<Account>(rs.rows as Row[], rs.columns);
+}
+
+export async function getAccountById(accountId: number, userId: number): Promise<Account | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const rs = await db.execute({
+    sql: "SELECT * FROM accounts WHERE id = ? AND user_id = ?",
+    args: [accountId, userId],
+  });
+  if (rs.rows.length === 0) return null;
+  return rowToObj<Account>(rs.rows[0] as Row, rs.columns);
+}
+
+/** Valide que le compte existe et appartient à l’utilisateur (comptabilité stricte). */
+export async function validateAccountOwnership(userId: number, accountId: number): Promise<void> {
+  await ensureMigrations();
+  if (accountId == null || Number(accountId) <= 0) throw new Error("ACCOUNT_ID_REQUIRED");
+  const acc = await getAccountById(Number(accountId), userId);
+  if (!acc) throw new Error("ACCOUNT_NOT_FOUND");
+}
+
+/** Vérifie que le compte peut être débité (coffre non verrouillé). Retourne l’id de compte effectif. */
+export async function assertAccountAllowsDebit(
+  userId: number,
+  accountId: number | null | undefined,
+): Promise<number> {
+  await ensureMigrations();
+  let id = accountId;
+  if (id == null || id === undefined || Number.isNaN(Number(id))) {
+    id = await getDefaultAccountId(userId);
+  }
+  const acc = await getAccountById(Number(id), userId);
+  if (!acc) throw new Error("ACCOUNT_NOT_FOUND");
+  if (isVaultAccountLocked(acc.vault_unlocks_on)) {
+    throw new Error("ACCOUNT_VAULT_LOCKED");
+  }
+  return Number(id);
+}
+
+function isArchivedOrVaultLockedForDebit(acc: Account): boolean {
+  return !!acc.is_archived || isVaultAccountLocked(acc.vault_unlocks_on);
+}
+
+/**
+ * Compte débité pour un remboursement : prêt bancaire → compte **bancaire** de trésorerie
+ * (`isBankTreasuryDebitAccount`, hors épargne bloquée) ; emprunt personnel → compte au choix.
+ */
+export async function resolveLoanRepaymentDebitAccountId(
+  userId: number,
+  loan: Loan,
+  overrideAccountId?: number | null,
+): Promise<number> {
+  const accounts = await getAccounts(userId);
+
+  if (loan.type === "bank") {
+    const bankTreasury = accounts.filter(
+      (a) => isBankTreasuryDebitAccount(a.kind) && !isArchivedOrVaultLockedForDebit(a),
+    );
+    if (bankTreasury.length === 0) throw new Error("NO_BANK_CURRENT_ACCOUNT");
+    const preferred = overrideAccountId ?? loan.payment_account_id ?? null;
+    if (preferred != null) {
+      const found = bankTreasury.find((a) => a.id === preferred);
+      if (!found) throw new Error("INVALID_BANK_CURRENT_ACCOUNT");
+      return await assertAccountAllowsDebit(userId, found.id);
+    }
+    if (bankTreasury.length === 1) return await assertAccountAllowsDebit(userId, bankTreasury[0].id);
+    throw new Error("BANK_LOAN_PICK_CURRENT_ACCOUNT");
+  }
+
+  if (loan.type === "personal_borrowed") {
+    const id = overrideAccountId ?? loan.payment_account_id ?? null;
+    if (id != null) {
+      const acc = accounts.find((a) => a.id === id);
+      if (!acc || isArchivedOrVaultLockedForDebit(acc)) throw new Error("INVALID_REPAYMENT_ACCOUNT");
+    }
+    return await assertAccountAllowsDebit(userId, id);
+  }
+
+  throw new Error("LOAN_REPAYMENT_DEBIT_NOT_APPLICABLE");
+}
+
+/** Compte crédité pour un encaissement (argent récupéré sur un prêt personnel fait). */
+export async function resolveLoanRecoveryCreditAccountId(
+  userId: number,
+  loan: Loan,
+  overrideAccountId?: number | null,
+): Promise<number> {
+  const id = overrideAccountId ?? loan.payment_account_id ?? null;
+  if (id == null) return getDefaultAccountId(userId);
+  const acc = await getAccountById(Number(id), userId);
+  if (!acc || acc.is_archived) throw new Error("INVALID_RECOVERY_ACCOUNT");
+  return Number(id);
+}
+
+export async function getAccountsWithBalances(userId: number): Promise<AccountWithBalance[]> {
+  const accounts = await getAccounts(userId);
+  const out: AccountWithBalance[] = [];
+  for (const a of accounts) {
+    const balance = await calculateAccountBalance(userId, a.id);
+    out.push({ ...a, balance });
+  }
+  return out;
+}
+
+export async function addAccount(
+  userId: number,
+  data: Pick<Account, "name" | "kind"> &
+    Partial<
+      Pick<
+        Account,
+        | "subtype"
+        | "institution_name"
+        | "notes"
+        | "icon"
+        | "color"
+        | "logo_url"
+        | "opening_balance"
+        | "sort_order"
+        | "vault_unlocks_on"
+      >
+    >,
+): Promise<Account> {
+  await ensureMigrations();
+  await ensureUserDefaultAccount(userId);
+  const db = getDbClient();
+  const maxRs = await db.execute({
+    sql: "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM accounts WHERE user_id = ?",
+    args: [userId],
+  });
+  const nextOrder = Number((maxRs.rows[0] as Row)?.n ?? 0);
+  const vaultUntil =
+    data.kind === "vault" && data.vault_unlocks_on?.trim()
+      ? String(data.vault_unlocks_on).trim()
+      : null;
+  const rs = await db.execute({
+    sql: `INSERT INTO accounts (user_id, name, kind, subtype, institution_name, notes, icon, color, logo_url, opening_balance, is_archived, sort_order, vault_unlocks_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) RETURNING *`,
+    args: [
+      userId,
+      data.name,
+      data.kind,
+      data.subtype ?? "",
+      data.institution_name ?? "",
+      data.notes ?? "",
+      data.icon ?? "wallet",
+      data.color ?? "#6366f1",
+      data.logo_url ?? "",
+      data.opening_balance ?? 0,
+      data.sort_order ?? nextOrder,
+      vaultUntil,
+    ],
+  });
+  return rowToObj<Account>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function updateAccount(
+  id: number,
+  userId: number,
+  updates: Partial<
+    Pick<
+      Account,
+      | "name"
+      | "kind"
+      | "subtype"
+      | "institution_name"
+      | "notes"
+      | "icon"
+      | "color"
+      | "logo_url"
+      | "opening_balance"
+      | "is_archived"
+      | "sort_order"
+      | "vault_unlocks_on"
+    >
+  >,
+): Promise<Account | null> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const curRs = await db.execute({ sql: "SELECT * FROM accounts WHERE id = ? AND user_id = ?", args: [id, userId] });
+  if (curRs.rows.length === 0) return null;
+  const cur = rowToObj<Account>(curRs.rows[0] as Row, curRs.columns);
+  const merged = { ...cur, ...updates };
+  await db.execute({
+    sql: `UPDATE accounts SET name=?, kind=?, subtype=?, institution_name=?, notes=?, icon=?, color=?, logo_url=?, opening_balance=?, is_archived=?, sort_order=?, vault_unlocks_on=? WHERE id=? AND user_id=?`,
+    args: [
+      merged.name,
+      merged.kind,
+      merged.subtype ?? "",
+      merged.institution_name ?? "",
+      merged.notes ?? "",
+      merged.icon ?? "wallet",
+      merged.color ?? "#6366f1",
+      merged.logo_url ?? "",
+      merged.opening_balance,
+      merged.is_archived,
+      merged.sort_order,
+      merged.vault_unlocks_on ?? null,
+      id,
+      userId,
+    ],
+  });
+  const rs = await db.execute({ sql: "SELECT * FROM accounts WHERE id = ?", args: [id] });
+  return rowToObj<Account>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function deleteAccount(id: number, userId: number): Promise<{ ok: boolean; reason?: string }> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const acc = await db.execute({ sql: "SELECT id FROM accounts WHERE id = ? AND user_id = ?", args: [id, userId] });
+  if (acc.rows.length === 0) return { ok: false, reason: "not_found" };
+  const count = await db.execute({ sql: "SELECT COUNT(*) AS c FROM accounts WHERE user_id = ?", args: [userId] });
+  if (Number((count.rows[0] as Row).c) <= 1) return { ok: false, reason: "last_account" };
+  const e1 = await db.execute({ sql: "SELECT 1 FROM expenses WHERE account_id = ? LIMIT 1", args: [id] });
+  if (e1.rows.length > 0) return { ok: false, reason: "has_expenses" };
+  const e2 = await db.execute({ sql: "SELECT 1 FROM incomes WHERE account_id = ? LIMIT 1", args: [id] });
+  if (e2.rows.length > 0) return { ok: false, reason: "has_incomes" };
+  const e3 = await db.execute({
+    sql: "SELECT 1 FROM account_transfers WHERE from_account_id = ? OR to_account_id = ? LIMIT 1",
+    args: [id, id],
+  });
+  if (e3.rows.length > 0) return { ok: false, reason: "has_transfers" };
+  const e4 = await db.execute({
+    sql: "SELECT 1 FROM fixed_charge_payments WHERE account_id = ? LIMIT 1",
+    args: [id],
+  });
+  if (e4.rows.length > 0) return { ok: false, reason: "has_fixed_charges" };
+  const e5 = await db.execute({
+    sql: "SELECT 1 FROM loan_payments WHERE account_id = ? LIMIT 1",
+    args: [id],
+  });
+  if (e5.rows.length > 0) return { ok: false, reason: "has_loan_payments" };
+  const e6 = await db.execute({
+    sql: "SELECT 1 FROM project_purchases WHERE account_id = ? LIMIT 1",
+    args: [id],
+  });
+  if (e6.rows.length > 0) return { ok: false, reason: "has_project_purchases" };
+  await db.execute({ sql: "DELETE FROM accounts WHERE id = ? AND user_id = ?", args: [id, userId] });
+  return { ok: true };
+}
+
+export async function addAccountTransfer(
+  userId: number,
+  fromAccountId: number,
+  toAccountId: number,
+  amount: number,
+  options?: {
+    fee?: number;
+    fees_account_id?: number | null;
+    date?: string;
+    time?: string;
+    notes?: string;
+  },
+): Promise<AccountTransfer> {
+  await ensureMigrations();
+  if (fromAccountId === toAccountId) throw new Error("TRANSFER_SAME_ACCOUNT");
+  const db = getDbClient();
+  const a1 = await db.execute({ sql: "SELECT id FROM accounts WHERE id = ? AND user_id = ?", args: [fromAccountId, userId] });
+  const a2 = await db.execute({ sql: "SELECT id FROM accounts WHERE id = ? AND user_id = ?", args: [toAccountId, userId] });
+  if (a1.rows.length === 0 || a2.rows.length === 0) throw new Error("ACCOUNT_NOT_FOUND");
+  await assertAccountAllowsDebit(userId, fromAccountId);
+  const now = new Date();
+  const fee = Math.max(0, Math.round(options?.fee ?? 0));
+  let feesAccountId: number | null =
+    options?.fees_account_id != null && !Number.isNaN(Number(options.fees_account_id))
+      ? Number(options.fees_account_id)
+      : null;
+  if (feesAccountId != null && (feesAccountId <= 0 || feesAccountId === fromAccountId)) {
+    feesAccountId = null;
+  }
+  const fromPaysFee = fee > 0 && (feesAccountId == null || feesAccountId === fromAccountId);
+  const fromTotal = amount + (fromPaysFee ? fee : 0);
+  const chkFrom = await checkSufficientBalance(userId, fromAccountId, fromTotal);
+  if (!chkFrom.ok) throw new Error("INSUFFICIENT_BALANCE");
+  if (feesAccountId != null && fee > 0 && feesAccountId !== fromAccountId) {
+    await validateAccountOwnership(userId, feesAccountId);
+    await assertAccountAllowsDebit(userId, feesAccountId);
+    const chkFee = await checkSufficientBalance(userId, feesAccountId, fee);
+    if (!chkFee.ok) throw new Error("INSUFFICIENT_BALANCE");
+  }
+  const date = options?.date ?? now.toISOString().split("T")[0];
+  const time = options?.time ?? `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const rs = await db.execute({
+    sql: `INSERT INTO account_transfers (user_id, from_account_id, to_account_id, amount, fee, fees_account_id, date, time, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    args: [
+      userId,
+      fromAccountId,
+      toAccountId,
+      amount,
+      fee,
+      feesAccountId,
+      date,
+      time,
+      options?.notes ?? "",
+    ],
+  });
+  return rowToObj<AccountTransfer>(rs.rows[0] as Row, rs.columns);
+}
+
+export async function getAccountTransfers(userId: number, limit = 100): Promise<AccountTransfer[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT * FROM account_transfers WHERE user_id = ? ORDER BY date DESC, time DESC, id DESC LIMIT ?",
+    args: [userId, limit],
+  });
+  return rowsToObjs<AccountTransfer>(rs.rows as Row[], rs.columns);
+}
+
+/** Transferts dont la date tombe dans le mois calendaire (même logique que les dépenses). */
+export async function getAccountTransfersForMonth(userId: number, month: number, year: number): Promise<AccountTransfer[]> {
+  await ensureMigrations();
+  const startDate = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const endMonth = month === 11 ? 1 : month + 2;
+  const endYear = month === 11 ? year + 1 : year;
+  const endDate = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
+  const rs = await getDbClient().execute({
+    sql: "SELECT * FROM account_transfers WHERE user_id = ? AND date >= ? AND date < ? ORDER BY date DESC, time DESC, id DESC",
+    args: [userId, startDate, endDate],
+  });
+  return rowsToObjs<AccountTransfer>(rs.rows as Row[], rs.columns);
+}
+
+export async function deleteAccountTransfer(id: number, userId: number): Promise<boolean> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "DELETE FROM account_transfers WHERE id = ? AND user_id = ?",
+    args: [id, userId],
+  });
+  return (rs.rowsAffected ?? 0) > 0;
+}
+
 // ── Expenses ──
 
 export async function getExpenses(month?: number, year?: number, limit?: number, offset?: number): Promise<Expense[]> {
@@ -197,9 +601,15 @@ export async function getExpenses(month?: number, year?: number, limit?: number,
 export async function addExpense(exp: Omit<Expense, "id" | "created_at">, userId: number): Promise<Expense> {
   await ensureMigrations();
   const db = getDbClient();
+  const fee = exp.transaction_fee ?? 0;
+  const accountId = await assertAccountAllowsDebit(userId, exp.account_id);
+  await validateAccountOwnership(userId, accountId);
+  const totalOut = Number(exp.amount) + Number(fee);
+  const chk = await checkSufficientBalance(userId, accountId, totalOut);
+  if (!chk.ok) throw new Error("INSUFFICIENT_BALANCE");
   const rs = await db.execute({
-    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [userId, exp.date, exp.time || "00:00", exp.description, exp.category, exp.amount, exp.notes || ""],
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes, payment_method, transaction_fee, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [userId, exp.date, exp.time || "00:00", exp.description, exp.category, exp.amount, exp.notes || "", "cash", fee, accountId],
   });
   return rowToObj<Expense>(rs.rows[0] as Row, rs.columns);
 }
@@ -217,10 +627,30 @@ export async function updateExpense(id: number, updates: Partial<Omit<Expense, "
     category: updates.category ?? current.category,
     amount: updates.amount ?? current.amount,
     notes: updates.notes ?? current.notes,
+    payment_method: "cash",
+    transaction_fee: updates.transaction_fee ?? (current as Expense).transaction_fee ?? 0,
+    account_id: updates.account_id !== undefined ? updates.account_id : (current as Expense).account_id,
   };
+  const uidRs = await db.execute({ sql: "SELECT user_id FROM expenses WHERE id = ?", args: [id] });
+  const expenseUserId = uidRs.rows.length ? Number((uidRs.rows[0] as Row).user_id) : null;
+  if (expenseUserId != null) {
+    const newAcc = await assertAccountAllowsDebit(expenseUserId, m.account_id);
+    await validateAccountOwnership(expenseUserId, newAcc);
+    const oldAcc = Number((current as Expense).account_id ?? 0);
+    const oldFee = Number((current as Expense).transaction_fee ?? 0);
+    const oldTotal = Number(current.amount) + oldFee;
+    const newTotal = Number(m.amount) + Number(m.transaction_fee ?? 0);
+    if (oldAcc === newAcc) {
+      const bal = await calculateAccountBalance(expenseUserId, newAcc);
+      if (bal + oldTotal - newTotal < 0) throw new Error("INSUFFICIENT_BALANCE");
+    } else {
+      const chk = await checkSufficientBalance(expenseUserId, newAcc, newTotal);
+      if (!chk.ok) throw new Error("INSUFFICIENT_BALANCE");
+    }
+  }
   await db.execute({
-    sql: "UPDATE expenses SET date=?, time=?, description=?, category=?, amount=?, notes=? WHERE id=?",
-    args: [m.date, m.time, m.description, m.category, m.amount, m.notes ?? "", id],
+    sql: "UPDATE expenses SET date=?, time=?, description=?, category=?, amount=?, notes=?, payment_method=?, transaction_fee=?, account_id=? WHERE id=?",
+    args: [m.date, m.time, m.description, m.category, m.amount, m.notes ?? "", m.payment_method, m.transaction_fee, m.account_id ?? null, id],
   });
   const rs = await db.execute({ sql: "SELECT * FROM expenses WHERE id = ?", args: [id] });
   return rowToObj<Expense>(rs.rows[0] as Row, rs.columns);
@@ -256,6 +686,36 @@ export async function getExpensesByDateRange(start: string, end: string): Promis
   return rowsToObjs<Expense>(rs.rows as Row[], rs.columns);
 }
 
+/** Dépenses rattachées à un compte (mouvements du grand livre). */
+export async function getExpensesForAccount(userId: number, accountId: number, limit = 300): Promise<Expense[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: `SELECT * FROM expenses WHERE account_id = ? AND (user_id = ? OR user_id IS NULL) ORDER BY date DESC, time DESC, id DESC LIMIT ?`,
+    args: [accountId, userId, limit],
+  });
+  return rowsToObjs<Expense>(rs.rows as Row[], rs.columns);
+}
+
+/** Revenus rattachés à un compte. */
+export async function getIncomesForAccount(accountId: number, limit = 300): Promise<Income[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: `SELECT * FROM incomes WHERE account_id = ? ORDER BY date DESC, time DESC, id DESC LIMIT ?`,
+    args: [accountId, limit],
+  });
+  return rowsToObjs<Income>(rs.rows as Row[], rs.columns);
+}
+
+/** Transferts où ce compte est source ou destination. */
+export async function getAccountTransfersInvolving(userId: number, accountId: number, limit = 200): Promise<AccountTransfer[]> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: `SELECT * FROM account_transfers WHERE user_id = ? AND (from_account_id = ? OR to_account_id = ?) ORDER BY date DESC, time DESC, id DESC LIMIT ?`,
+    args: [userId, accountId, accountId, limit],
+  });
+  return rowsToObjs<AccountTransfer>(rs.rows as Row[], rs.columns);
+}
+
 // ── Incomes ──
 
 export async function getIncomes(month?: number, year?: number): Promise<Income[]> {
@@ -276,12 +736,15 @@ export async function getIncomes(month?: number, year?: number): Promise<Income[
   return rowsToObjs<Income>(rs.rows as Row[], rs.columns);
 }
 
-export async function addIncome(inc: Omit<Income, "id" | "created_at">): Promise<Income> {
+export async function addIncome(inc: Omit<Income, "id" | "created_at">, userId: number): Promise<Income> {
   await ensureMigrations();
   const db = getDbClient();
+  const accountId = inc.account_id;
+  if (accountId == null || Number(accountId) <= 0) throw new Error("ACCOUNT_ID_REQUIRED");
+  await validateAccountOwnership(userId, Number(accountId));
   const rs = await db.execute({
-    sql: "INSERT INTO incomes (date, time, description, source, amount, notes) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [inc.date, inc.time || "00:00", inc.description, inc.source || "other", inc.amount, inc.notes || ""],
+    sql: "INSERT INTO incomes (date, time, description, source, amount, notes, account_id) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [inc.date, inc.time || "00:00", inc.description, inc.source || "other", inc.amount, inc.notes || "", Number(accountId)],
   });
   return rowToObj<Income>(rs.rows[0] as Row, rs.columns);
 }
@@ -381,27 +844,213 @@ export async function setSaving(month: number, year: number, amount: number): Pr
   });
 }
 
-// ── Salaries ──
-
-export async function getSalaries(year: number): Promise<number[]> {
+/** Montant déjà enregistré pour ce mois (0 si aucune ligne). `month` : 0–11 comme dans l’UI. */
+export async function getSavingRowAmount(month: number, year: number): Promise<number> {
   await ensureMigrations();
   const rs = await getDbClient().execute({
-    sql: "SELECT month, amount FROM salaries WHERE year = ? ORDER BY month",
-    args: [year],
+    sql: "SELECT amount FROM savings WHERE month = ? AND year = ?",
+    args: [month, year],
   });
-  const rows = rowsToObjs<{ month: number; amount: number }>(rs.rows as Row[], rs.columns);
-  const result = Array(12).fill(0);
-  rows.forEach((r) => {
-    result[r.month] = r.amount;
-  });
-  return result;
+  if (rs.rows.length === 0) return 0;
+  return Number((rs.rows[0] as Row).amount ?? 0);
 }
 
-export async function setSalary(month: number, year: number, amount: number): Promise<void> {
+/** Compte à débiter pour alimenter le coffre (≠ coffre, débit autorisé). Essaie d’abord le compte par défaut s’il n’est pas le coffre. */
+async function resolveOutgoingAccountForVaultTopUp(userId: number, vaultId: number): Promise<number> {
+  const defaultId = await getDefaultAccountId(userId);
+  const accounts = await getAccounts(userId);
+  const tryIds: number[] = [];
+  if (defaultId !== vaultId) tryIds.push(defaultId);
+  for (const a of accounts) {
+    if (!a.is_archived && a.id !== vaultId && !tryIds.includes(a.id)) tryIds.push(a.id);
+  }
+  for (const id of tryIds) {
+    try {
+      await assertAccountAllowsDebit(userId, id);
+      return id;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("NO_DEBIT_ACCOUNT_FOR_SAVINGS");
+}
+
+/** Compte qui reçoit l’argent sorti du coffre (≠ coffre). */
+async function resolveIncomingAccountForVaultWithdrawal(userId: number, vaultId: number): Promise<number> {
+  const defaultId = await getDefaultAccountId(userId);
+  if (defaultId !== vaultId) return defaultId;
+  const accounts = await getAccounts(userId);
+  const other = accounts.find((a) => !a.is_archived && a.id !== vaultId);
+  if (!other) throw new Error("NO_ACCOUNT_FOR_SAVINGS_RETURN");
+  return other.id;
+}
+
+/**
+ * Enregistre l’épargne mensuelle et, si un coffre fonds d’urgence est configuré (`emergency_fund_account_id`),
+ * crée un transfert pour refléter le delta (compte par défaut ↔ coffre).
+ */
+export async function setSavingAndSyncEmergencyVault(
+  userId: number,
+  month: number,
+  year: number,
+  amount: number,
+): Promise<void> {
+  await ensureMigrations();
+  const newAmount = Math.max(0, Math.round(Number(amount)));
+  const prev = await getSavingRowAmount(month, year);
+  const delta = newAmount - prev;
+
+  const config = await getConfig();
+  const vaultIdRaw = config.emergency_fund_account_id;
+  const vaultId =
+    vaultIdRaw != null && !Number.isNaN(Number(vaultIdRaw)) ? Number(vaultIdRaw) : null;
+
+  if (delta === 0) {
+    await setSaving(month, year, newAmount);
+    return;
+  }
+
+  if (vaultId == null) {
+    await setSaving(month, year, newAmount);
+    return;
+  }
+
+  const vault = await getAccountById(vaultId, userId);
+  if (!vault || vault.kind !== "vault") {
+    await setSaving(month, year, newAmount);
+    return;
+  }
+
+  const now = new Date();
+  const date = now.toISOString().split("T")[0];
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const monthLabel = `${month + 1}`.padStart(2, "0");
+  const notes = `Épargne mensuelle ${monthLabel}/${year}`;
+
+  const db = getDbClient();
+  const tx = await db.transaction("write");
+  try {
+    if (delta > 0) {
+      const fromId = await resolveOutgoingAccountForVaultTopUp(userId, vaultId);
+      await tx.execute({
+        sql: `INSERT INTO account_transfers (user_id, from_account_id, to_account_id, amount, fee, date, time, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [userId, fromId, vaultId, delta, 0, date, time, notes],
+      });
+    } else {
+      const out = -delta;
+      await assertAccountAllowsDebit(userId, vaultId);
+      const toId = await resolveIncomingAccountForVaultWithdrawal(userId, vaultId);
+      await tx.execute({
+        sql: `INSERT INTO account_transfers (user_id, from_account_id, to_account_id, amount, fee, date, time, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [userId, vaultId, toId, out, 0, date, time, `${notes} (ajustement)`],
+      });
+    }
+    await tx.execute({
+      sql: "INSERT INTO savings (month, year, amount) VALUES (?, ?, ?) ON CONFLICT(month, year) DO UPDATE SET amount = excluded.amount",
+      args: [month, year, newAmount],
+    });
+    await tx.commit();
+  } finally {
+    tx.close();
+  }
+}
+
+// ── Salaries ──
+
+export type SalariesYearData = { amounts: number[]; accountIds: (number | null)[] };
+
+export async function getSalaries(year: number): Promise<SalariesYearData> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT month, amount, account_id FROM salaries WHERE year = ? ORDER BY month",
+    args: [year],
+  });
+  const rows = rowsToObjs<{ month: number; amount: number; account_id?: number | null }>(
+    rs.rows as Row[],
+    rs.columns,
+  );
+  const amounts = Array(12).fill(0) as number[];
+  const accountIds: (number | null)[] = Array(12).fill(null);
+  rows.forEach((r) => {
+    amounts[r.month] = r.amount;
+    const raw = r.account_id;
+    const n = raw != null ? Number(raw) : NaN;
+    accountIds[r.month] = Number.isFinite(n) ? n : null;
+  });
+  return { amounts, accountIds };
+}
+
+export async function setSalary(
+  month: number,
+  year: number,
+  amount: number,
+  accountId?: number | null,
+): Promise<void> {
   await ensureMigrations();
   await getDbClient().execute({
-    sql: "INSERT INTO salaries (month, year, amount) VALUES (?, ?, ?) ON CONFLICT(month, year) DO UPDATE SET amount = excluded.amount",
-    args: [month, year, amount],
+    sql: `INSERT INTO salaries (month, year, amount, account_id) VALUES (?, ?, ?, ?)
+      ON CONFLICT(month, year) DO UPDATE SET amount = excluded.amount, account_id = excluded.account_id`,
+    args: [month, year, amount, accountId ?? null],
+  });
+}
+
+/**
+ * Synchronise un revenu `incomes` avec le salaire des réglages pour créditer le compte (trésorerie).
+ * Supprimé si montant 0 ou pas de compte. Exclu des totaux budget via `source === salary_settings`.
+ */
+export async function syncSalaryLinkedIncome(
+  year: number,
+  month: number,
+  amount: number,
+  accountId: number | null,
+): Promise<void> {
+  await ensureMigrations();
+  const db = getDbClient();
+  const note = salarySettingsIncomeNote(year, month);
+  const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+  const existing = await db.execute({
+    sql: "SELECT id FROM incomes WHERE notes = ? LIMIT 1",
+    args: [note],
+  });
+
+  if (amount <= 0 || accountId == null) {
+    if (existing.rows.length > 0) {
+      const id = Number((existing.rows[0] as Row).id);
+      await deleteIncome(id);
+    }
+    return;
+  }
+
+  const amt = Math.max(0, Math.round(amount));
+
+  if (existing.rows.length > 0) {
+    const id = Number((existing.rows[0] as Row).id);
+    await db.execute({
+      sql: `UPDATE incomes SET amount = ?, account_id = ?, date = ?, time = '00:00', description = ?, source = ?, notes = ? WHERE id = ?`,
+      args: [
+        amt,
+        accountId,
+        dateStr,
+        "Salaire (réglages)",
+        INCOME_SOURCE_SALARY_SETTINGS,
+        note,
+        id,
+      ],
+    });
+    return;
+  }
+
+  await db.execute({
+    sql: `INSERT INTO incomes (date, time, description, source, amount, notes, account_id) VALUES (?, '00:00', ?, ?, ?, ?, ?)`,
+    args: [
+      dateStr,
+      "Salaire (réglages)",
+      INCOME_SOURCE_SALARY_SETTINGS,
+      amt,
+      note,
+      accountId,
+    ],
   });
 }
 
@@ -482,8 +1131,8 @@ export async function addLoan(l: Omit<Loan, "id" | "created_at">): Promise<Loan>
   await ensureMigrations();
   const db = getDbClient();
   const rs = await db.execute({
-    sql: `INSERT INTO loans (type, label, lender_borrower, total_amount, remaining_amount, interest_rate, fees, monthly_payment, start_date, end_date, next_due_date, notes, status, bank_name, agency, loan_number, first_payment_date, payment_day, total_payments, paid_payments, insurance_rate, tax_rate, fees_amount)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    sql: `INSERT INTO loans (type, label, lender_borrower, total_amount, remaining_amount, interest_rate, fees, monthly_payment, start_date, end_date, next_due_date, notes, status, bank_name, agency, loan_number, first_payment_date, payment_day, total_payments, paid_payments, insurance_rate, tax_rate, fees_amount, payment_account_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     args: [
       l.type,
       l.label,
@@ -508,6 +1157,7 @@ export async function addLoan(l: Omit<Loan, "id" | "created_at">): Promise<Loan>
       l.insurance_rate ?? 0,
       l.tax_rate ?? 0,
       l.fees_amount ?? 0,
+      l.payment_account_id ?? null,
     ],
   });
   return rowToObj<Loan>(rs.rows[0] as Row, rs.columns);
@@ -521,9 +1171,11 @@ export async function updateLoan(id: number, updates: Partial<Loan>): Promise<Lo
   const current = rowToObj<Loan>(currentRs.rows[0] as Row, currentRs.columns);
   const m = { ...current, ...updates };
   const paidPayments = m.paid_payments ?? (current as Loan).paid_payments ?? 0;
+  const paymentAccountId =
+    updates.payment_account_id !== undefined ? updates.payment_account_id : (current as Loan).payment_account_id ?? null;
   await db.execute({
     sql: `UPDATE loans SET type=?, label=?, lender_borrower=?, total_amount=?, remaining_amount=?, interest_rate=?, fees=?, monthly_payment=?, start_date=?, end_date=?, next_due_date=?, notes=?, status=?, paid_payments=?,
-      bank_name=?, agency=?, loan_number=?, first_payment_date=?, payment_day=?, total_payments=?, insurance_rate=?, tax_rate=?, fees_amount=?, effective_rate=? WHERE id=?`,
+      bank_name=?, agency=?, loan_number=?, first_payment_date=?, payment_day=?, total_payments=?, insurance_rate=?, tax_rate=?, fees_amount=?, effective_rate=?, payment_account_id=? WHERE id=?`,
     args: [
       m.type,
       m.label,
@@ -549,6 +1201,7 @@ export async function updateLoan(id: number, updates: Partial<Loan>): Promise<Lo
       m.tax_rate ?? 0,
       m.fees_amount ?? 0,
       m.effective_rate ?? 0,
+      paymentAccountId,
       id,
     ],
   });
@@ -864,20 +1517,42 @@ export async function getLoanPaymentsByDateRange(start: string, end: string): Pr
   return rowsToObjs<LoanPayment>(rs.rows as Row[], rs.columns);
 }
 
-export async function updateLoanPaymentExpenseId(paymentId: number, expenseId: number): Promise<void> {
+export async function updateLoanPaymentExpenseId(
+  paymentId: number,
+  expenseId: number,
+  accountId?: number | null,
+): Promise<void> {
   await ensureMigrations();
-  await getDbClient().execute({
-    sql: "UPDATE loan_payments SET expense_id = ? WHERE id = ?",
-    args: [expenseId, paymentId],
-  });
+  if (accountId != null && Number(accountId) > 0) {
+    await getDbClient().execute({
+      sql: "UPDATE loan_payments SET expense_id = ?, account_id = ? WHERE id = ?",
+      args: [expenseId, Number(accountId), paymentId],
+    });
+  } else {
+    await getDbClient().execute({
+      sql: "UPDATE loan_payments SET expense_id = ? WHERE id = ?",
+      args: [expenseId, paymentId],
+    });
+  }
 }
 
-export async function updateLoanPaymentIncomeId(paymentId: number, incomeId: number): Promise<void> {
+export async function updateLoanPaymentIncomeId(
+  paymentId: number,
+  incomeId: number,
+  accountId?: number | null,
+): Promise<void> {
   await ensureMigrations();
-  await getDbClient().execute({
-    sql: "UPDATE loan_payments SET income_id = ? WHERE id = ?",
-    args: [incomeId, paymentId],
-  });
+  if (accountId != null && Number(accountId) > 0) {
+    await getDbClient().execute({
+      sql: "UPDATE loan_payments SET income_id = ?, account_id = ? WHERE id = ?",
+      args: [incomeId, Number(accountId), paymentId],
+    });
+  } else {
+    await getDbClient().execute({
+      sql: "UPDATE loan_payments SET income_id = ? WHERE id = ?",
+      args: [incomeId, paymentId],
+    });
+  }
 }
 
 export async function getPaymentByExpenseId(expenseId: number): Promise<{ id: number } | null> {
@@ -905,9 +1580,10 @@ export async function addLoanPayment(p: Omit<LoanPayment, "id" | "created_at">):
   const db = getDbClient();
   const tx = await db.transaction("write");
   try {
+    const payAcc = (p as LoanPayment).account_id != null && Number((p as LoanPayment).account_id) > 0 ? Number((p as LoanPayment).account_id) : 0;
     const ins = await tx.execute({
-      sql: "INSERT INTO loan_payments (loan_id, amount, fees, date, time, notes) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
-      args: [p.loan_id, p.amount, p.fees || 0, p.date, p.time || "00:00", p.notes || ""],
+      sql: "INSERT INTO loan_payments (loan_id, amount, fees, date, time, notes, account_id) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+      args: [p.loan_id, p.amount, p.fees || 0, p.date, p.time || "00:00", p.notes || "", payAcc],
     });
     const payment = rowToObj<LoanPayment>(ins.rows[0] as Row, ins.columns);
     const loanRs = await tx.execute({ sql: "SELECT * FROM loans WHERE id = ?", args: [p.loan_id] });
@@ -928,17 +1604,40 @@ export async function addLoanPayment(p: Omit<LoanPayment, "id" | "created_at">):
 
 export async function addLoanPaymentsBatch(
   loanId: number,
-  payments: Array<{ amount: number; fees: number; date: string; time: string; notes: string }>
+  userId: number,
+  payments: Array<{
+    amount: number;
+    fees: number;
+    date: string;
+    time: string;
+    notes: string;
+    account_id?: number;
+  }>,
 ): Promise<number> {
   await ensureMigrations();
   const db = getDbClient();
+  const loanRow = await getLoan(loanId);
+  if (!loanRow) throw new Error("LOAN_NOT_FOUND");
   const tx = await db.transaction("write");
   try {
     let totalDeducted = 0;
     for (const p of payments) {
+      let acc =
+        p.account_id != null && p.account_id > 0
+          ? p.account_id
+          : loanRow.payment_account_id != null
+            ? Number(loanRow.payment_account_id)
+            : await getDefaultAccountId(userId);
+      if (!acc || acc <= 0) acc = await getDefaultAccountId(userId);
+      if (loanRow.type === "bank" || loanRow.type === "personal_borrowed") {
+        acc = await resolveLoanRepaymentDebitAccountId(userId, loanRow, acc);
+        const totalOut = p.amount + (p.fees || 0);
+        const chk = await checkSufficientBalance(userId, acc, totalOut);
+        if (!chk.ok) throw new Error("INSUFFICIENT_BALANCE");
+      }
       await tx.execute({
-        sql: "INSERT INTO loan_payments (loan_id, amount, fees, date, time, notes) VALUES (?, ?, ?, ?, ?, ?)",
-        args: [loanId, p.amount, p.fees || 0, p.date, p.time || "00:00", p.notes || ""],
+        sql: "INSERT INTO loan_payments (loan_id, amount, fees, date, time, notes, account_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        args: [loanId, p.amount, p.fees || 0, p.date, p.time || "00:00", p.notes || "", acc],
       });
       totalDeducted += p.amount;
     }
@@ -1020,7 +1719,7 @@ export async function deleteLoanPayment(id: number): Promise<boolean> {
 
 // ── Fixed Charge Payments ──
 
-export async function ensureRecurringPayments(month: number, year: number): Promise<number> {
+export async function ensureRecurringPayments(userId: number, month: number, year: number): Promise<number> {
   const now = new Date();
   if (month !== now.getMonth() || year !== now.getFullYear()) return 0;
 
@@ -1032,17 +1731,20 @@ export async function ensureRecurringPayments(month: number, year: number): Prom
 
   for (const ch of config.fixedCharges || []) {
     if (ch.amount <= 0 || existingChargeIds.has(ch.id)) continue;
-    await addFixedChargePayment({
-      charge_id: ch.id,
-      label: ch.label,
-      icon: ch.icon || "house",
-      amount: ch.amount,
-      date: dateStr,
-      time: "00:00",
-      month,
-      year,
-      notes: "Créé automatiquement",
-    });
+    await addFixedChargePayment(
+      {
+        charge_id: ch.id,
+        label: ch.label,
+        icon: ch.icon || "house",
+        amount: ch.amount,
+        date: dateStr,
+        time: "00:00",
+        month,
+        year,
+        notes: "Créé automatiquement",
+      },
+      userId,
+    );
     existingChargeIds.add(ch.id);
     created++;
   }
@@ -1073,11 +1775,19 @@ export async function getFixedChargePaymentsByDateRange(start: string, end: stri
   return rowsToObjs<FixedChargePayment>(rs.rows as Row[], rs.columns);
 }
 
-export async function addFixedChargePayment(p: Omit<FixedChargePayment, "id" | "created_at">): Promise<FixedChargePayment> {
+export async function addFixedChargePayment(
+  p: Omit<FixedChargePayment, "id" | "created_at">,
+  userId: number,
+): Promise<FixedChargePayment> {
   await ensureMigrations();
+  let accId = p.account_id != null && Number(p.account_id) > 0 ? Number(p.account_id) : await getDefaultAccountId(userId);
+  await validateAccountOwnership(userId, accId);
+  await assertAccountAllowsDebit(userId, accId);
+  const chk = await checkSufficientBalance(userId, accId, p.amount);
+  if (!chk.ok) throw new Error("INSUFFICIENT_BALANCE");
   const rs = await getDbClient().execute({
-    sql: "INSERT INTO fixed_charge_payments (charge_id, label, icon, amount, date, time, month, year, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [p.charge_id, p.label, p.icon, p.amount, p.date, p.time || "00:00", p.month, p.year, p.notes || ""],
+    sql: "INSERT INTO fixed_charge_payments (charge_id, label, icon, amount, date, time, month, year, notes, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [p.charge_id, p.label, p.icon, p.amount, p.date, p.time || "00:00", p.month, p.year, p.notes || "", accId],
   });
   return rowToObj<FixedChargePayment>(rs.rows[0] as Row, rs.columns);
 }
@@ -1100,7 +1810,7 @@ export async function getProjects(): Promise<Project[]> {
 export async function addProject(p: Omit<Project, "id" | "created_at">): Promise<Project> {
   await ensureMigrations();
   const rs = await getDbClient().execute({
-    sql: "INSERT INTO projects (name, description, target_amount, saved_amount, deadline, color, icon, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    sql: "INSERT INTO projects (name, description, target_amount, saved_amount, deadline, color, icon, status, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
     args: [
       p.name,
       p.description,
@@ -1110,6 +1820,7 @@ export async function addProject(p: Omit<Project, "id" | "created_at">): Promise
       p.color,
       p.icon,
       p.status || "active",
+      p.account_id ?? null,
     ],
   });
   return rowToObj<Project>(rs.rows[0] as Row, rs.columns);
@@ -1123,7 +1834,7 @@ export async function updateProject(id: number, updates: Partial<Project>): Prom
   const current = rowToObj<Project>(currentRs.rows[0] as Row, currentRs.columns);
   const merged = { ...current, ...updates };
   await db.execute({
-    sql: "UPDATE projects SET name=?, description=?, target_amount=?, saved_amount=?, deadline=?, color=?, icon=?, status=? WHERE id=?",
+    sql: "UPDATE projects SET name=?, description=?, target_amount=?, saved_amount=?, deadline=?, color=?, icon=?, status=?, account_id=? WHERE id=?",
     args: [
       merged.name,
       merged.description,
@@ -1133,6 +1844,7 @@ export async function updateProject(id: number, updates: Partial<Project>): Prom
       merged.color,
       merged.icon,
       merged.status,
+      merged.account_id ?? null,
       id,
     ],
   });
@@ -1189,16 +1901,77 @@ export async function getProjectFunds(projectId: number): Promise<ProjectFund[]>
 }
 
 export async function addProjectFund(
-  f: Omit<ProjectFund, "id" | "created_at"> & { income_id?: number | null }
+  f: Omit<ProjectFund, "id" | "created_at"> & { income_id?: number | null; from_account_id?: number | null },
 ): Promise<ProjectFund> {
   await ensureMigrations();
   const db = getDbClient();
+  const srcAcc =
+    f.from_account_id != null && Number(f.from_account_id) > 0
+      ? Number(f.from_account_id)
+      : f.account_id != null && Number(f.account_id) > 0
+        ? Number(f.account_id)
+        : 0;
   const rs = await db.execute({
-    sql: "INSERT INTO project_funds (project_id, amount, date, notes, income_id) VALUES (?, ?, ?, ?, ?) RETURNING *",
-    args: [f.project_id, f.amount, f.date, f.notes || "", f.income_id ?? null],
+    sql: "INSERT INTO project_funds (project_id, amount, date, notes, income_id, from_account_id, account_id) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [f.project_id, f.amount, f.date, f.notes || "", f.income_id ?? null, f.from_account_id ?? null, srcAcc],
   });
   const fund = rowToObj<ProjectFund>(rs.rows[0] as Row, rs.columns);
   await syncProjectSavedAmount(f.project_id);
+  return fund;
+}
+
+/**
+ * Versement vers un projet : transfert compte source → compte du projet, + ligne project_funds.
+ */
+export async function addProjectFundWithTransfer(
+  userId: number,
+  params: {
+    project_id: number;
+    amount: number;
+    date: string;
+    notes?: string;
+    from_account_id: number;
+  },
+): Promise<ProjectFund> {
+  await ensureMigrations();
+  const project = await getProject(params.project_id);
+  if (!project) throw new Error("PROJECT_NOT_FOUND");
+  if (project.account_id == null || Number.isNaN(Number(project.account_id))) {
+    throw new Error("PROJECT_NO_ACCOUNT");
+  }
+  const destId = Number(project.account_id);
+  const fromId = Number(params.from_account_id);
+  if (fromId === destId) throw new Error("TRANSFER_SAME_ACCOUNT");
+  const amt = Math.round(Number(params.amount));
+  if (!amt || amt <= 0) throw new Error("INVALID_AMOUNT");
+
+  await assertAccountAllowsDebit(userId, fromId);
+  const srcAcc = await getAccountById(fromId, userId);
+  const dstAcc = await getAccountById(destId, userId);
+  if (!srcAcc || !dstAcc) throw new Error("ACCOUNT_NOT_FOUND");
+
+  const now = new Date();
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const xferNote = `Projet: ${project.name}${params.notes?.trim() ? ` — ${params.notes.trim()}` : ""}`;
+
+  const db = getDbClient();
+  const tx = await db.transaction("write");
+  let fund: ProjectFund;
+  try {
+    await tx.execute({
+      sql: `INSERT INTO account_transfers (user_id, from_account_id, to_account_id, amount, fee, date, time, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [userId, fromId, destId, amt, 0, params.date, time, xferNote],
+    });
+    const fundRs = await tx.execute({
+      sql: "INSERT INTO project_funds (project_id, amount, date, notes, income_id, from_account_id, account_id) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+      args: [params.project_id, amt, params.date, params.notes?.trim() || "", null, fromId, fromId],
+    });
+    fund = rowToObj<ProjectFund>(fundRs.rows[0] as Row, fundRs.columns);
+    await tx.commit();
+  } finally {
+    tx.close();
+  }
+  await syncProjectSavedAmount(params.project_id);
   return fund;
 }
 
@@ -1210,7 +1983,16 @@ export async function updateProjectFund(
   const db = getDbClient();
   const currentRs = await db.execute({ sql: "SELECT * FROM project_funds WHERE id = ?", args: [id] });
   if (currentRs.rows.length === 0) return null;
-  const current = rowToObj<ProjectFund & { income_id?: number | null }>(currentRs.rows[0] as Row, currentRs.columns);
+  const current = rowToObj<ProjectFund & { income_id?: number | null; from_account_id?: number | null }>(
+    currentRs.rows[0] as Row,
+    currentRs.columns,
+  );
+  if (
+    current.from_account_id != null &&
+    (updates.amount !== undefined || updates.date !== undefined)
+  ) {
+    throw new Error("PROJECT_FUND_TRANSFER_LOCKED");
+  }
   const m = { ...current, ...updates };
   await db.execute({
     sql: "UPDATE project_funds SET amount=?, date=?, notes=? WHERE id=?",
@@ -1231,13 +2013,26 @@ export async function updateProjectFund(
   return rowToObj<ProjectFund>(rs.rows[0] as Row, rs.columns);
 }
 
-export async function deleteProjectFund(id: number): Promise<boolean> {
+export async function deleteProjectFund(id: number, userId: number): Promise<boolean> {
   await ensureMigrations();
   const db = getDbClient();
   const fundRs = await db.execute({ sql: "SELECT * FROM project_funds WHERE id = ?", args: [id] });
   if (fundRs.rows.length === 0) return false;
-  const fund = rowToObj<ProjectFund & { income_id?: number | null }>(fundRs.rows[0] as Row, fundRs.columns);
-  if (fund.income_id) {
+  const fund = rowToObj<ProjectFund & { income_id?: number | null; from_account_id?: number | null }>(
+    fundRs.rows[0] as Row,
+    fundRs.columns,
+  );
+  const project = await getProject(fund.project_id);
+  if (fund.from_account_id != null && project?.account_id != null) {
+    await assertAccountAllowsDebit(userId, Number(project.account_id));
+    await addAccountTransfer(
+      userId,
+      Number(project.account_id),
+      Number(fund.from_account_id),
+      fund.amount,
+      { notes: `Annulation versement projet: ${project.name}` },
+    );
+  } else if (fund.income_id) {
     await db.execute({ sql: "DELETE FROM incomes WHERE id = ?", args: [fund.income_id] });
   }
   const rs = await db.execute({ sql: "DELETE FROM project_funds WHERE id = ?", args: [id] });
@@ -1293,12 +2088,27 @@ export async function getProjectPurchases(projectId: number): Promise<ProjectPur
   return rowsToObjs<ProjectPurchase>(rs.rows as Row[], rs.columns);
 }
 
-export async function addProjectPurchase(p: Omit<ProjectPurchase, "id" | "created_at">): Promise<ProjectPurchase> {
+export async function addProjectPurchase(
+  p: Omit<ProjectPurchase, "id" | "created_at">,
+  userId: number,
+): Promise<ProjectPurchase> {
   await ensureMigrations();
+  const linkedExp = p.expense_id != null && Number(p.expense_id) > 0;
+  let accId =
+    p.account_id != null && Number(p.account_id) > 0 ? Number(p.account_id) : 0;
+  if (!linkedExp) {
+    if (!accId) throw new Error("ACCOUNT_ID_REQUIRED");
+    await validateAccountOwnership(userId, accId);
+    await assertAccountAllowsDebit(userId, accId);
+    const chk = await checkSufficientBalance(userId, accId, p.amount);
+    if (!chk.ok) throw new Error("INSUFFICIENT_BALANCE");
+  } else {
+    accId = 0;
+  }
   const db = getDbClient();
   const rs = await db.execute({
-    sql: "INSERT INTO project_purchases (project_id, description, amount, date, expense_id) VALUES (?, ?, ?, ?, ?) RETURNING *",
-    args: [p.project_id, p.description, p.amount, p.date, p.expense_id ?? null],
+    sql: "INSERT INTO project_purchases (project_id, description, amount, date, expense_id, account_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [p.project_id, p.description, p.amount, p.date, p.expense_id ?? null, accId],
   });
   const purchase = rowToObj<ProjectPurchase>(rs.rows[0] as Row, rs.columns);
   await syncProjectSavedAmount(p.project_id);
@@ -1338,9 +2148,10 @@ export async function addPlannedExpense(
   p: Omit<PlannedExpense, "id" | "created_at" | "expense_id">
 ): Promise<PlannedExpense> {
   await ensureMigrations();
+  const accId = p.account_id != null && Number(p.account_id) > 0 ? Number(p.account_id) : 0;
   const rs = await getDbClient().execute({
-    sql: "INSERT INTO planned_expenses (due_date, description, category, amount, notes, status) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [p.due_date, p.description, p.category, p.amount, p.notes || "", p.status || "pending"],
+    sql: "INSERT INTO planned_expenses (due_date, description, category, amount, notes, status, account_id) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [p.due_date, p.description, p.category, p.amount, p.notes || "", p.status || "pending", accId],
   });
   return rowToObj<PlannedExpense>(rs.rows[0] as Row, rs.columns);
 }
@@ -1352,9 +2163,11 @@ export async function updatePlannedExpense(id: number, updates: Partial<PlannedE
   if (currentRs.rows.length === 0) return null;
   const current = rowToObj<PlannedExpense>(currentRs.rows[0] as Row, currentRs.columns);
   const merged = { ...current, ...updates };
+  const accRaw = updates.account_id !== undefined ? updates.account_id : merged.account_id;
+  const accId = accRaw != null && Number(accRaw) > 0 ? Number(accRaw) : 0;
   await db.execute({
-    sql: "UPDATE planned_expenses SET due_date=?, description=?, category=?, amount=?, notes=? WHERE id=?",
-    args: [merged.due_date, merged.description, merged.category, merged.amount, merged.notes || "", id],
+    sql: "UPDATE planned_expenses SET due_date=?, description=?, category=?, amount=?, notes=?, account_id=? WHERE id=?",
+    args: [merged.due_date, merged.description, merged.category, merged.amount, merged.notes || "", accId, id],
   });
   const rs = await db.execute({ sql: "SELECT * FROM planned_expenses WHERE id = ?", args: [id] });
   return rowToObj<PlannedExpense>(rs.rows[0] as Row, rs.columns);
@@ -1372,9 +2185,14 @@ export async function executePlannedExpenseById(id: number, userId: number): Pro
   const today = new Date().toISOString().split("T")[0];
   const now = new Date();
   const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const prefAcc = p.account_id != null && Number(p.account_id) > 0 ? Number(p.account_id) : null;
+  const accId = prefAcc ?? (await getDefaultAccountId(userId));
+  await assertAccountAllowsDebit(userId, accId);
+  const chk = await checkSufficientBalance(userId, accId, p.amount);
+  if (!chk.ok) throw new Error("INSUFFICIENT_BALANCE");
   const ins = await db.execute({
-    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [userId, today, time, p.description, p.category, p.amount, p.notes ? `[Planifié] ${p.notes}` : "[Planifié]"],
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes, payment_method, transaction_fee, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'cash', 0, ?) RETURNING *",
+    args: [userId, today, time, p.description, p.category, p.amount, p.notes ? `[Planifié] ${p.notes}` : "[Planifié]", accId],
   });
   const expense = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
   await db.execute({
@@ -1407,12 +2225,18 @@ export async function executeDuePlannedExpenses(userId: number): Promise<{ execu
   });
   const due = rowsToObjs<PlannedExpense>(dueRs.rows as Row[], dueRs.columns);
   const executedIds: number[] = [];
+  const defaultAcc = await getDefaultAccountId(userId);
   const tx = await db.transaction("write");
   try {
     for (const p of due) {
+      const useAcc =
+        p.account_id != null && Number(p.account_id) > 0 ? Number(p.account_id) : defaultAcc;
+      await assertAccountAllowsDebit(userId, useAcc);
+      const chk = await checkSufficientBalance(userId, useAcc, p.amount);
+      if (!chk.ok) throw new Error("INSUFFICIENT_BALANCE");
       const ins = await tx.execute({
-        sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
-        args: [userId, p.due_date, "00:00", p.description, p.category, p.amount, p.notes ? `[Planifié] ${p.notes}` : "[Planifié]"],
+        sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes, payment_method, transaction_fee, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'cash', 0, ?) RETURNING *",
+        args: [userId, p.due_date, "00:00", p.description, p.category, p.amount, p.notes ? `[Planifié] ${p.notes}` : "[Planifié]", useAcc],
       });
       const exp = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
       await tx.execute({
@@ -1476,7 +2300,7 @@ export async function updateWish(id: number, updates: Partial<Pick<Wish, "name" 
   return rowToObj<Wish>(rs.rows[0] as Row, rs.columns);
 }
 
-export async function markWishPurchased(id: number, actualAmount: number, userId: number): Promise<Expense | null> {
+export async function markWishPurchased(id: number, actualAmount: number, userId: number, transactionFee = 0, accountId?: number | null): Promise<Expense | null> {
   await ensureMigrations();
   const db = getDbClient();
   const wRs = await db.execute({ sql: "SELECT * FROM wishes WHERE id = ? AND status = 'pending'", args: [id] });
@@ -1485,9 +2309,11 @@ export async function markWishPurchased(id: number, actualAmount: number, userId
   const today = new Date().toISOString().split("T")[0];
   const now = new Date();
   const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const acc = accountId ?? (await getDefaultAccountId(userId));
+  await assertAccountAllowsDebit(userId, acc);
   const ins = await db.execute({
-    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [userId, today, time, w.name, w.category, actualAmount, w.notes ? `[Envie achetée] ${w.notes}` : "[Envie achetée]"],
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes, payment_method, transaction_fee, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [userId, today, time, w.name, w.category, actualAmount, w.notes ? `[Envie achetée] ${w.notes}` : "[Envie achetée]", "cash", transactionFee, acc],
   });
   const expense = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
   await db.execute({
@@ -1628,7 +2454,7 @@ export async function updateShoppingListItem(id: number, updates: Partial<Pick<S
   return rowToObj<ShoppingListItem>(rs.rows[0] as Row, rs.columns);
 }
 
-export async function markShoppingItemPurchased(id: number, actualAmount: number, userId: number): Promise<Expense | null> {
+export async function markShoppingItemPurchased(id: number, actualAmount: number, userId: number, transactionFee = 0, accountId?: number | null): Promise<Expense | null> {
   await ensureMigrations();
   const db = getDbClient();
   const itemRs = await db.execute({ sql: "SELECT * FROM shopping_list_items WHERE id = ? AND status = 'pending'", args: [id] });
@@ -1639,9 +2465,11 @@ export async function markShoppingItemPurchased(id: number, actualAmount: number
   const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   const purchasedAt = now.toISOString();
   const category = item.category || "food";
+  const acc = accountId ?? (await getDefaultAccountId(userId));
+  await assertAccountAllowsDebit(userId, acc);
   const ins = await db.execute({
-    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [userId, date, time, item.name, category, actualAmount, `[Liste de courses] ${item.name}`],
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes, payment_method, transaction_fee, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [userId, date, time, item.name, category, actualAmount, `[Liste de courses] ${item.name}`, "cash", transactionFee, acc],
   });
   const expense = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
   await db.execute({
@@ -1797,7 +2625,7 @@ export async function updateWishListItem(id: number, updates: Partial<Pick<WishL
   return rowToObj<WishListItem>(rs.rows[0] as Row, rs.columns);
 }
 
-export async function markWishItemPurchased(id: number, actualAmount: number, userId: number): Promise<Expense | null> {
+export async function markWishItemPurchased(id: number, actualAmount: number, userId: number, transactionFee = 0, accountId?: number | null): Promise<Expense | null> {
   await ensureMigrations();
   const db = getDbClient();
   const itemRs = await db.execute({ sql: "SELECT * FROM wish_list_items WHERE id = ? AND status = 'pending'", args: [id] });
@@ -1807,9 +2635,11 @@ export async function markWishItemPurchased(id: number, actualAmount: number, us
   const date = now.toISOString().split("T")[0];
   const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   const purchasedAt = now.toISOString();
+  const acc = accountId ?? (await getDefaultAccountId(userId));
+  await assertAccountAllowsDebit(userId, acc);
   const ins = await db.execute({
-    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
-    args: [userId, date, time, item.name, item.category, actualAmount, item.notes ? `[Envie achetée] ${item.notes}` : "[Envie achetée]"],
+    sql: "INSERT INTO expenses (user_id, date, time, description, category, amount, notes, payment_method, transaction_fee, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    args: [userId, date, time, item.name, item.category, actualAmount, item.notes ? `[Envie achetée] ${item.notes}` : "[Envie achetée]", "cash", transactionFee, acc],
   });
   const expense = rowToObj<Expense>(ins.rows[0] as Row, ins.columns);
   await db.execute({
@@ -1905,9 +2735,11 @@ export interface BackupData {
   data: {
     expenses: Expense[];
     incomes: Income[];
+    accounts?: Account[];
+    account_transfers?: AccountTransfer[];
     config: BudgetConfig;
     savings: Array<{ id?: number; month: number; year: number; amount: number }>;
-    salaries: Array<{ id?: number; month: number; year: number; amount: number }>;
+    salaries: Array<{ id?: number; month: number; year: number; amount: number; account_id?: number | null }>;
     other_incomes: Array<{ id?: number; month: number; year: number; amount: number }>;
     projects: Project[];
     fixed_charge_payments: FixedChargePayment[];
@@ -1920,9 +2752,11 @@ export interface BackupData {
 export async function exportBackup(): Promise<BackupData> {
   await ensureMigrations();
   const db = getDbClient();
-  const [expensesRs, incomesRs, savingsRs, salariesRs, otherIncomesRs, projectsRs, fcpRs, loansRs, loanPayRs, plannedRs] = await Promise.all([
+  const [expensesRs, incomesRs, accountsRs, transfersRs, savingsRs, salariesRs, otherIncomesRs, projectsRs, fcpRs, loansRs, loanPayRs, plannedRs] = await Promise.all([
     db.execute("SELECT * FROM expenses ORDER BY id"),
     db.execute("SELECT * FROM incomes ORDER BY id"),
+    db.execute("SELECT * FROM accounts ORDER BY id"),
+    db.execute("SELECT * FROM account_transfers ORDER BY id"),
     db.execute("SELECT * FROM savings ORDER BY year, month"),
     db.execute("SELECT * FROM salaries ORDER BY year, month"),
     db.execute("SELECT * FROM other_incomes ORDER BY year, month"),
@@ -1940,6 +2774,8 @@ export async function exportBackup(): Promise<BackupData> {
     data: {
       expenses: rowsToObjs<Expense>(expensesRs.rows as Row[], expensesRs.columns),
       incomes: rowsToObjs<Income>(incomesRs.rows as Row[], incomesRs.columns),
+      accounts: rowsToObjs<Account>(accountsRs.rows as Row[], accountsRs.columns),
+      account_transfers: rowsToObjs<AccountTransfer>(transfersRs.rows as Row[], transfersRs.columns),
       config,
       savings: rowsToObjs(savingsRs.rows as Row[], savingsRs.columns),
       salaries: rowsToObjs(salariesRs.rows as Row[], salariesRs.columns),
@@ -1970,6 +2806,8 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
       { sql: "DELETE FROM planned_expenses" },
       { sql: "DELETE FROM expenses" },
       { sql: "DELETE FROM incomes" },
+      { sql: "DELETE FROM account_transfers" },
+      { sql: "DELETE FROM accounts" },
       { sql: "DELETE FROM savings" },
       { sql: "DELETE FROM salaries" },
       { sql: "DELETE FROM other_incomes" },
@@ -1981,30 +2819,73 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
     if (data.config) {
       batch.push({ sql: "INSERT INTO config (id, data) VALUES (1, ?)", args: [JSON.stringify(data.config)] });
     }
+    for (const a of data.accounts || []) {
+      batch.push({
+        sql: `INSERT INTO accounts (id, user_id, name, kind, subtype, institution_name, notes, icon, color, logo_url, opening_balance, is_archived, sort_order, created_at, vault_unlocks_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          a.id,
+          userId,
+          a.name,
+          a.kind,
+          a.subtype ?? "",
+          a.institution_name ?? "",
+          a.notes || "",
+          a.icon || "wallet",
+          a.color || "#6366f1",
+          a.logo_url ?? "",
+          a.opening_balance ?? 0,
+          a.is_archived ?? 0,
+          a.sort_order ?? 0,
+          a.created_at || new Date().toISOString(),
+          a.vault_unlocks_on ?? null,
+        ],
+      });
+    }
+    for (const t of data.account_transfers || []) {
+      batch.push({
+        sql: `INSERT INTO account_transfers (id, user_id, from_account_id, to_account_id, amount, fee, fees_account_id, date, time, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        args: [
+          t.id,
+          userId,
+          t.from_account_id,
+          t.to_account_id,
+          t.amount,
+          t.fee ?? 0,
+          (t as AccountTransfer).fees_account_id ?? null,
+          t.date,
+          t.time || "00:00",
+          t.notes || "",
+          t.created_at || new Date().toISOString(),
+        ],
+      });
+    }
     for (const e of data.expenses || []) {
       batch.push({
-        sql: "INSERT INTO expenses (id, user_id, date, time, description, category, amount, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        args: [e.id, userId, e.date, e.time || "00:00", e.description, e.category, e.amount, e.notes || "", e.created_at || new Date().toISOString()],
+        sql: "INSERT INTO expenses (id, user_id, date, time, description, category, amount, notes, payment_method, transaction_fee, account_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        args: [e.id, userId, e.date, e.time || "00:00", e.description, e.category, e.amount, e.notes || "", (e as Expense).payment_method || "cash", (e as Expense).transaction_fee ?? 0, (e as Expense).account_id ?? null, e.created_at || new Date().toISOString()],
       });
     }
     for (const i of data.incomes || []) {
       batch.push({
-        sql: "INSERT INTO incomes (id, date, time, description, source, amount, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        args: [i.id, i.date, i.time || "00:00", i.description, i.source || "other", i.amount, i.notes || "", i.created_at || new Date().toISOString()],
+        sql: "INSERT INTO incomes (id, date, time, description, source, amount, notes, account_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        args: [i.id, i.date, i.time || "00:00", i.description, i.source || "other", i.amount, i.notes || "", (i as Income).account_id ?? null, i.created_at || new Date().toISOString()],
       });
     }
     for (const s of data.savings || []) {
       batch.push({ sql: "INSERT INTO savings (month, year, amount) VALUES (?, ?, ?)", args: [s.month, s.year, s.amount ?? 0] });
     }
     for (const s of data.salaries || []) {
-      batch.push({ sql: "INSERT INTO salaries (month, year, amount) VALUES (?, ?, ?)", args: [s.month, s.year, s.amount ?? 0] });
+      batch.push({
+        sql: "INSERT INTO salaries (month, year, amount, account_id) VALUES (?, ?, ?, ?)",
+        args: [s.month, s.year, s.amount ?? 0, (s as { account_id?: number | null }).account_id ?? null],
+      });
     }
     for (const o of data.other_incomes || []) {
       batch.push({ sql: "INSERT INTO other_incomes (month, year, amount) VALUES (?, ?, ?)", args: [o.month, o.year, o.amount ?? 0] });
     }
     for (const p of data.projects || []) {
       batch.push({
-        sql: "INSERT INTO projects (id, name, description, target_amount, saved_amount, deadline, color, icon, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        sql: "INSERT INTO projects (id, name, description, target_amount, saved_amount, deadline, color, icon, status, created_at, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         args: [
           p.id,
           p.name,
@@ -2016,12 +2897,13 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
           p.icon || "target",
           p.status || "active",
           p.created_at || new Date().toISOString(),
+          (p as Project).account_id ?? null,
         ],
       });
     }
     for (const l of data.loans || []) {
       batch.push({
-        sql: "INSERT INTO loans (id, type, label, lender_borrower, total_amount, remaining_amount, interest_rate, fees, monthly_payment, start_date, end_date, next_due_date, notes, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        sql: "INSERT INTO loans (id, type, label, lender_borrower, total_amount, remaining_amount, interest_rate, fees, monthly_payment, start_date, end_date, next_due_date, notes, status, created_at, payment_account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         args: [
           l.id,
           l.type,
@@ -2038,24 +2920,48 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
           l.notes || "",
           l.status || "active",
           l.created_at || new Date().toISOString(),
+          (l as Loan).payment_account_id ?? null,
         ],
       });
     }
     for (const lp of data.loan_payments || []) {
       batch.push({
-        sql: "INSERT INTO loan_payments (id, loan_id, amount, fees, date, time, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        args: [lp.id, lp.loan_id, lp.amount, lp.fees ?? 0, lp.date, lp.time || "00:00", lp.notes || "", lp.created_at || new Date().toISOString()],
+        sql: "INSERT INTO loan_payments (id, loan_id, amount, fees, date, time, notes, created_at, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        args: [
+          lp.id,
+          lp.loan_id,
+          lp.amount,
+          lp.fees ?? 0,
+          lp.date,
+          lp.time || "00:00",
+          lp.notes || "",
+          lp.created_at || new Date().toISOString(),
+          (lp as LoanPayment).account_id ?? 0,
+        ],
       });
     }
     for (const f of data.fixed_charge_payments || []) {
       batch.push({
-        sql: "INSERT INTO fixed_charge_payments (id, charge_id, label, icon, amount, date, time, month, year, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        args: [f.id, f.charge_id, f.label, f.icon || "house", f.amount, f.date, f.time || "00:00", f.month, f.year, f.notes || "", f.created_at || new Date().toISOString()],
+        sql: "INSERT INTO fixed_charge_payments (id, charge_id, label, icon, amount, date, time, month, year, notes, created_at, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        args: [
+          f.id,
+          f.charge_id,
+          f.label,
+          f.icon || "house",
+          f.amount,
+          f.date,
+          f.time || "00:00",
+          f.month,
+          f.year,
+          f.notes || "",
+          f.created_at || new Date().toISOString(),
+          (f as FixedChargePayment).account_id ?? 0,
+        ],
       });
     }
     for (const pe of data.planned_expenses || []) {
       batch.push({
-        sql: "INSERT INTO planned_expenses (id, due_date, description, category, amount, notes, status, expense_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        sql: "INSERT INTO planned_expenses (id, due_date, description, category, amount, notes, status, expense_id, created_at, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         args: [
           pe.id,
           pe.due_date,
@@ -2066,11 +2972,23 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
           pe.status || "pending",
           pe.expense_id ?? null,
           pe.created_at || new Date().toISOString(),
+          (pe as PlannedExpense).account_id ?? 0,
         ],
       });
     }
     await tx.batch(batch);
     await tx.commit();
+    const db2 = getDbClient();
+    await ensureUserDefaultAccount(userId);
+    const defRs = await db2.execute({
+      sql: "SELECT id FROM accounts WHERE user_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1",
+      args: [userId],
+    });
+    if (defRs.rows.length > 0) {
+      const defId = Number((defRs.rows[0] as Row).id);
+      await db2.execute({ sql: "UPDATE expenses SET account_id = ? WHERE user_id = ? AND account_id IS NULL", args: [defId, userId] });
+      await db2.execute({ sql: "UPDATE incomes SET account_id = ? WHERE account_id IS NULL", args: [defId] });
+    }
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Erreur lors de la restauration" };

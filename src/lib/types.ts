@@ -6,6 +6,10 @@ export interface Expense {
   category: string;
   amount: number;
   notes: string;
+  payment_method?: string;
+  transaction_fee?: number;
+  /** Compte débité (obligatoire en création via API) */
+  account_id?: number | null;
   created_at: string;
 }
 
@@ -16,6 +20,52 @@ export interface Income {
   description: string;
   source: string;
   amount: number;
+  notes: string;
+  /** Compte crédité (obligatoire en création via API) */
+  account_id?: number | null;
+  created_at: string;
+}
+
+/** Compte de trésorerie (Mobile Money, banque, espèces, etc.) */
+export interface Account {
+  id: number;
+  user_id: number;
+  name: string;
+  kind: string;
+  /** Sous-type : ex. opérateur mobile money (`wave`, `orange_money`, …) */
+  subtype?: string;
+  /** Nom de la banque / établissement (`kind` bancaire) */
+  institution_name?: string;
+  notes: string;
+  icon: string;
+  color: string;
+  /** Image opérateur (data URI), affichée à la place de l’icône si présente */
+  logo_url?: string;
+  opening_balance: number;
+  is_archived: number;
+  sort_order: number;
+  created_at: string;
+  /**
+   * Coffre (kind `vault`) : date YYYY-MM-DD à partir de laquelle les sorties sont autorisées.
+   * `null` = pas de verrou, ou débloqué manuellement.
+   */
+  vault_unlocks_on?: string | null;
+}
+
+export type AccountWithBalance = Account & { balance: number };
+
+/** Transfert entre deux comptes */
+export interface AccountTransfer {
+  id: number;
+  user_id: number;
+  from_account_id: number;
+  to_account_id: number;
+  amount: number;
+  fee: number;
+  /** Si renseigné et différent de la source : les frais sont prélevés sur ce compte */
+  fees_account_id?: number | null;
+  date: string;
+  time: string;
   notes: string;
   created_at: string;
 }
@@ -62,6 +112,8 @@ export interface FixedChargePayment {
   year: number;
   notes: string;
   created_at: string;
+  /** Compte débité pour ce paiement */
+  account_id?: number;
 }
 
 export interface Project {
@@ -75,6 +127,8 @@ export interface Project {
   icon: string;
   status: "active" | "completed" | "paused";
   created_at: string;
+  /** Compte sur lequel est versée l’épargne du projet */
+  account_id?: number | null;
 }
 
 export interface ProjectPurchase {
@@ -85,6 +139,8 @@ export interface ProjectPurchase {
   date: string;
   expense_id: number | null;
   created_at: string;
+  /** Compte débité (si pas de expense_id liée) */
+  account_id?: number | null;
 }
 
 export interface ProjectFund {
@@ -96,6 +152,10 @@ export interface ProjectFund {
   created_at: string;
   /** ID du revenu créé (fonds = revenu + épargne projet) */
   income_id?: number | null;
+  /** Compte prélevé pour ce versement (transfert vers le compte du projet) */
+  from_account_id?: number | null;
+  /** Alias / piste comptable : même sens que from_account_id pour les versements */
+  account_id?: number | null;
 }
 
 export interface BudgetConfig {
@@ -110,6 +170,8 @@ export interface BudgetConfig {
   savingsGoalStartDate?: string;
   /** Date cible pour le fonds d'urgence (YYYY-MM-DD). Fin de la période d'épargne. */
   savingsGoalDeadline?: string;
+  /** Compte coffre (`kind === "vault"`) dont le solde suit l’objectif fonds d’urgence. */
+  emergency_fund_account_id?: number | null;
 }
 
 export interface MonthlySaving {
@@ -157,6 +219,8 @@ export interface Loan {
   payment_day?: number;
   total_payments?: number;
   paid_payments?: number;
+  /** Prélèvements (banque / emprunt perso) ou encaissements par défaut (prêt fait) — référence `accounts.id` */
+  payment_account_id?: number | null;
 }
 
 export interface LoanScheduleRow {
@@ -250,6 +314,8 @@ export interface LoanPayment {
   created_at: string;
   expense_id?: number | null;
   income_id?: number | null;
+  /** Compte impacté (redondant avec expense/income liés ; utilisé pour imports sans écriture liée) */
+  account_id?: number | null;
 }
 
 export interface PlannedExpense {
@@ -262,6 +328,8 @@ export interface PlannedExpense {
   status: "pending" | "executed" | "cancelled";
   expense_id: number | null;
   created_at: string;
+  /** Compte à débiter à l’exécution (0 = défaut utilisateur) */
+  account_id?: number | null;
 }
 
 /** @deprecated Utiliser WishList + WishListItem */
@@ -343,7 +411,7 @@ export interface CalendarEvent {
   icon?: string;
 }
 
-export type NotificationSourceType = "loan_due" | "loan_overdue" | "loan_upcoming" | "planned_expense" | "wish" | "shopping" | "reminder";
+export type NotificationSourceType = "loan_due" | "loan_overdue" | "loan_upcoming" | "change_encash" | "planned_expense" | "wish" | "shopping" | "reminder";
 
 export interface NotificationTodo {
   id: string;

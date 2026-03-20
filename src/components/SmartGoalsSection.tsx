@@ -22,6 +22,8 @@ interface SmartGoalsSectionProps {
   totalSavedManual: number;
   /** Épargne réalisée dans la période [début, cible] — prend en compte les variations mensuelles */
   savedInPeriod?: number;
+  /** Si défini : solde du coffre lié au fonds d’urgence (remplace l’épargne manuelle pour cet objectif). */
+  emergencyVaultBalance?: number | null;
   resteAVivre: number;
 }
 
@@ -30,6 +32,7 @@ export default function SmartGoalsSection({
   projects,
   totalSavedManual,
   savedInPeriod,
+  emergencyVaultBalance = null,
   resteAVivre,
 }: SmartGoalsSectionProps) {
   const goals: Array<{
@@ -48,9 +51,11 @@ export default function SmartGoalsSection({
 
   // Fonds d'urgence — période d'épargne (début → cible) ou simple date cible
   // savedInPeriod = épargne uniquement dans la période (prise en compte des variations mensuelles)
-  const savedForGoal = (config.savingsGoalStartDate && config.savingsGoalDeadline && savedInPeriod !== undefined)
+  const savedForGoalManual = (config.savingsGoalStartDate && config.savingsGoalDeadline && savedInPeriod !== undefined)
     ? savedInPeriod
     : totalSavedManual;
+  const savedForGoal =
+    emergencyVaultBalance != null ? emergencyVaultBalance : savedForGoalManual;
 
   if (config.savingsGoal > 0 && config.savingsGoalDeadline) {
     const deadline = config.savingsGoalDeadline;
