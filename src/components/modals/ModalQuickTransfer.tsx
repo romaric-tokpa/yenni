@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { ArrowRightLeft, X, Check } from "lucide-react";
-import { accountHasActiveOutgoingLock } from "@/lib/constants";
 import type { BudgetContextValue } from "./types";
 
 interface ModalQuickTransferProps {
@@ -13,7 +12,7 @@ interface ModalQuickTransferProps {
 export default function ModalQuickTransfer({ onClose, budget }: ModalQuickTransferProps) {
   const { showToast, fetchAccounts, accountsWithBalance } = budget;
   const activeAccounts = accountsWithBalance.filter((a) => !a.is_archived);
-  const fromAccounts = activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on));
+  const fromAccounts = activeAccounts;
 
   const [form, setForm] = useState({
     from_account_id: "",
@@ -130,7 +129,6 @@ export default function ModalQuickTransfer({ onClose, budget }: ModalQuickTransf
               </option>
             ))}
           </select>
-          <p className="text-[10px] text-neutral-600 mt-1">Les coffres verrouillés ne peuvent pas être sources.</p>
         </div>
         <div>
           <label className="text-xs text-neutral-500 mb-1.5 block">Vers</label>

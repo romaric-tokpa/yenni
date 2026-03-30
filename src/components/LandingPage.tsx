@@ -43,7 +43,7 @@ const features = [
     icon: Landmark,
     title: "Épargne & urgences",
     description:
-      "Objectifs, fonds d’urgence et versements mois par mois, avec option coffre verrouillé.",
+      "Objectifs, fonds d’urgence et versements mois par mois.",
     accent: "text-emerald-400",
     bg: "bg-emerald-500/10",
   },

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useBudgetContext } from "@/contexts/BudgetContext";
-import { formatCFA, accountTypeLabel, accountHasActiveOutgoingLock } from "@/lib/constants";
+import { formatCFA, accountTypeLabel } from "@/lib/constants";
 import type { AccountWithBalance, AccountTransfer } from "@/lib/types";
 import AccountGlyph from "@/components/ui/AccountGlyph";
 import {
@@ -20,8 +20,6 @@ import {
   Landmark,
   History,
   Loader2,
-  Lock,
-  Unlock,
   Pencil,
   RefreshCw,
 } from "lucide-react";
@@ -55,10 +53,7 @@ export default function AccountsManageView() {
   }, [accountsRevision, loadTransfers]);
 
   const activeAccounts = accountsWithBalance.filter((a) => !a.is_archived);
-  const transferFromAccounts = useMemo(
-    () => activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)),
-    [activeAccounts],
-  );
+  const transferFromAccounts = activeAccounts;
 
   const stats = useMemo(() => {
     const active = accountsWithBalance.filter((a) => !a.is_archived);
@@ -137,30 +132,6 @@ export default function AccountsManageView() {
       return;
     }
     showToast("Compte supprimé");
-    await fetchAccounts();
-  };
-
-  const unlockVault = async (a: AccountWithBalance) => {
-    const isCoffre = a.kind === "vault";
-    if (
-      !confirm(
-        isCoffre
-          ? `Débloquer le coffre « ${a.name} » maintenant ? Tu pourras à nouveau payer et transférer depuis ce compte.`
-          : `Débloquer le plan d'épargne « ${a.name} » maintenant ? Les sorties (dépenses, transferts) seront à nouveau autorisées.`,
-      )
-    )
-      return;
-    const r = await fetch(`/api/accounts/${a.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ unlock_vault: true }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      showToast(j.error || "Impossible de débloquer", "error");
-      return;
-    }
-    showToast(isCoffre ? "Coffre débloqué — les sorties sont à nouveau possibles." : "Plan d'épargne débloqué — les sorties sont à nouveau possibles.");
     await fetchAccounts();
   };
 
@@ -286,15 +257,6 @@ export default function AccountsManageView() {
               {sortedAccounts.map((a) => {
                 const accent = a.color || "#6366f1";
                 const hasLogo = a.logo_url?.trim().startsWith("data:image/");
-                const outgoingLock = accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on);
-                const isVaultKind = a.kind === "vault";
-                const unlockLabel = a.vault_unlocks_on
-                  ? new Date(a.vault_unlocks_on + "T12:00:00").toLocaleDateString("fr-FR", {
-                      day: "numeric",
-                      month: "long",
-                      year: "numeric",
-                    })
-                  : "";
                 return (
                   <li key={a.id}>
                     <div
@@ -333,46 +295,11 @@ export default function AccountsManageView() {
                                 Archivé
                               </span>
                             )}
-                            {outgoingLock && (
-                              <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-200/90 border border-amber-500/30 inline-flex items-center gap-1">
-                                <Lock size={11} strokeWidth={2.5} className="opacity-90" />
-                                {isVaultKind ? "Coffre" : "Plan d'épargne"}
-                              </span>
-                            )}
                           </div>
                           <p className="text-xs text-neutral-500 mt-1 leading-snug">
                             {accountTypeLabel(a.kind, a.subtype, a.institution_name)}
                           </p>
                           <p className="text-[10px] text-emerald-500/70 mt-2 font-medium">Voir les mouvements →</p>
-                          {outgoingLock && (
-                            <p
-                              className="text-[11px] text-amber-200/80 mt-2 leading-snug flex flex-wrap items-center gap-2"
-                              onClick={(e) => e.preventDefault()}
-                            >
-                              <span>
-                                Verrouillé jusqu’au <strong>{unlockLabel}</strong> — entrées autorisées, pas de dépenses
-                                ni transferts sortants.
-                              </span>
-                              {!a.is_archived && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    unlockVault(a);
-                                  }}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-100 hover:bg-amber-500/25 transition-colors"
-                                >
-                                  <Unlock size={12} />
-                                  Débloquer
-                                </button>
-                              )}
-                            </p>
-                          )}
-                          {(isVaultKind || a.kind === "bank_blocked_savings") && !outgoingLock && (
-                            <p className="text-[11px] text-emerald-400/90 mt-2">
-                              Période écoulée ou déblocage manuel — ce solde est utilisable pour achats et transferts.
-                            </p>
-                          )}
                         </div>
 
                         <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1 sm:min-w-[120px] px-4 pb-4 sm:p-5 sm:pl-0">
@@ -384,9 +311,7 @@ export default function AccountsManageView() {
                             >
                               {formatCFA(a.balance)}
                             </div>
-                            <div className="text-[10px] text-neutral-500">
-                              FCFA · solde {outgoingLock ? "(immobilisé)" : "courant"}
-                            </div>
+                            <div className="text-[10px] text-neutral-500">FCFA · solde courant</div>
                           </div>
                         </div>
                       </Link>

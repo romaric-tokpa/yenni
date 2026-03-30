@@ -40,6 +40,8 @@ export function generateAmortizationSchedule(params: {
   feesAmount?: number;
   feeTaxRate?: number;
   alreadyPaid?: number;
+  /** Mensualité fixe (capital + intérêts + assurances + taxes) comme relevés SGCI / PPO — sauf dernière échéance (solde). */
+  fixedRegularTotalPayment?: number;
 }): LoanScheduleInput[] {
   const {
     totalAmount,
@@ -53,6 +55,7 @@ export function generateAmortizationSchedule(params: {
     feesAmount = 0,
     feeTaxRate = 10,
     alreadyPaid = 0,
+    fixedRegularTotalPayment,
   } = params;
 
   const r = annualRate / 100 / 12;
@@ -87,15 +90,33 @@ export function generateAmortizationSchedule(params: {
   }
 
   // Échéances régulières (capital + intérêts + taxes + assurances)
+  const useFixed =
+    fixedRegularTotalPayment != null && Number.isFinite(fixedRegularTotalPayment) && fixedRegularTotalPayment > 0;
+
   for (let i = 0; i < n; i++) {
     const interest = Math.round(balance * r);
-    let principal = Math.round(monthlyPrincipalInterest - balance * r);
-    if (i === n - 1) principal = balance;
-    principal = Math.min(principal, balance);
     const insurance = Math.round(monthlyInsurance);
     const taxInterest = Math.round(interest * (taxRate / 100));
     const taxInsurance = Math.round(insurance * (taxRate / 100));
-    const totalPayment = principal + interest + insurance + taxInterest + taxInsurance;
+    const components = interest + insurance + taxInterest + taxInsurance;
+
+    let principal: number;
+    let totalPayment: number;
+
+    if (i === n - 1) {
+      principal = balance;
+      totalPayment = principal + components;
+    } else if (useFixed) {
+      totalPayment = Math.round(fixedRegularTotalPayment);
+      principal = Math.round(totalPayment - components);
+      if (principal < 0) principal = 0;
+      if (principal > balance) principal = balance;
+    } else {
+      let pr = Math.round(monthlyPrincipalInterest - balance * r);
+      principal = Math.min(pr, balance);
+      totalPayment = principal + components;
+    }
+
     balance = Math.max(0, balance - principal);
 
     const num = rowNumber++;

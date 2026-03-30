@@ -1,6 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
-import { formatCFA, MONTHS_FULL, accountHasActiveOutgoingLock } from "@/lib/constants";
+import { formatCFA, MONTHS_FULL } from "@/lib/constants";
 import { BudgetConfig, Expense, Income, FixedChargePayment, LoanPayment, Loan, CalendarEvent, AccountWithBalance } from "@/lib/types";
 import Icon from "./ui/Icon";
 import {
@@ -75,7 +75,7 @@ export default function CalendarView({
 
   const activeAccounts = useMemo(() => accountsWithBalance.filter((a) => !a.is_archived), [accountsWithBalance]);
   const debitAccounts = useMemo(
-    () => activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)),
+    () => activeAccounts,
     [activeAccounts],
   );
   const defaultAccountId = activeAccounts[0]?.id;
@@ -227,7 +227,7 @@ export default function CalendarView({
       return;
     }
     if (!defaultExpenseAccountId) {
-      showToast("Aucun compte utilisable pour une dépense (coffres verrouillés ?).", "error");
+      showToast("Aucun compte actif pour une dépense. Ajoute-en un dans Réglages → Trésorerie.", "error");
       return;
     }
     const acc = expenseForm.account_id ? Number(expenseForm.account_id) : defaultExpenseAccountId;

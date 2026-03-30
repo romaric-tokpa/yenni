@@ -1,9 +1,10 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { formatCFA, accountHasActiveOutgoingLock, accountTypeLabel, isBankTreasuryDebitAccount } from "@/lib/constants";
+import { formatCFA, accountTypeLabel, isBankTreasuryDebitAccount } from "@/lib/constants";
 import { useBudgetContext } from "@/contexts/BudgetContext";
 import { generateAmortizationSchedule } from "@/lib/loan-calculator";
+import { parseSgciPdfScheduleMainLine } from "@/lib/sgci-amortization-parse";
 import { Loan } from "@/lib/types";
 import Icon from "./ui/Icon";
 import {
@@ -94,25 +95,17 @@ export default function LoanFormView({
   });
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [pdfPasteLine, setPdfPasteLine] = useState("");
 
-  /** Comptes bancaires trésorerie utilisables pour prélèvement d’échéances (hors ép. bloquée). */
+  /** Comptes bancaires trésorerie utilisables pour prélèvement d’échéances. */
   const bankTreasuryAccounts = useMemo(
-    () =>
-      accountsWithBalance.filter(
-        (a) =>
-          !a.is_archived &&
-          isBankTreasuryDebitAccount(a.kind) &&
-          !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)
-      ),
-    [accountsWithBalance]
+    () => accountsWithBalance.filter((a) => !a.is_archived && isBankTreasuryDebitAccount(a.kind)),
+    [accountsWithBalance],
   );
 
   const repaymentChoiceAccounts = useMemo(
-    () =>
-      accountsWithBalance.filter(
-        (a) => !a.is_archived && !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)
-      ),
-    [accountsWithBalance]
+    () => accountsWithBalance.filter((a) => !a.is_archived),
+    [accountsWithBalance],
   );
 
   const isBank = type === "bank";
@@ -269,6 +262,9 @@ export default function LoanFormView({
       const firstDate = form.first_payment_date || form.start_date;
       const paymentDay = Math.min(31, Math.max(1, Number(form.payment_day) || 25));
       const feesAmt = Number(form.fees_amount) || 0;
+      const rowsPaidCount = Math.max(0, Math.floor(Number(form.months_paid) || 0));
+      const fixedPay =
+        Number(form.monthly_payment) > 0 ? Math.round(Number(form.monthly_payment)) : undefined;
       schedule = generateAmortizationSchedule({
         totalAmount: amt,
         annualRate: Number(form.interest_rate) || 0,
@@ -279,7 +275,8 @@ export default function LoanFormView({
         insuranceRate: Number(form.insurance_rate) || 0,
         taxRate: Number(form.tax_rate) || 0,
         feesAmount: feesAmt,
-        alreadyPaid: monthsPaid + (feesAmt > 0 ? 1 : 0),
+        alreadyPaid: rowsPaidCount,
+        fixedRegularTotalPayment: fixedPay,
       });
     }
 
@@ -505,8 +502,8 @@ export default function LoanFormView({
             <>
               <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
                 Chaque échéance est une <strong>dépense</strong> débitée sur le{" "}
-                <strong>compte bancaire</strong> de ta trésorerie choisi (courant, épargne non bloquée, etc. — pas
-                d&apos;épargne bloquée, ni coffre, ni espèces / mobile money).
+                <strong>compte bancaire</strong> de ta trésorerie choisi (courant, épargne, plan d’épargne… — pas
+                coffre, ni espèces / mobile money).
               </p>
               <Field label="Compte bancaire (trésorerie) — prélèvement des mensualités">
                 <select
@@ -552,8 +549,8 @@ export default function LoanFormView({
           ) : (
             <>
               <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
-                Chaque remboursement est une <strong>dépense</strong> sur le compte choisi (espèces, mobile
-                money, compte courant, etc.). Les comptes coffre <strong>verrouillés</strong> ne sont pas proposés.
+                Chaque remboursement est une <strong>dépense</strong> sur le compte choisi (espèces, mobile money,
+                compte courant, coffre, etc.).
               </p>
               <Field label="Compte pour les remboursements">
                 <select
@@ -610,10 +607,14 @@ export default function LoanFormView({
                   <input
                     type="number"
                     className={`${inputClass} font-mono`}
-                    placeholder="Auto-calculée"
+                    placeholder="Ex. 94 179 (relevé SGCI — mensualité constante)"
                     value={form.monthly_payment}
                     onChange={(e) => setForm((f) => ({ ...f, monthly_payment: e.target.value }))}
                   />
+                  <span className="text-[10px] text-slate-500 mt-0.5 block">
+                    Si renseignée : tableau d’amortissement avec <strong>mensualité fixe</strong> (comme extrait PPO /
+                    SGCI), pas seulement l’annuité théorique.
+                  </span>
                 </Field>
                 <Field label="Taux assurance (%)" optional>
                   <input
@@ -662,15 +663,63 @@ export default function LoanFormView({
               </>
             )}
           </div>
-          {estimatedMonthly !== null && isBank && (
+          {estimatedMonthly !== null && isBank && !Number(form.monthly_payment) && (
             <div className="mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
               <p className="text-sm font-medium text-emerald-300">
                 Mensualité estimée : <span className="font-mono">{formatCFA(Math.round(estimatedMonthly))} FCFA</span>
               </p>
-              <p className="text-xs text-slate-400 mt-0.5">Tu peux ajuster si la banque arrondit différemment</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Indique le « Montant échéance » du relevé pour coller au tableau bancaire (mensualité constante).
+              </p>
             </div>
           )}
         </Section>
+
+        {isBank && !isEdit && (
+          <Section title="Coller une ligne du tableau PDF (SGCI)" icon={FileText}>
+            <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
+              Depuis l’extrait texte du tableau d’amortissement (PPO moyen terme, etc.), colle{" "}
+              <strong>une ligne d’échéance</strong> commençant par <code className="text-slate-400">!015!25/03/2026!…</code>.
+              L’app remplit la <strong>prochaine échéance</strong>, le <strong>nombre de lignes déjà payées</strong> et la{" "}
+              <strong>mensualité constante</strong> (montant échéance).
+            </p>
+            <textarea
+              className={`${inputClass} min-h-[72px] resize-y font-mono text-xs`}
+              placeholder={`!015!25/03/2026! 65.392! 23.091! ! ! ! ! 94.179!NDC!`}
+              value={pdfPasteLine}
+              onChange={(e) => setPdfPasteLine(e.target.value)}
+              rows={3}
+              aria-label="Ligne tableau amortissement PDF"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const p = parseSgciPdfScheduleMainLine(pdfPasteLine);
+                if (!p) {
+                  showToast(
+                    "Ligne non reconnue. Utilise une ligne principale avec date JJ/MM/AAAA et montants séparés par « ! ».",
+                    "error",
+                  );
+                  return;
+                }
+                setForm((f) => ({
+                  ...f,
+                  isExisting: true,
+                  months_paid: String(Math.max(0, p.number - 1)),
+                  monthly_payment: String(p.totalPayment),
+                  next_due_date: p.dueDateIso,
+                }));
+                showToast(
+                  `Échéance n°${p.number} — ${p.number - 1} ligne(s) payée(s). Mensualité ${formatCFA(p.totalPayment)} F (${p.bankStatus}).`,
+                );
+                setPdfPasteLine("");
+              }}
+              className="mt-2 px-4 py-2 rounded-xl bg-sky-500/15 border border-sky-500/25 text-sky-300 text-xs font-semibold hover:bg-sky-500/25 transition-colors"
+            >
+              Lire la ligne et remplir l’import
+            </button>
+          </Section>
+        )}
 
         {/* Dates */}
         <Section title="Dates" icon={Calendar}>
@@ -740,14 +789,27 @@ export default function LoanFormView({
                 <span className="text-sm text-slate-300">Prêt déjà en cours — aucune écriture comptable</span>
               </label>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Échéances déjà payées">
+                <Field
+                  label={
+                    isBank
+                      ? "Lignes du tableau déjà payées (relevé PDF)"
+                      : "Échéances déjà payées"
+                  }
+                >
                   <input
                     type="number"
                     className={`${inputClass} font-mono`}
-                    placeholder="13"
+                    placeholder={isBank ? "14 (inclut n°001 frais si déjà prélevés)" : "13"}
                     value={form.months_paid}
                     onChange={(e) => setForm((f) => ({ ...f, months_paid: e.target.value }))}
                   />
+                  {isBank && (
+                    <span className="text-[10px] text-slate-500 mt-0.5 block">
+                      Compte chaque ligne du tableau : <strong>n°001</strong> frais de dossier + les mensualités
+                      jusqu’à la dernière marquée payée (<strong>CPT</strong> sur le relevé). Si ta prochaine ligne est{" "}
+                      <strong>n°15</strong>, indique <strong>14</strong>.
+                    </span>
+                  )}
                 </Field>
                 {!isBank && (
                   <Field label="Montant par échéance">
@@ -760,13 +822,22 @@ export default function LoanFormView({
                     />
                   </Field>
                 )}
-                {isBank && Number(form.months_paid) > 0 && Number(form.total_payments) > 0 && (
-                  <div className="flex items-end pb-2">
-                    <p className="text-sm text-amber-300">
-                      {Number(form.months_paid)} marquées payées, {Math.max(0, Number(form.total_payments) - Number(form.months_paid))} restantes
-                    </p>
-                  </div>
-                )}
+                {isBank &&
+                  Number(form.total_payments) > 0 &&
+                  (() => {
+                    const feeRows = Number(form.fees_amount) > 0 ? 1 : 0;
+                    const scheduleRows = feeRows + Number(form.total_payments);
+                    const paid = Math.max(0, Math.floor(Number(form.months_paid) || 0));
+                    const rest = Math.max(0, scheduleRows - paid);
+                    return (
+                      <div className="flex items-end pb-2 sm:col-span-2">
+                        <p className="text-sm text-amber-300">
+                          {paid} ligne{paid > 1 ? "s" : ""} payée{paid > 1 ? "s" : ""} sur {scheduleRows} au tableau (
+                          {rest} restante{rest > 1 ? "s" : ""})
+                        </p>
+                      </div>
+                    );
+                  })()}
               </div>
             </div>
           </Section>

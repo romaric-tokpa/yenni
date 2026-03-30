@@ -1,8 +1,9 @@
 services:
   monbudget:
     build: .
+    # Si 3000 est déjà pris (ex. `next dev` local) : HOST_PORT=3001 docker compose up -d
     ports:
-      - "3000:3000"
+      - "${HOST_PORT:-3000}:3000"
     volumes:
       - monbudget_data:/app/data
     environment:

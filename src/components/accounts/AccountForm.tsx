@@ -4,13 +4,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useBudgetContext } from "@/contexts/BudgetContext";
-import {
-  ACCOUNT_KIND_PRESETS,
-  MOBILE_MONEY_PROVIDERS,
-  PREPAID_CARD_PROVIDERS,
-  AVAILABLE_ICONS,
-  VAULT_PERIOD_MONTHS_PRESETS,
-} from "@/lib/constants";
+import { ACCOUNT_KIND_PRESETS, MOBILE_MONEY_PROVIDERS, AVAILABLE_ICONS } from "@/lib/constants";
 import AccountGlyph from "@/components/ui/AccountGlyph";
 import Icon from "@/components/ui/Icon";
 import {
@@ -34,25 +28,18 @@ function accountToFormState(acc: AccountWithBalance) {
     icon: acc.icon ?? "wallet",
     color: acc.color ?? "#6366f1",
     logoDataUri: logo.startsWith("data:image/") ? logo : "",
-    vault_lock_preset_months: 6 as number,
-    vault_lock_use_custom: false,
-    vault_lock_custom_months: "",
-    savings_plan_lock_enabled: false,
   };
 }
 
 function defaultIconForKind(kind: string): string {
   if (kind === "cash") return "banknote";
-  if (kind === "vault") return "piggy-bank";
   if (kind.startsWith("bank_")) return "landmark";
   return "wallet";
 }
 
 function defaultColorForKind(kind: string): string {
   if (kind === "cash") return "#10B981";
-  if (kind === "vault") return "#d97706";
   if (kind.startsWith("bank_")) return "#3B82F6";
-  if (kind === "other") return "#78716C";
   return "#6366f1";
 }
 
@@ -66,12 +53,6 @@ const EMPTY_NEW_FORM = {
   icon: "banknote",
   color: "#10B981",
   logoDataUri: "",
-  /** Durée blocage coffre : preset en mois, ou 0 si saisie libre */
-  vault_lock_preset_months: 6 as number,
-  vault_lock_use_custom: false,
-  vault_lock_custom_months: "",
-  /** Plan d'épargne : si false, aucune échéance (sorties autorisées comme un compte courant). */
-  savings_plan_lock_enabled: false,
 };
 
 export default function AccountForm({ editAccountId }: { editAccountId?: number }) {
@@ -82,7 +63,6 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
   const [newForm, setNewForm] = useState({ ...EMPTY_NEW_FORM });
   const [logoUrlInput, setLogoUrlInput] = useState("");
   const [logoUrlLoading, setLogoUrlLoading] = useState(false);
-  const [vaultUnlockDate, setVaultUnlockDate] = useState("");
   const [editHydrated, setEditHydrated] = useState(false);
 
   const account = useMemo(
@@ -97,8 +77,6 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
   useEffect(() => {
     if (!isEdit || !account) return;
     setNewForm(accountToFormState(account));
-    const vu = account.vault_unlocks_on?.trim();
-    setVaultUnlockDate(vu ? vu.slice(0, 10) : "");
     setLogoUrlInput("");
     setEditHydrated(true);
   }, [isEdit, account]);
@@ -112,72 +90,26 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
       newForm.kind === "mobile_money"
         ? MOBILE_MONEY_PROVIDERS.find((p) => p.id === (newForm.subtype || MOBILE_MONEY_PROVIDERS[0].id))
         : undefined;
-    const pcProv =
-      newForm.kind === "prepaid_card"
-        ? PREPAID_CARD_PROVIDERS.find((p) => p.id === (newForm.subtype || PREPAID_CARD_PROVIDERS[0].id))
-        : undefined;
-
-    let vaultLockMonths: number | undefined;
-    const needsLockSchedule =
-      (newForm.kind === "vault" && !isEdit) ||
-      (newForm.kind === "bank_blocked_savings" && !isEdit && newForm.savings_plan_lock_enabled);
-    if (needsLockSchedule) {
-      if (newForm.vault_lock_use_custom) {
-        const n = Math.floor(Number(newForm.vault_lock_custom_months));
-        if (!Number.isFinite(n) || n < 1 || n > 120) {
-          showToast(
-            newForm.kind === "vault"
-              ? "Indique une durée entre 1 et 120 mois pour le coffre"
-              : "Indique une durée entre 1 et 120 mois pour le verrouillage du plan d'épargne",
-            "error",
-          );
-          return null;
-        }
-        vaultLockMonths = n;
-      } else {
-        vaultLockMonths = newForm.vault_lock_preset_months;
-      }
-    }
-
-    if (newForm.kind === "vault" && isEdit) {
-      if (!vaultUnlockDate.trim()) {
-        if (account && account.kind !== "vault") {
-          showToast("Indique une date de déblocage pour le coffre", "error");
-          return null;
-        }
-      }
-    }
 
     const payload: Record<string, unknown> = {
       name: newForm.name.trim(),
       kind: newForm.kind,
-      subtype:
-        newForm.kind === "mobile_money"
-          ? newForm.subtype || MOBILE_MONEY_PROVIDERS[0].id
-          : newForm.kind === "prepaid_card"
-            ? newForm.subtype || PREPAID_CARD_PROVIDERS[0].id
-            : "",
+      subtype: newForm.kind === "mobile_money" ? newForm.subtype || MOBILE_MONEY_PROVIDERS[0].id : "",
       notes: newForm.notes,
       opening_balance: newForm.opening_balance ? Number(newForm.opening_balance) : 0,
       logo_url: accountKindAllowsLogo(newForm.kind)
         ? (newForm.logoDataUri.trim() || logoUrlInput.trim())
         : "",
       institution_name: newForm.kind.startsWith("bank_") ? newForm.institution_name.trim() : "",
-      ...(!isEdit && vaultLockMonths != null && (newForm.kind === "vault" || newForm.kind === "bank_blocked_savings")
-        ? { vault_lock_months: vaultLockMonths }
-        : {}),
     };
 
-    if ((newForm.kind === "vault" || newForm.kind === "bank_blocked_savings") && isEdit) {
-      payload.vault_unlocks_on = vaultUnlockDate.trim() || null;
+    if (isEdit && newForm.kind === "bank_blocked_savings") {
+      payload.vault_unlocks_on = null;
     }
 
     if (mmProv) {
       payload.icon = "smartphone";
       payload.color = mmProv.color;
-    } else if (pcProv) {
-      payload.icon = "credit-card";
-      payload.color = pcProv.color;
     } else if (newForm.kind.startsWith("bank_")) {
       payload.icon = "landmark";
       payload.color = newForm.color || defaultColorForKind(newForm.kind);
@@ -187,13 +119,11 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
     }
 
     return payload;
-  }, [newForm, logoUrlInput, showToast, isEdit, account, vaultUnlockDate]);
+  }, [newForm, logoUrlInput, showToast, isEdit]);
 
   const handleCreate = useCallback(async () => {
     const payload = buildPayload();
     if (!payload) return;
-    delete payload.vault_unlocks_on;
-
     const r = await fetch("/api/accounts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -304,39 +234,6 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
           logoDataUri: preservedLogo,
         };
       }
-      if (kind === "prepaid_card") {
-        const sub =
-          f.subtype && PREPAID_CARD_PROVIDERS.some((p) => p.id === f.subtype)
-            ? f.subtype
-            : PREPAID_CARD_PROVIDERS[0].id;
-        const prov = PREPAID_CARD_PROVIDERS.find((p) => p.id === sub) ?? PREPAID_CARD_PROVIDERS[0];
-        return {
-          ...f,
-          kind,
-          subtype: sub,
-          institution_name: "",
-          name: f.name.trim() ? f.name : prov.label,
-          icon: "credit-card",
-          color: prov.color,
-          logoDataUri: preservedLogo,
-        };
-      }
-      if (kind === "vault") {
-        const label = ACCOUNT_KIND_PRESETS.find((p) => p.id === kind)?.label ?? "Coffre";
-        return {
-          ...f,
-          kind,
-          subtype: "",
-          institution_name: "",
-          name: f.name.trim() ? f.name : label,
-          icon: "piggy-bank",
-          color: "#d97706",
-          logoDataUri: "",
-          vault_lock_preset_months: f.kind === "vault" ? f.vault_lock_preset_months : 6,
-          vault_lock_use_custom: f.kind === "vault" ? f.vault_lock_use_custom : false,
-          vault_lock_custom_months: f.kind === "vault" ? f.vault_lock_custom_months : "",
-        };
-      }
       if (kind.startsWith("bank_")) {
         const logoPreserved = keepLogoBetweenKinds(f.kind, kind) ? f.logoDataUri : "";
         const instPreserved =
@@ -351,12 +248,6 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
           icon: "landmark",
           color: defaultColorForKind(kind),
           logoDataUri: logoPreserved,
-          savings_plan_lock_enabled:
-            kind === "bank_blocked_savings" && f.kind === "bank_blocked_savings"
-              ? f.savings_plan_lock_enabled
-              : kind === "bank_blocked_savings"
-                ? false
-                : false,
         };
       }
       const label = ACCOUNT_KIND_PRESETS.find((p) => p.id === kind)?.label ?? "";
@@ -434,196 +325,12 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
           </select>
         </div>
 
-        {newForm.kind === "vault" && isEdit && (
-          <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4 space-y-3">
-            <p className="text-xs text-amber-200/90 leading-relaxed">
-              <strong className="text-amber-100">Coffre-fort :</strong> l’argent peut <strong>entrer</strong> mais pas
-              partir en dépense ou transfert sortant tant que la date de déblocage n’est pas atteinte (ou déblocage
-              depuis la liste des comptes).
-            </p>
-            <div>
-              <label className="text-xs text-neutral-500 mb-1 block">
-                Dépenses et transferts sortants autorisés à partir du
-              </label>
-              <input
-                type="date"
-                className="input-field font-mono"
-                value={vaultUnlockDate}
-                onChange={(e) => setVaultUnlockDate(e.target.value)}
-              />
-              <p className="text-[10px] text-neutral-500 mt-1.5 leading-relaxed">
-                Laisse vide pour considérer le coffre comme <strong>débloqué</strong>. Si tu passes un autre type de
-                compte en « Coffre », indique obligatoirement une date.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {newForm.kind === "vault" && !isEdit && (
-          <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4 space-y-3">
-            <p className="text-xs text-amber-200/90 leading-relaxed">
-              <strong className="text-amber-100">Coffre-fort :</strong> l’argent peut{' '}
-              <strong>entrer</strong> (revenus, transferts entrants) mais pas{' '}
-              <strong>sortir</strong> pour des achats ou des transferts vers un autre compte, jusqu’à la
-              date de fin du blocage ou si tu débloques manuellement depuis la liste des comptes.
-            </p>
-            <div>
-              <label className="text-xs text-neutral-500 mb-1.5 block">Durée du verrouillage</label>
-              <div className="flex flex-wrap gap-2">
-                {VAULT_PERIOD_MONTHS_PRESETS.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() =>
-                      setNewForm((f) => ({
-                        ...f,
-                        vault_lock_preset_months: m,
-                        vault_lock_use_custom: false,
-                      }))
-                    }
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                      !newForm.vault_lock_use_custom && newForm.vault_lock_preset_months === m
-                        ? "border-amber-400/60 bg-amber-500/20 text-amber-100"
-                        : "border-white/10 text-neutral-400 hover:bg-white/5"
-                    }`}
-                  >
-                    {m} mois
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setNewForm((f) => ({ ...f, vault_lock_use_custom: true }))}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                    newForm.vault_lock_use_custom
-                      ? "border-amber-400/60 bg-amber-500/20 text-amber-100"
-                      : "border-white/10 text-neutral-400 hover:bg-white/5"
-                  }`}
-                >
-                  Autre durée
-                </button>
-              </div>
-            </div>
-            {newForm.vault_lock_use_custom && (
-              <div>
-                <label className="text-xs text-neutral-500 mb-1 block">Nombre de mois (1 à 120)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={120}
-                  className="input-field font-mono"
-                  placeholder="Ex : 7"
-                  value={newForm.vault_lock_custom_months}
-                  onChange={(e) => setNewForm((f) => ({ ...f, vault_lock_custom_months: e.target.value }))}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {newForm.kind === "bank_blocked_savings" && isEdit && (
-          <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4 space-y-3">
+        {newForm.kind === "bank_blocked_savings" && (
+          <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-4">
             <p className="text-xs text-cyan-100/90 leading-relaxed">
-              <strong className="text-cyan-50">Plan d&apos;épargne :</strong> tu peux laisser le compte{" "}
-              <strong>sans échéance</strong> (l&apos;argent entre et sort librement) ou définir une date jusqu&apos;à
-              laquelle <strong>seuls les encaissements</strong> sont autorisés (pas de dépenses ni transferts sortants),
-              sauf si tu <strong>débloques</strong> depuis la liste des comptes.
+              <strong className="text-cyan-50">Plan d’épargne :</strong> compte bancaire dédié ; les entrées et sorties
+              sont libres comme sur un compte courant (selon ton solde).
             </p>
-            <div>
-              <label className="text-xs text-neutral-500 mb-1 block">
-                Sorties autorisées à partir du (vide = pas de blocage)
-              </label>
-              <input
-                type="date"
-                className="input-field font-mono"
-                value={vaultUnlockDate}
-                onChange={(e) => setVaultUnlockDate(e.target.value)}
-              />
-              <p className="text-[10px] text-neutral-500 mt-1.5 leading-relaxed">
-                Laisse vide pour un plan <strong>débloqué</strong>. Renseigne une date pour verrouiller les sorties
-                jusqu&apos;à cette échéance.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {newForm.kind === "bank_blocked_savings" && !isEdit && (
-          <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4 space-y-3">
-            <p className="text-xs text-cyan-100/90 leading-relaxed">
-              <strong className="text-cyan-50">Plan d&apos;épargne :</strong> compte bancaire dédié à
-              l&apos;épargne. Par défaut les fonds peuvent entrer et sortir. Tu peux optionnellement{" "}
-              <strong>bloquer les sorties</strong> jusqu&apos;à une échéance : tant que le blocage est actif, le compte{" "}
-              <strong>ne peut que recevoir</strong> de l&apos;argent (virements, revenus…) ; aucune sortie (dépense,
-              transfert) tant que la date n&apos;est pas atteinte ou que tu n&apos;as pas débloqué le compte.
-            </p>
-            <label className="flex items-start gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                className="mt-0.5 rounded border-white/20"
-                checked={newForm.savings_plan_lock_enabled}
-                onChange={(e) =>
-                  setNewForm((f) => ({ ...f, savings_plan_lock_enabled: e.target.checked }))
-                }
-              />
-              <span className="text-xs text-cyan-100/90 leading-snug">
-                Bloquer les sorties jusqu&apos;à une échéance (durée ci-dessous)
-              </span>
-            </label>
-            {newForm.savings_plan_lock_enabled && (
-              <>
-                <div>
-                  <label className="text-xs text-neutral-500 mb-1.5 block">Durée du verrouillage</label>
-                  <div className="flex flex-wrap gap-2">
-                    {VAULT_PERIOD_MONTHS_PRESETS.map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() =>
-                          setNewForm((f) => ({
-                            ...f,
-                            vault_lock_preset_months: m,
-                            vault_lock_use_custom: false,
-                          }))
-                        }
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                          !newForm.vault_lock_use_custom && newForm.vault_lock_preset_months === m
-                            ? "border-cyan-400/60 bg-cyan-500/20 text-cyan-50"
-                            : "border-white/10 text-neutral-400 hover:bg-white/5"
-                        }`}
-                      >
-                        {m} mois
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setNewForm((f) => ({ ...f, vault_lock_use_custom: true }))}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                        newForm.vault_lock_use_custom
-                          ? "border-cyan-400/60 bg-cyan-500/20 text-cyan-50"
-                          : "border-white/10 text-neutral-400 hover:bg-white/5"
-                      }`}
-                    >
-                      Autre durée
-                    </button>
-                  </div>
-                </div>
-                {newForm.vault_lock_use_custom && (
-                  <div>
-                    <label className="text-xs text-neutral-500 mb-1 block">Nombre de mois (1 à 120)</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={120}
-                      className="input-field font-mono"
-                      placeholder="Ex : 18"
-                      value={newForm.vault_lock_custom_months}
-                      onChange={(e) =>
-                        setNewForm((f) => ({ ...f, vault_lock_custom_months: e.target.value }))
-                      }
-                    />
-                  </div>
-                )}
-              </>
-            )}
           </div>
         )}
 
@@ -653,36 +360,6 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
             </select>
             <p className="text-[10px] text-neutral-500 mt-1">
               Wave, Orange Money, MTN… Tu peux ajuster le nom du compte ci-dessous.
-            </p>
-          </div>
-        )}
-
-        {newForm.kind === "prepaid_card" && (
-          <div>
-            <label className="text-xs text-neutral-500 mb-1 block">Émetteur de la carte</label>
-            <select
-              className="input-field"
-              value={newForm.subtype || PREPAID_CARD_PROVIDERS[0].id}
-              onChange={(e) => {
-                const id = e.target.value;
-                const prov = PREPAID_CARD_PROVIDERS.find((p) => p.id === id);
-                setNewForm((f) => ({
-                  ...f,
-                  subtype: id,
-                  name: f.name.trim() ? f.name : prov?.label ?? "",
-                  color: prov?.color ?? f.color,
-                  icon: "credit-card",
-                }));
-              }}
-            >
-              {PREPAID_CARD_PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-            <p className="text-[10px] text-neutral-500 mt-1">
-              Wave, Orange Money, MTN, Djamo, Push… Le nom du compte peut être personnalisé.
             </p>
           </div>
         )}
@@ -815,7 +492,7 @@ export default function AccountForm({ editAccountId }: { editAccountId?: number 
               />
             </div>
             <p className="text-[10px] text-neutral-500">
-              Espèces ou autre : pas de logo fichier, uniquement icône et couleur.
+              Espèces : pas de logo fichier, uniquement icône et couleur.
             </p>
           </div>
         )}

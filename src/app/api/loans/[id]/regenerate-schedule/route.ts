@@ -37,6 +37,9 @@ export async function POST(
     const oldSchedule = await getLoanSchedule(loanId);
     const oldByNumber = new Map(oldSchedule.map((r) => [r.number, r]));
 
+    const monthly = loan.monthly_payment != null ? Math.round(Number(loan.monthly_payment)) : 0;
+    const fixedRegularTotalPayment = monthly > 0 ? monthly : undefined;
+
     const generated = generateAmortizationSchedule({
       totalAmount: loan.total_amount,
       annualRate: loan.interest_rate ?? 0,
@@ -48,6 +51,7 @@ export async function POST(
       taxRate: loan.tax_rate ?? 0,
       feesAmount: loan.fees_amount ?? 0,
       alreadyPaid: paidPayments,
+      fixedRegularTotalPayment,
     });
 
     const rows: LoanScheduleInput[] = generated.map((r) => {

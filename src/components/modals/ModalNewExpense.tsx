@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Plus, X, Check, Coins } from "lucide-react";
-import { suggestedTransactionFeePercentFromAccount, accountHasActiveOutgoingLock } from "@/lib/constants";
+import { suggestedTransactionFeePercentFromAccount } from "@/lib/constants";
 import type { Category } from "@/lib/types";
 import type { BudgetContextValue } from "./types";
 
@@ -14,7 +14,7 @@ interface ModalNewExpenseProps {
 export default function ModalNewExpense({ onClose, budget }: ModalNewExpenseProps) {
   const { config, addExpense, addLoan, showToast, accountsWithBalance } = budget;
   const activeAccounts = accountsWithBalance.filter((a) => !a.is_archived);
-  const debitAccounts = activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on));
+  const debitAccounts = activeAccounts;
   const defaultAcc = debitAccounts[0]?.id;
   const now = new Date();
   const defaultDueDate = new Date(now);
@@ -50,7 +50,7 @@ export default function ModalNewExpense({ onClose, budget }: ModalNewExpenseProp
       return;
     }
     if (debitAccounts.length === 0) {
-      showToast("Aucun compte disponible pour payer (coffres verrouillés ? Crée un compte ou débloque un coffre).", "error");
+      showToast("Aucun compte actif pour payer. Crée un compte dans Réglages → Trésorerie.", "error");
       return;
     }
     const expenseAmount = Number(form.amount);
@@ -182,7 +182,7 @@ export default function ModalNewExpense({ onClose, budget }: ModalNewExpenseProp
             ))}
           </select>
           <p className="text-[10px] text-slate-500 mt-1">
-            Les coffres verrouillés n’apparaissent pas ici. Les frais suggérés dépendent du type de compte (Mobile Money, carte, banque…).
+            Les frais suggérés dépendent du type de compte (Mobile Money, carte, banque…).
           </p>
         </div>
         {feePercentFromAccount > 0 && (

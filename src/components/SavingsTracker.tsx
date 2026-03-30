@@ -13,12 +13,14 @@ import {
   ChevronRight,
   Settings,
   Plus,
+  Pencil,
+  Check,
 } from "lucide-react";
 import AnimatedProgressBar from "./ui/AnimatedProgressBar";
 import SmartGoalsSection from "./SmartGoalsSection";
 import { useConfetti } from "@/hooks/useConfetti";
 import Link from "next/link";
-import { useMemo, useRef, useCallback, useEffect } from "react";
+import { useMemo, useRef, useCallback, useEffect, useState } from "react";
 
 /** Évite d’envoyer une requête à chaque frappe (champ vide = 0 provoquait un gros « retrait » coffre verrouillé). */
 const SAVING_INPUT_DEBOUNCE_MS = 480;
@@ -60,6 +62,8 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
     accountsWithBalance,
   } = budget;
   const fireConfetti = useConfetti();
+  const [monthlySavingsEditing, setMonthlySavingsEditing] = useState(false);
+  const monthlySavingsSectionRef = useRef<HTMLDivElement>(null);
 
   const emergencyVaultBalance = useMemo(
     () => getLinkedVaultEmergencyBalance(config, accountsWithBalance),
@@ -145,6 +149,18 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
         if (id) clearTimeout(id);
       });
     };
+  }, []);
+
+  useEffect(() => {
+    setMonthlySavingsEditing(false);
+  }, [selectedYear]);
+
+  const finishMonthlySavingsEditing = useCallback(() => {
+    const root = monthlySavingsSectionRef.current;
+    root?.querySelectorAll("input").forEach((el) => {
+      (el as HTMLInputElement).blur();
+    });
+    setMonthlySavingsEditing(false);
   }, []);
 
   const container = {
@@ -356,12 +372,36 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
         transition={{ delay: 0.2 }}
         className="glass-strong rounded-2xl p-4 lg:p-6"
       >
-        <h3 className="text-xs lg:text-sm font-semibold mb-3 lg:mb-4 flex items-center gap-2">
-          <CalendarDays size={14} className="text-emerald-400" /> Épargne
-          Mensuelle
-        </h3>
+        <div ref={monthlySavingsSectionRef}>
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3 lg:mb-4">
+          <h3 className="text-xs lg:text-sm font-semibold flex items-center gap-2">
+            <CalendarDays size={14} className="text-emerald-400" /> Épargne
+            Mensuelle
+          </h3>
+          {monthlySavingsEditing ? (
+            <button
+              type="button"
+              onClick={finishMonthlySavingsEditing}
+              className="inline-flex items-center justify-center gap-1.5 self-start sm:self-auto px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-[11px] lg:text-xs font-semibold hover:bg-emerald-500/25 transition-colors"
+            >
+              <Check size={14} strokeWidth={2.25} />
+              Terminer
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setMonthlySavingsEditing(true)}
+              className="inline-flex items-center justify-center gap-1.5 self-start sm:self-auto px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-300 text-[11px] lg:text-xs font-semibold hover:bg-white/10 transition-colors"
+            >
+              <Pencil size={14} strokeWidth={2} />
+              Modifier
+            </button>
+          )}
+        </div>
         <p className="text-[10px] lg:text-xs text-slate-500 mb-3">
-          Saisis le montant épargné chaque mois pour {selectedYear}.
+          {monthlySavingsEditing
+            ? `Saisis le montant épargné pour chaque mois de ${selectedYear}, puis Terminer.`
+            : `Montants épargnés en ${selectedYear}. Clique sur Modifier pour les changer.`}
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2 lg:gap-3">
           {MONTHS_SHORT.map((m, i) => {
@@ -401,15 +441,24 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
                     </span>
                   )}
                 </div>
-                <input
-                  type="number"
-                  className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 w-full min-w-0"
-                  placeholder="0"
-                  defaultValue={savings[i] || ""}
-                  key={`sav-${selectedYear}-${i}`}
-                  onChange={(e) => scheduleSavingInputUpdate(i, e.target.value)}
-                  onBlur={(e) => flushSavingInputOnBlur(i, e.target.value)}
-                />
+                {monthlySavingsEditing ? (
+                  <input
+                    type="number"
+                    className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 w-full min-w-0"
+                    placeholder="0"
+                    defaultValue={savings[i] || ""}
+                    key={`sav-${selectedYear}-${i}-edit`}
+                    onChange={(e) => scheduleSavingInputUpdate(i, e.target.value)}
+                    onBlur={(e) => flushSavingInputOnBlur(i, e.target.value)}
+                  />
+                ) : (
+                  <div
+                    className="font-mono text-xs lg:text-[13px] py-1.5 px-2 w-full min-w-0 rounded-lg border border-white/[0.06] bg-black/20 text-slate-200 tabular-nums"
+                    aria-label={`Épargne ${m} ${selectedYear}`}
+                  >
+                    {formatCFA(actual ?? 0)} <span className="text-[10px] text-slate-500 font-normal">F</span>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -427,6 +476,7 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
           <span className="font-mono text-sm lg:text-lg font-bold text-amber-400">
             {formatCFA(totalSaved)} FCFA
           </span>
+        </div>
         </div>
       </motion.div>
 

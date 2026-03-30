@@ -58,10 +58,7 @@ export async function POST(req: NextRequest) {
     console.error("[API ERROR]", err);
     const msg = err instanceof Error ? err.message : "";
     if (msg === "ACCOUNT_VAULT_LOCKED") {
-      return NextResponse.json(
-        { error: "Ce compte coffre est encore verrouillé : aucune dépense possible jusqu’à la date prévue ou après déblocage manuel." },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: "Dépense impossible sur ce compte pour le moment." }, { status: 403 });
     }
     if (msg === "ACCOUNT_NOT_FOUND" || msg === "ACCOUNT_ID_REQUIRED") {
       return NextResponse.json({ error: "Compte requis ou compte introuvable" }, { status: 400 });
@@ -111,10 +108,7 @@ export async function PUT(req: NextRequest) {
     console.error("[API ERROR]", err);
     const msg = err instanceof Error ? err.message : "";
     if (msg === "ACCOUNT_VAULT_LOCKED") {
-      return NextResponse.json(
-        { error: "Ce compte coffre est encore verrouillé : aucune dépense possible jusqu’à la date prévue ou après déblocage manuel." },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: "Dépense impossible sur ce compte pour le moment." }, { status: 403 });
     }
     if (msg === "ACCOUNT_NOT_FOUND" || msg === "ACCOUNT_ID_REQUIRED") {
       return NextResponse.json({ error: "Compte introuvable ou requis" }, { status: 404 });

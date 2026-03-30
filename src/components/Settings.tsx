@@ -6,7 +6,6 @@ import {
   AVAILABLE_ICONS,
   CATEGORY_COLORS,
   MONTHS_SHORT,
-  accountHasActiveOutgoingLock,
 } from "@/lib/constants";
 import AccountSelect from "./AccountSelect";
 import {
@@ -19,7 +18,7 @@ import {
   AccountWithBalance,
 } from "@/lib/types";
 import Icon from "./ui/Icon";
-import { Coins, ClipboardList, FolderOpen, Plus, Trash2, X, Banknote, Check, Clock, Heart } from "lucide-react";
+import { Coins, ClipboardList, FolderOpen, Plus, Trash2, X, Banknote, Check, Clock, Heart, Pencil } from "lucide-react";
 
 interface BudgetData {
   config: BudgetConfig;
@@ -42,32 +41,76 @@ function SalarySection({
   salaries,
   salaryAccountIds,
   selectedMonth,
+  selectedYear,
   updateSalary,
   accounts,
 }: {
   salaries: number[];
   salaryAccountIds: (number | null)[];
   selectedMonth: number;
+  selectedYear: number;
   updateSalary: (month: number, amount: number, accountId?: number | null) => Promise<void>;
   accounts: AccountWithBalance[];
 }) {
+  const [salaryEditing, setSalaryEditing] = useState(false);
   const totalAnnual = salaries.reduce((a, b) => a + b, 0);
   const accountOptions = useMemo(
     () => accounts.filter((a) => !a.is_archived),
     [accounts],
   );
 
+  useEffect(() => {
+    setSalaryEditing(false);
+  }, [selectedYear]);
+
+  const payrollAccountLabel = useCallback(
+    (accId: number | null) => {
+      if (accId == null) return "Non défini";
+      return accountOptions.find((a) => a.id === accId)?.name ?? `Compte #${accId}`;
+    },
+    [accountOptions],
+  );
+
   return (
     <div id="revenus-salaire" className="scroll-mt-24 rounded-lg border border-white/5 p-4 mb-4">
-      <h3 className="text-sm font-medium mb-1 flex items-center gap-2">
-        <Banknote size={14} className="text-green-500" /> Salaire
-      </h3>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-2">
+        <h3 className="text-sm font-medium flex items-center gap-2">
+          <Banknote size={14} className="text-green-500" /> Salaire
+        </h3>
+        {salaryEditing ? (
+          <button
+            type="button"
+            onClick={() => setSalaryEditing(false)}
+            className="inline-flex items-center justify-center gap-1.5 self-start sm:self-auto px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-[11px] font-semibold hover:bg-emerald-500/25 transition-colors"
+          >
+            <Check size={14} strokeWidth={2.25} />
+            Terminer
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setSalaryEditing(true)}
+            className="inline-flex items-center justify-center gap-1.5 self-start sm:self-auto px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-300 text-[11px] font-semibold hover:bg-white/10 transition-colors"
+          >
+            <Pencil size={14} strokeWidth={2} />
+            Modifier
+          </button>
+        )}
+      </div>
       <p className="text-[10px] text-neutral-500 mb-3 leading-relaxed">
-        Montant + <strong className="text-neutral-400">compte de versement</strong> : un revenu{" "}
-        <strong className="text-neutral-400">« Salaire (réglages) »</strong> est créé automatiquement (date du 1
-        <sup>er</sup> du mois) — le <strong className="text-neutral-400">solde du compte</strong>, les{" "}
-        <strong className="text-neutral-400">mouvements</strong> et l&apos;<strong className="text-neutral-400">historique</strong>{" "}
-        sont mis à jour.
+        {salaryEditing ? (
+          <>
+            Montant + <strong className="text-neutral-400">compte de versement</strong> : un revenu{" "}
+            <strong className="text-neutral-400">« Salaire (réglages) »</strong> est créé ou mis à jour (1
+            <sup>er</sup> du mois) — solde, mouvements et historique suivent. Clique sur <strong>Terminer</strong> quand
+            tu as fini.
+          </>
+        ) : (
+          <>
+            Salaires pour <strong className="text-neutral-400">{selectedYear}</strong>.{" "}
+            <strong className="text-neutral-400">Modifier</strong> pour changer montants et comptes de versement.
+          </>
+        )}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
         {MONTHS_SHORT.map((m, i) => {
@@ -89,32 +132,51 @@ function SalarySection({
                 >
                   {m}
                 </span>
-                <input
-                  type="number"
-                  className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 flex-1 min-w-0"
-                  placeholder="0"
-                  defaultValue={salaries[i] || ""}
-                  key={`sal-s-${i}`}
-                  onChange={(e) => updateSalary(i, Number(e.target.value) || 0)}
-                />
+                {salaryEditing ? (
+                  <input
+                    type="number"
+                    className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 flex-1 min-w-0"
+                    placeholder="0"
+                    defaultValue={salaries[i] || ""}
+                    key={`sal-s-${selectedYear}-${i}-edit`}
+                    onChange={(e) => updateSalary(i, Number(e.target.value) || 0)}
+                  />
+                ) : (
+                  <div
+                    className="font-mono text-xs lg:text-[13px] py-1.5 px-2 flex-1 min-w-0 rounded-lg border border-white/[0.06] bg-black/20 text-slate-200 tabular-nums"
+                    aria-label={`Salaire ${m} ${selectedYear}`}
+                  >
+                    {formatCFA(salaries[i] ?? 0)}{" "}
+                    <span className="text-[10px] text-slate-500 font-normal">F</span>
+                  </div>
+                )}
               </div>
-              <select
-                className="input-field text-[11px] py-1.5 px-2 w-full"
-                value={accId ?? ""}
-                aria-label={`Compte de versement du salaire — ${m}`}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  const aid = v === "" ? null : parseInt(v, 10);
-                  void updateSalary(i, salaries[i], aid);
-                }}
-              >
-                <option value="">Compte de versement…</option>
-                {accountOptions.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
+              {salaryEditing ? (
+                <select
+                  className="input-field text-[11px] py-1.5 px-2 w-full"
+                  value={accId ?? ""}
+                  aria-label={`Compte de versement du salaire — ${m}`}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const aid = v === "" ? null : parseInt(v, 10);
+                    void updateSalary(i, salaries[i], aid);
+                  }}
+                >
+                  <option value="">Compte de versement…</option>
+                  {accountOptions.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div
+                  className="text-[11px] py-1.5 px-2 w-full rounded-lg border border-white/[0.06] bg-black/20 text-slate-400 truncate"
+                  title={payrollAccountLabel(accId)}
+                >
+                  {payrollAccountLabel(accId)}
+                </div>
+              )}
             </div>
           );
         })}
@@ -153,17 +215,15 @@ export default function Settings({
     accountsWithBalance = [],
   } = budget;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const vaultAccounts = useMemo(
-    () => accountsWithBalance.filter((a) => !a.is_archived && a.kind === "vault"),
+  const emergencyFundAccounts = useMemo(
+    () => accountsWithBalance.filter((a) => !a.is_archived && a.kind === "bank_blocked_savings"),
     [accountsWithBalance],
   );
 
-  const defaultDebitAccountId = useMemo(() => {
-    const unlocked = accountsWithBalance.find(
-      (x) => !x.is_archived && !accountHasActiveOutgoingLock(x.kind, x.vault_unlocks_on),
-    );
-    return unlocked?.id ?? accountsWithBalance.find((x) => !x.is_archived)?.id ?? 0;
-  }, [accountsWithBalance]);
+  const defaultDebitAccountId = useMemo(
+    () => accountsWithBalance.find((x) => !x.is_archived)?.id ?? 0,
+    [accountsWithBalance],
+  );
 
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [newCharge, setNewCharge] = useState({ label: "", amount: "", icon: "house" });
@@ -321,6 +381,7 @@ export default function Settings({
         salaries={salaries}
         salaryAccountIds={salaryAccountIds}
         selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
         updateSalary={updateSalary}
         accounts={accountsWithBalance}
       />
@@ -349,7 +410,9 @@ export default function Settings({
                 onChange={(e) => save({ ...config, savingsGoalDeadline: e.target.value || undefined })} />
             </div>
             <div>
-              <label className="text-[10px] text-neutral-500 mb-0.5 block">Compte coffre lié (fonds d&apos;urgence)</label>
+              <label className="text-[10px] text-neutral-500 mb-0.5 block">
+                Compte plan d&apos;épargne lié (fonds d&apos;urgence)
+              </label>
               <select
                 className="input-field"
                 value={config.emergency_fund_account_id != null ? String(config.emergency_fund_account_id) : ""}
@@ -362,7 +425,7 @@ export default function Settings({
                 }}
               >
                 <option value="">— Non lié (progression = épargne saisie sur la page Épargne) —</option>
-                {vaultAccounts.map((a) => (
+                {emergencyFundAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
                     {typeof a.balance === "number" ? ` · ${formatCFA(a.balance)}` : ""}
@@ -370,15 +433,15 @@ export default function Settings({
                 ))}
               </select>
               <p className="text-[10px] text-neutral-500 mt-1 leading-relaxed">
-                Si tu lies un <strong className="text-neutral-400">coffre</strong>, l’objectif fonds d’urgence utilise son{" "}
-                <strong className="text-neutral-400">solde réel</strong> (revenus et transferts vers ce compte).
+                Si tu lies un <strong className="text-neutral-400">plan d&apos;épargne</strong>, l’objectif fonds d’urgence utilise
+                son <strong className="text-neutral-400">solde réel</strong> (revenus et transferts vers ce compte).
               </p>
-              {vaultAccounts.length === 0 && (
+              {emergencyFundAccounts.length === 0 && (
                 <Link
                   href="/settings/accounts/new"
                   className="text-[10px] text-emerald-400 hover:text-emerald-300 mt-1 inline-block font-medium"
                 >
-                  Créer un compte coffre →
+                  Créer un compte plan d&apos;épargne →
                 </Link>
               )}
             </div>

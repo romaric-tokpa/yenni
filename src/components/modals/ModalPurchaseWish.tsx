@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Check, X, Coins } from "lucide-react";
-import { formatCFA, suggestedTransactionFeePercentFromAccount, accountHasActiveOutgoingLock } from "@/lib/constants";
+import { formatCFA, suggestedTransactionFeePercentFromAccount } from "@/lib/constants";
 import type { BudgetContextValue } from "./types";
 
 interface ModalPurchaseWishProps {
@@ -15,7 +15,7 @@ interface ModalPurchaseWishProps {
 export default function ModalPurchaseWish({ onClose, budget, listId, itemId }: ModalPurchaseWishProps) {
   const { addLoan, showToast, accountsWithBalance } = budget;
   const activeAccounts = accountsWithBalance.filter((a) => !a.is_archived);
-  const debitAccounts = activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on));
+  const debitAccounts = activeAccounts;
   const defaultAcc = debitAccounts[0]?.id;
   const now = new Date();
   const defaultDueDate = new Date(now);
@@ -54,7 +54,7 @@ export default function ModalPurchaseWish({ onClose, budget, listId, itemId }: M
       return;
     }
     if (!defaultAcc) {
-      showToast("Aucun compte débitable (coffre verrouillé ?).", "error");
+      showToast("Aucun compte actif. Ajoute-en un dans Réglages → Trésorerie.", "error");
       return;
     }
     if (changeLeft && changeForm.amount && Number(changeForm.amount) > 0) {

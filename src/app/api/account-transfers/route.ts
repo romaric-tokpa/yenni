@@ -64,13 +64,7 @@ export async function POST(req: NextRequest) {
       if (msg === "ACCOUNT_NOT_FOUND")
         return NextResponse.json({ error: "Compte introuvable" }, { status: 404 });
       if (msg === "ACCOUNT_VAULT_LOCKED") {
-        return NextResponse.json(
-          {
-            error:
-              "Le compte source est un coffre encore verrouillé : transfert impossible jusqu’à la date prévue ou après déblocage.",
-          },
-          { status: 403 },
-        );
+        return NextResponse.json({ error: "Transfert impossible depuis ce compte pour le moment." }, { status: 403 });
       }
       throw e;
     }

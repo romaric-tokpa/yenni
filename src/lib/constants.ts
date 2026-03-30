@@ -1,4 +1,3 @@
-import { addMonths, format } from "date-fns";
 import type { AccountWithBalance, BudgetConfig } from "./types";
 
 /** Revenu généré automatiquement depuis Réglages → Salaire + compte (exclu des totaux « revenus saisis » pour éviter doublon avec `monthSalary`). */
@@ -92,55 +91,41 @@ export const EXPENSES_PAGE_SIZE = 25;
 /** Types de compte suggérés à la création (libellé + id technique) */
 export const ACCOUNT_KIND_PRESETS = [
   { id: "cash", label: "Espèces" },
-  { id: "vault", label: "Coffre — épargne bloquée" },
   { id: "mobile_money", label: "Mobile Money" },
-  { id: "prepaid_card", label: "Carte prépayée" },
   { id: "bank_current", label: "Compte bancaire — Courant" },
   { id: "bank_savings", label: "Compte bancaire — Épargne classique" },
   { id: "bank_blocked_savings", label: "Plan d'épargne" },
-  { id: "bank_loan", label: "Compte bancaire — Prêt" },
-  { id: "other", label: "Autre" },
 ] as const;
-
-/** Durées prédéfinies (mois) pour la création d’un compte coffre */
-export const VAULT_PERIOD_MONTHS_PRESETS = [3, 6, 12, 18, 24] as const;
 
 export type AccountKindId = (typeof ACCOUNT_KIND_PRESETS)[number]["id"];
 
+/** Types acceptés à la création / mise à jour (identiques aux presets). */
+export const ALLOWED_ACCOUNT_KIND_IDS = new Set<string>(ACCOUNT_KIND_PRESETS.map((p) => p.id));
+
+export function isAllowedAccountKind(kind: string): boolean {
+  return ALLOWED_ACCOUNT_KIND_IDS.has(kind);
+}
+
 /**
- * Compte bancaire utilisable pour les prélèvements (échéances prêt, etc.) : trésorerie « banque »,
- * hors plan d'épargne (`bank_blocked_savings`). Exclut coffre, espèces, mobile money.
+ * Compte bancaire utilisable pour les prélèvements (échéances prêt, etc.) : tout `kind` commençant par `bank_`.
+ * Exclut coffre, espèces, mobile money.
  */
 export function isBankTreasuryDebitAccount(kind: string): boolean {
-  if (!kind.startsWith("bank_")) return false;
-  if (kind === "bank_blocked_savings") return false;
-  return true;
+  return kind.startsWith("bank_");
 }
 
-/** True si les sorties (dépenses, transferts depuis ce compte) sont interdites (coffre verrouillé). */
-export function isVaultAccountLocked(vaultUnlocksOn: string | null | undefined): boolean {
-  if (vaultUnlocksOn == null || String(vaultUnlocksOn).trim() === "") return false;
-  const today = new Date().toISOString().slice(0, 10);
-  return today < String(vaultUnlocksOn).trim();
+/** Conservé pour compatibilité : l’app ne bloque plus les sorties par date. */
+export function isVaultAccountLocked(_vaultUnlocksOn: string | null | undefined): boolean {
+  return false;
 }
 
-/**
- * Coffre (`vault`) ou plan d'épargne (`bank_blocked_savings`) avec une échéance de blocage active :
- * l'argent peut encore entrer ; les sorties sont bloquées jusqu'à la date ou un déblocage manuel.
- */
-export function accountHasActiveOutgoingLock(kind: string, vaultUnlocksOn: string | null | undefined): boolean {
-  if (!isVaultAccountLocked(vaultUnlocksOn)) return false;
-  return kind === "vault" || kind === "bank_blocked_savings";
-}
-
-/** Date YYYY-MM-DD à partir de laquelle un coffre créé aujourd’hui autorise les sorties (N mois plus tard). */
-export function computeVaultUnlockDateFromNow(months: number): string {
-  const m = Math.max(1, Math.min(120, Math.floor(Number(months)) || 1));
-  return format(addMonths(new Date(), m), "yyyy-MM-dd");
+/** Conservé pour compatibilité : plus de blocage actif sur les sorties. */
+export function accountHasActiveOutgoingLock(_kind: string, _vaultUnlocksOn: string | null | undefined): boolean {
+  return false;
 }
 
 /**
- * Solde du compte coffre lié au fonds d’urgence, si configuré et valide.
+ * Solde du compte « plan d’épargne » lié au fonds d’urgence, si configuré et valide.
  * Sinon `null` (revenir à l’épargne saisie manuelle / période).
  */
 export function getLinkedVaultEmergencyBalance(
@@ -150,7 +135,7 @@ export function getLinkedVaultEmergencyBalance(
   const id = config.emergency_fund_account_id;
   if (id == null || id === undefined || Number.isNaN(Number(id))) return null;
   const acc = accounts.find((a) => a.id === Number(id) && !a.is_archived);
-  if (!acc || acc.kind !== "vault") return null;
+  if (!acc || acc.kind !== "bank_blocked_savings") return null;
   return Math.max(0, acc.balance);
 }
 
@@ -190,9 +175,20 @@ export function prepaidCardProviderLabel(id: string | undefined | null): string 
   return p?.label ?? id;
 }
 
+/** Libellés pour d’éventuelles données / exports hors jeu standard (post-migration : rare). */
+const LEGACY_ACCOUNT_KIND_LABELS: Record<string, string> = {
+  vault: "Coffre / tirelire",
+  prepaid_card: "Carte prépayée",
+  bank_loan: "Compte bancaire — Prêt",
+  other: "Autre",
+};
+
 /** Libellé complet type de compte (opérateur MM, carte prépayée, banque…) */
 export function accountTypeLabel(kind: string, subtype?: string | null, institutionName?: string | null): string {
-  const base = ACCOUNT_KIND_PRESETS.find((p) => p.id === kind)?.label ?? kind;
+  const base =
+    ACCOUNT_KIND_PRESETS.find((p) => p.id === kind)?.label ??
+    LEGACY_ACCOUNT_KIND_LABELS[kind] ??
+    kind;
   if (kind === "mobile_money" && subtype) {
     const sub = mobileMoneyProviderLabel(subtype);
     return sub ? `${base} — ${sub}` : base;
@@ -210,15 +206,14 @@ export function accountTypeLabel(kind: string, subtype?: string | null, institut
 
 /**
  * Pourcentage de frais de transaction suggéré selon le type de compte débité
- * (Mobile Money ~1 %, carte prépayée / banque ~1,5 %, espèces / coffre 0).
+ * (Mobile Money ~1 %, banque ~1,5 %, espèces 0).
  */
 export function suggestedTransactionFeePercentFromAccount(
   kind: string | undefined,
   _subtype?: string | null,
 ): number {
-  if (!kind || kind === "cash" || kind === "vault") return 0;
+  if (!kind || kind === "cash") return 0;
   if (kind === "mobile_money") return 1;
-  if (kind === "prepaid_card") return 1.5;
   if (kind.startsWith("bank_")) return 1.5;
   return 0;
 }

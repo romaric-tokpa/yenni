@@ -77,7 +77,7 @@ export async function POST(
     }
     if (msg === "ACCOUNT_VAULT_LOCKED") {
       return NextResponse.json(
-        { error: "Ce compte source est un coffre verrouillé : choisis un autre compte." },
+        { error: "Versement impossible depuis ce compte pour le moment. Choisis un autre compte." },
         { status: 400 },
       );
     }
@@ -151,10 +151,7 @@ export async function DELETE(req: NextRequest) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "ACCOUNT_VAULT_LOCKED") {
         return NextResponse.json(
-          {
-            error:
-              "Le compte du projet est verrouillé : impossible de renvoyer les fonds vers le compte source.",
-          },
+          { error: "Impossible d’annuler ce versement depuis le compte du projet pour le moment." },
           { status: 400 },
         );
       }

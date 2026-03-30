@@ -4,6 +4,7 @@ import { getAccountById, updateAccount, deleteAccount } from "@/lib/db";
 import { apiErrorResponse } from "@/lib/apiError";
 import { accountKindAllowsLogo } from "@/lib/accountLogoShared";
 import { resolveAccountLogoInput } from "@/lib/accountLogoParse";
+import { isAllowedAccountKind } from "@/lib/constants";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -17,7 +18,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const updates: Record<string, unknown> = {};
     if (body.name !== undefined) updates.name = String(body.name).trim();
-    if (body.kind !== undefined) updates.kind = String(body.kind);
+    if (body.kind !== undefined) {
+      const k = String(body.kind);
+      if (!isAllowedAccountKind(k)) {
+        return NextResponse.json({ error: "Type de compte non pris en charge" }, { status: 400 });
+      }
+      updates.kind = k;
+    }
     if (body.subtype !== undefined) updates.subtype = body.subtype != null ? String(body.subtype).trim() : "";
     if (body.institution_name !== undefined) {
       updates.institution_name =
@@ -37,7 +44,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     const nextKind = body.kind !== undefined ? String(body.kind) : existing.kind;
-    if (body.kind !== undefined && nextKind !== "vault" && nextKind !== "bank_blocked_savings") {
+    if (body.kind !== undefined && nextKind !== "bank_blocked_savings") {
       updates.vault_unlocks_on = null;
     }
     if (body.kind !== undefined && !nextKind.startsWith("bank_")) {
@@ -48,7 +55,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (!p.ok) return NextResponse.json({ error: p.error }, { status: 400 });
       if (p.dataUri && !accountKindAllowsLogo(nextKind)) {
         return NextResponse.json(
-          { error: "Logo réservé aux comptes Mobile Money, carte prépayée ou bancaire" },
+          { error: "Logo réservé aux comptes Mobile Money ou bancaire" },
           { status: 400 },
         );
       }

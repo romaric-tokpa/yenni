@@ -1,7 +1,7 @@
 "use client";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatCFA, MONTHS_FULL, EXPENSES_PAGE_SIZE, getSelectableYears, suggestedTransactionFeePercentFromAccount, accountHasActiveOutgoingLock } from "@/lib/constants";
+import { formatCFA, MONTHS_FULL, EXPENSES_PAGE_SIZE, getSelectableYears, suggestedTransactionFeePercentFromAccount } from "@/lib/constants";
 import { BudgetConfig, Expense, FixedChargePayment, Category, PlannedExpense, AccountWithBalance, Income, AccountTransfer } from "@/lib/types";
 import { Plus, Trash2, X, FileText, Check, Landmark, CalendarClock, Clock, CircleCheck, Pencil, CirclePlay, History, Calendar, ChevronLeft, ChevronRight, FileSpreadsheet, List, CalendarDays, TrendingUp, ArrowRightLeft, Filter } from "lucide-react";
 import { exportTransactionsCSV } from "@/lib/exportUtils";
@@ -108,7 +108,7 @@ export default function ExpenseTracker({
     [accountsWithBalance]
   );
   const debitAccounts = useMemo(
-    () => activeAccounts.filter((a) => !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)),
+    () => activeAccounts,
     [activeAccounts]
   );
   const firstDebitAccountId = debitAccounts[0]?.id;
@@ -273,7 +273,7 @@ export default function ExpenseTracker({
       return;
     }
     if (!editingExpense && !firstDebitAccountId) {
-      showToast("Aucun compte débitable (tous coffres verrouillés ?).", "error");
+      showToast("Aucun compte actif pour débiter. Ajoute-en un dans Réglages → Trésorerie.", "error");
       return;
     }
     if (editingExpense) {

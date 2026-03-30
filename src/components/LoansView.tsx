@@ -1,7 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatCFA, accountHasActiveOutgoingLock, accountTypeLabel, isBankTreasuryDebitAccount } from "@/lib/constants";
+import { formatCFA, accountTypeLabel, isBankTreasuryDebitAccount } from "@/lib/constants";
 import type { AccountWithBalance } from "@/lib/types";
 import { Loan, LoanPayment } from "@/lib/types";
 import Icon from "./ui/Icon";
@@ -140,22 +140,14 @@ export default function LoansView({
   }, [showPayModal?.id]);
 
   const accountsForLoanPay = useMemo(
-    () =>
-      accountsWithBalance.filter(
-        (a) => !a.is_archived && !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)
-      ),
-    [accountsWithBalance]
+    () => accountsWithBalance.filter((a) => !a.is_archived),
+    [accountsWithBalance],
   );
 
   const bankTreasuryOptions = useMemo(
     () =>
-      accountsWithBalance.filter(
-        (a) =>
-          !a.is_archived &&
-          isBankTreasuryDebitAccount(a.kind) &&
-          !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)
-      ),
-    [accountsWithBalance]
+      accountsWithBalance.filter((a) => !a.is_archived && isBankTreasuryDebitAccount(a.kind)),
+    [accountsWithBalance],
   );
 
   useEffect(() => {
@@ -749,7 +741,7 @@ export default function LoansView({
                       ))}
                     </select>
                     <p className="text-[10px] text-slate-600 mt-1">
-                      Comptes coffre verrouillés exclus. Choix optionnel si déjà défini sur le prêt.
+                      Choix optionnel si déjà défini sur le prêt.
                     </p>
                   </div>
                 )}

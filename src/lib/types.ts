@@ -45,10 +45,7 @@ export interface Account {
   is_archived: number;
   sort_order: number;
   created_at: string;
-  /**
-   * Coffre (kind `vault`) : date YYYY-MM-DD à partir de laquelle les sorties sont autorisées.
-   * `null` = pas de verrou, ou débloqué manuellement.
-   */
+  /** Champ historique (plans d’épargne) ; non utilisé pour le verrouillage des sorties. */
   vault_unlocks_on?: string | null;
 }
 
@@ -169,7 +166,7 @@ export interface BudgetConfig {
   savingsGoalStartDate?: string;
   /** Date cible pour le fonds d'urgence (YYYY-MM-DD). Fin de la période d'épargne. */
   savingsGoalDeadline?: string;
-  /** Compte coffre (`kind === "vault"`) dont le solde suit l’objectif fonds d’urgence. */
+  /** Compte plan d’épargne (`kind === "bank_blocked_savings"`) : solde pour l’objectif fonds d’urgence. */
   emergency_fund_account_id?: number | null;
 }
 

@@ -12,6 +12,7 @@ import {
   salarySettingsIncomeNote,
 } from "./constants";
 import { calculateAccountBalance, checkSufficientBalance } from "./account-balance";
+import { STANDARD_PERSONAL_FINANCE_ACCOUNTS, type StandardPersonalFinanceAccountSpec } from "./default-personal-accounts";
 
 // ── Helpers ──
 
@@ -31,7 +32,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -207,9 +208,93 @@ async function ensureProjectFundsMigration(): Promise<void> {
 
 // ── Comptes (trésorerie) ──
 
+async function insertPersonalFinanceAccountRow(userId: number, row: StandardPersonalFinanceAccountSpec): Promise<void> {
+  const db = getDbClient();
+  await db.execute({
+    sql: `INSERT INTO accounts (user_id, name, kind, subtype, institution_name, notes, icon, color, logo_url, opening_balance, is_archived, sort_order, vault_unlocks_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL)`,
+    args: [
+      userId,
+      row.name,
+      row.kind,
+      row.subtype,
+      row.institution_name,
+      row.notes,
+      row.icon,
+      row.color,
+      "",
+      row.sort_order,
+    ],
+  });
+}
+
+/**
+ * Garantit la présence du lot de comptes personnels (SGCI + espèces + MM).
+ * - Aucun compte : crée les 7 comptes standards.
+ * - Un seul compte « Espèces » encore au libellé auto : le met à jour et ajoute les 6 autres.
+ */
 export async function ensureUserDefaultAccount(userId: number): Promise<number> {
   await ensureMigrations();
   const db = getDbClient();
+
+  const cntRs = await db.execute({
+    sql: "SELECT COUNT(*) AS c FROM accounts WHERE user_id = ?",
+    args: [userId],
+  });
+  const cnt = Number((cntRs.rows[0] as Row)?.c ?? 0);
+
+  if (cnt === 0) {
+    for (const row of STANDARD_PERSONAL_FINANCE_ACCOUNTS) {
+      await insertPersonalFinanceAccountRow(userId, row);
+    }
+    const firstRs = await db.execute({
+      sql: "SELECT id FROM accounts WHERE user_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1",
+      args: [userId],
+    });
+    const id = Number((firstRs.rows[0] as Row).id);
+    await db.execute({
+      sql: "UPDATE expenses SET account_id = ? WHERE user_id = ? AND account_id IS NULL",
+      args: [id, userId],
+    });
+    return id;
+  }
+
+  if (cnt === 1) {
+    const oneRs = await db.execute({ sql: "SELECT * FROM accounts WHERE user_id = ? LIMIT 1", args: [userId] });
+    if (oneRs.rows.length > 0) {
+      const a = rowToObj<Account>(oneRs.rows[0] as Row, oneRs.columns);
+      const notes = String(a.notes ?? "");
+      const legacyCash =
+        a.kind === "cash" &&
+        !a.is_archived &&
+        (a.name === "Espèces" || a.name === "Espèces (porte-monnaie)") &&
+        (notes.includes("Compte créé automatiquement") || notes.trim() === "");
+      if (legacyCash) {
+        const t0 = STANDARD_PERSONAL_FINANCE_ACCOUNTS[0];
+        await db.execute({
+          sql: `UPDATE accounts SET name=?, kind=?, subtype=?, institution_name=?, notes=?, icon=?, color=?, sort_order=?, vault_unlocks_on=NULL WHERE id=? AND user_id=?`,
+          args: [
+            t0.name,
+            t0.kind,
+            t0.subtype,
+            t0.institution_name,
+            t0.notes,
+            t0.icon,
+            t0.color,
+            t0.sort_order,
+            a.id,
+            userId,
+          ],
+        });
+        for (let i = 1; i < STANDARD_PERSONAL_FINANCE_ACCOUNTS.length; i++) {
+          let row = STANDARD_PERSONAL_FINANCE_ACCOUNTS[i];
+          if (row === undefined) continue;
+          await insertPersonalFinanceAccountRow(userId, row);
+        }
+        return Number(a.id);
+      }
+    }
+  }
+
   const existing = await db.execute({
     sql: "SELECT id FROM accounts WHERE user_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1",
     args: [userId],
@@ -218,14 +303,16 @@ export async function ensureUserDefaultAccount(userId: number): Promise<number> 
     return Number((existing.rows[0] as Row).id);
   }
   const ins = await db.execute({
-    sql: `INSERT INTO accounts (user_id, name, kind, subtype, institution_name, notes, icon, color, logo_url, opening_balance, sort_order) VALUES (?, 'Espèces', 'cash', '', '', 'Compte créé automatiquement', 'banknote', '#10B981', '', 0, 0) RETURNING id`,
+    sql: `INSERT INTO accounts (user_id, name, kind, subtype, institution_name, notes, icon, color, logo_url, opening_balance, is_archived, sort_order, vault_unlocks_on) VALUES (?, 'Espèces (porte-monnaie)', 'cash', '', '', '', 'banknote', '#10B981', '', 0, 0, 0, NULL) RETURNING id`,
     args: [userId],
   });
-  const id = Number((ins.rows[0] as Row).id);
-  await db.execute({ sql: "UPDATE expenses SET account_id = ? WHERE user_id = ? AND account_id IS NULL", args: [id, userId] });
-  return id;
+  const fallbackId = Number((ins.rows[0] as Row).id);
+  await db.execute({
+    sql: "UPDATE expenses SET account_id = ? WHERE user_id = ? AND account_id IS NULL",
+    args: [fallbackId, userId],
+  });
+  return fallbackId;
 }
-
 export async function getDefaultAccountId(userId: number): Promise<number> {
   return ensureUserDefaultAccount(userId);
 }
@@ -260,7 +347,7 @@ export async function validateAccountOwnership(userId: number, accountId: number
   if (!acc) throw new Error("ACCOUNT_NOT_FOUND");
 }
 
-/** Vérifie que le compte peut être débité (coffre non verrouillé). Retourne l’id de compte effectif. */
+/** Vérifie que le compte peut être débité (existe, non archivé). Retourne l’id de compte effectif. */
 export async function assertAccountAllowsDebit(
   userId: number,
   accountId: number | null | undefined,
@@ -284,7 +371,7 @@ function isArchivedOrVaultLockedForDebit(acc: Account): boolean {
 
 /**
  * Compte débité pour un remboursement : prêt bancaire → compte **bancaire** de trésorerie
- * (`isBankTreasuryDebitAccount`, hors épargne bloquée) ; emprunt personnel → compte au choix.
+ * (`isBankTreasuryDebitAccount`) ; emprunt personnel → compte au choix.
  */
 export async function resolveLoanRepaymentDebitAccountId(
   userId: number,
@@ -374,10 +461,7 @@ export async function addAccount(
     args: [userId],
   });
   const nextOrder = Number((maxRs.rows[0] as Row)?.n ?? 0);
-  const vaultUntil =
-    (data.kind === "vault" || data.kind === "bank_blocked_savings") && data.vault_unlocks_on?.trim()
-      ? String(data.vault_unlocks_on).trim()
-      : null;
+  const vaultUntil = null;
   const rs = await db.execute({
     sql: `INSERT INTO accounts (user_id, name, kind, subtype, institution_name, notes, icon, color, logo_url, opening_balance, is_archived, sort_order, vault_unlocks_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) RETURNING *`,
     args: [
@@ -921,7 +1005,7 @@ export async function setSavingAndSyncEmergencyVault(
   }
 
   const vault = await getAccountById(vaultId, userId);
-  if (!vault || vault.kind !== "vault") {
+  if (!vault || vault.kind !== "bank_blocked_savings") {
     await setSaving(month, year, newAmount);
     return;
   }

@@ -25,8 +25,8 @@ function loanPaymentAccountErrorResponse(err: unknown): NextResponse | null {
     BANK_LOAN_PICK_CURRENT_ACCOUNT:
       "Tu as plusieurs comptes bancaires : choisis celui des prélèvements dans la fiche du prêt.",
     INVALID_BANK_CURRENT_ACCOUNT:
-      "Le compte débité doit être un compte bancaire de trésorerie (hors épargne bloquée).",
-    INVALID_REPAYMENT_ACCOUNT: "Compte de remboursement invalide ou non autorisé (coffre verrouillé ou archivé).",
+      "Le compte débité doit être un compte bancaire de trésorerie actif.",
+    INVALID_REPAYMENT_ACCOUNT: "Compte de remboursement invalide ou archivé.",
     INVALID_RECOVERY_ACCOUNT: "Compte d’encaissement invalide ou archivé.",
     LOAN_REPAYMENT_DEBIT_NOT_APPLICABLE: "Ce type de prêt ne correspond pas à une sortie de trésorerie.",
   };

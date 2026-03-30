@@ -60,11 +60,7 @@ export async function PUT(req: NextRequest) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg === "ACCOUNT_VAULT_LOCKED") {
       return NextResponse.json(
-        {
-          error:
-            "Le coffre est verrouillé : impossible de retirer de l’épargne (baisser un montant). " +
-            "Débloquez le coffre dans les comptes ou ne réduisez pas la cellule d’épargne mensuelle.",
-        },
+        { error: "Impossible d’ajuster l’épargne sur ce compte pour le moment." },
         { status: 400 },
       );
     }
@@ -72,7 +68,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Aucun compte disponible pour prélever l’épargne : ajoute un compte courant (non coffre) ou déverrouille un compte source.",
+            "Aucun compte disponible pour prélever l’épargne : ajoute ou réactive un compte source dans Trésorerie.",
         },
         { status: 400 },
       );

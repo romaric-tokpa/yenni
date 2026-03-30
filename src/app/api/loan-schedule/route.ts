@@ -21,12 +21,12 @@ function loanDebitAccountErrorResponse(err: unknown): NextResponse | null {
   const msg = err instanceof Error ? err.message : "";
   const map: Record<string, string> = {
     NO_BANK_CURRENT_ACCOUNT:
-      "Ajoute au moins un compte bancaire dans Trésorerie pour débiter les échéances (courant, épargne non bloquée…).",
+      "Ajoute au moins un compte bancaire dans Trésorerie pour débiter les échéances.",
     BANK_LOAN_PICK_CURRENT_ACCOUNT:
       "Tu as plusieurs comptes bancaires : indique celui des prélèvements dans la fiche du prêt (Modifier le prêt).",
     INVALID_BANK_CURRENT_ACCOUNT:
-      "Le compte débité doit être un compte bancaire de trésorerie actif (hors épargne bloquée).",
-    INVALID_REPAYMENT_ACCOUNT: "Compte de remboursement invalide ou non autorisé (coffre verrouillé ou archivé).",
+      "Le compte débité doit être un compte bancaire de trésorerie actif.",
+    INVALID_REPAYMENT_ACCOUNT: "Compte de remboursement invalide ou archivé.",
     LOAN_REPAYMENT_DEBIT_NOT_APPLICABLE: "Ce type de prêt ne correspond pas à une échéance à payer depuis un compte.",
   };
   const text = map[msg];

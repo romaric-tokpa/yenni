@@ -1,15 +1,14 @@
 "use client";
 
-import type { ReactNode } from "react";
 import type { AccountWithBalance } from "@/lib/types";
-import { formatCFA, accountHasActiveOutgoingLock } from "@/lib/constants";
+import { formatCFA } from "@/lib/constants";
 export interface AccountSelectProps {
   accounts: AccountWithBalance[];
   value: number;
   onChange: (id: number) => void;
   label?: string;
   required?: boolean;
-  /** Si true : masque coffre et plan d'épargne avec verrouillage actif (sorties bloquées). */
+  /** Conservé pour compatibilité ; sans effet (plus de comptes à sorties bloquées). */
   excludeVault?: boolean;
   filterType?: "debit" | "credit" | "all";
   id?: string;
@@ -33,14 +32,9 @@ export default function AccountSelect({
   debitAmount,
 }: AccountSelectProps) {
   const active = accounts.filter((a) => !a.is_archived);
-
-  const filtered = active.filter((a) => {
-    if (filterType === "all") return true;
-    if (excludeVault && accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)) {
-      return false;
-    }
-    return true;
-  });
+  void excludeVault;
+  void filterType;
+  const filtered = active;
 
   const selected = filtered.find((a) => a.id === value);
   const shortfall =
@@ -80,37 +74,19 @@ export default function AccountSelect({
       >
         <option value="">Choisir un compte…</option>
         {filtered.map((a) => {
-          const locked = accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on);
           const pos = a.balance >= 0;
           return (
             <option key={a.id} value={a.id}>
-              {locked ? "🔒 " : ""}
               {a.name} — {formatCFA(a.balance)} F{pos ? "" : " (négatif)"}
             </option>
           );
         })}
       </select>
-      {selected && lockedVaultLine(selected)}
       {shortfall != null && (
         <p className="text-[11px] text-red-400 flex items-center gap-1">
           ⚠️ Solde insuffisant ({formatCFA(selected!.balance)} F disponible, manque {formatCFA(shortfall)} F)
         </p>
       )}
     </div>
-  );
-}
-
-function lockedVaultLine(a: AccountWithBalance): ReactNode {
-  if (!accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on)) return null;
-  const d = a.vault_unlocks_on ?? "";
-  const [y, m, day] = d.split("-").map(Number);
-  const label =
-    y && m && day
-      ? `${String(day).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`
-      : d;
-  return (
-    <p className="text-[11px] text-slate-500 flex items-center gap-1">
-      🔒 Coffre verrouillé jusqu’au {label}
-    </p>
   );
 }

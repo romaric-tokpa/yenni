@@ -346,7 +346,7 @@ export default function Dashboard({ budget, user }: { budget: BudgetData; user?:
     {
       label: "Épargne Cumulée",
       value: formatCFA(totalSaved),
-      sub: `${config.savingsGoal > 0 ? ((savingsGoalProgressAmount / config.savingsGoal) * 100).toFixed(1) : 0}% objectif fonds d’urgence${vaultEmergencyBalance != null ? " (coffre)" : ""}${totalProjectSaved > 0 ? ` · Projets ${formatCFA(totalProjectSaved)}` : ""}`,
+      sub: `${config.savingsGoal > 0 ? ((savingsGoalProgressAmount / config.savingsGoal) * 100).toFixed(1) : 0}% objectif fonds d’urgence${vaultEmergencyBalance != null ? " (compte lié)" : ""}${totalProjectSaved > 0 ? ` · Projets ${formatCFA(totalProjectSaved)}` : ""}`,
       color: "text-amber-500",
       shadow: "",
       IconComp: Trophy,

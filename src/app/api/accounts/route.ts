@@ -4,8 +4,8 @@ import { getAccountsWithBalances, addAccount } from "@/lib/db";
 import { apiErrorResponse } from "@/lib/apiError";
 import { accountKindAllowsLogo } from "@/lib/accountLogoShared";
 import { resolveAccountLogoInput } from "@/lib/accountLogoParse";
-import { computeVaultUnlockDateFromNow } from "@/lib/constants";
 import { isValidIsoDate } from "@/lib/dashboardTreasuryPeriod";
+import { isAllowedAccountKind } from "@/lib/constants";
 
 export async function GET(req: NextRequest) {
   try {
@@ -38,6 +38,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Nom et type de compte requis" }, { status: 400 });
     }
     const kind = String(body.kind);
+    if (!isAllowedAccountKind(kind)) {
+      return NextResponse.json({ error: "Type de compte non pris en charge" }, { status: 400 });
+    }
     const logoParsed = await resolveAccountLogoInput(body.logo_url);
     if (!logoParsed.ok) {
       return NextResponse.json({ error: logoParsed.error }, { status: 400 });
@@ -49,26 +52,6 @@ export async function POST(req: NextRequest) {
         ? String(body.institution_name).trim()
         : "";
 
-    let vaultUnlocksOn: string | null = null;
-    if (kind === "vault") {
-      const monthsRaw =
-        body.vault_lock_months != null ? Number(body.vault_lock_months) : NaN;
-      if (!Number.isFinite(monthsRaw) || monthsRaw < 1) {
-        return NextResponse.json(
-          { error: "Indique une durée de blocage en mois (≥ 1) pour le coffre" },
-          { status: 400 },
-        );
-      }
-      vaultUnlocksOn = computeVaultUnlockDateFromNow(monthsRaw);
-    } else if (kind === "bank_blocked_savings") {
-      if (body.vault_lock_months != null && body.vault_lock_months !== "") {
-        const monthsRaw = Number(body.vault_lock_months);
-        if (Number.isFinite(monthsRaw) && monthsRaw >= 1) {
-          vaultUnlocksOn = computeVaultUnlockDateFromNow(monthsRaw);
-        }
-      }
-    }
-
     const acc = await addAccount(session.userId, {
       name: String(body.name).trim(),
       kind,
@@ -79,7 +62,6 @@ export async function POST(req: NextRequest) {
       color: body.color ? String(body.color) : "#6366f1",
       logo_url,
       opening_balance: body.opening_balance != null ? Math.round(Number(body.opening_balance)) : 0,
-      vault_unlocks_on: vaultUnlocksOn,
     });
     return NextResponse.json(acc, { status: 201 });
   } catch (err) {

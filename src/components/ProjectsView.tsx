@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { formatCFA, accountHasActiveOutgoingLock } from "@/lib/constants";
+import { formatCFA } from "@/lib/constants";
 import { Plus, X, Trash2, Pause, Play, CheckCircle, Target, Pencil, Check, Lightbulb, Receipt, History, ChevronDown, ChevronUp, ShoppingCart } from "lucide-react";
 import { Project, ProjectFund, ProjectPurchase, BudgetConfig, Category, AccountWithBalance } from "@/lib/types";
 import Icon from "./ui/Icon";
@@ -20,18 +20,13 @@ function accountsEligibleForProjectPocket(accounts: AccountWithBalance[]): Accou
   return accounts.filter((a) => !a.is_archived);
 }
 
-/** Comptes utilisables comme source d’un versement projet (pas coffre verrouillé, ≠ compte cible). */
+/** Comptes utilisables comme source d’un versement projet (≠ compte cible du projet). */
 function fundSourceAccountsForProject(
   project: Project,
   accounts: AccountWithBalance[],
 ): AccountWithBalance[] {
   const destId = project.account_id ?? -1;
-  return accounts.filter(
-    (a) =>
-      !a.is_archived &&
-      a.id !== destId &&
-      !accountHasActiveOutgoingLock(a.kind, a.vault_unlocks_on),
-  );
+  return accounts.filter((a) => !a.is_archived && a.id !== destId);
 }
 
 const PROJECT_COLORS = [
@@ -618,7 +613,7 @@ export default function ProjectsView({
                           onChange={(e) => setAddFundSourceId(e.target.value)}
                         >
                           {fundSourceAccountsForProject(p, accountsWithBalance).length === 0 ? (
-                            <option value="">Aucun compte disponible (coffres verrouillés exclus)</option>
+                            <option value="">Aucun compte disponible</option>
                           ) : (
                             fundSourceAccountsForProject(p, accountsWithBalance).map((a) => (
                               <option key={a.id} value={String(a.id)}>
@@ -627,9 +622,6 @@ export default function ProjectsView({
                             ))
                           )}
                         </select>
-                        <p className="text-[9px] text-neutral-600 mt-1">
-                          Les coffres bloqués ne peuvent pas servir de source.
-                        </p>
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => handleAddFunds(p)} className="btn-primary px-4 py-2 rounded-lg text-sm font-medium flex-1">
