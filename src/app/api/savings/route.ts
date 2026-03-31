@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/apiError";
 import { getSessionFromCookies } from "@/lib/auth";
 import {
-  getSavings,
+  getSavingsDetail,
   setSavingAndSyncEmergencyVault,
   getTotalSavingsCumulative,
   getSavingsInPeriod,
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     const year = parseInt(
       searchParams.get("year") || String(new Date().getFullYear())
     );
-    return NextResponse.json(await getSavings(year));
+    return NextResponse.json(await getSavingsDetail(year));
   } catch (err) {
     console.error("[API ERROR]", err);
     return NextResponse.json(apiErrorResponse(err), { status: 500 });
@@ -53,7 +53,25 @@ export async function PUT(req: NextRequest) {
     ) {
       return NextResponse.json({ error: "Données invalides" }, { status: 400 });
     }
-    await setSavingAndSyncEmergencyVault(session.userId, month, year, amount);
+    const fromRaw = body.from_account_id;
+    const toRaw = body.to_account_id;
+    const fromAccountId =
+      fromRaw === undefined || fromRaw === null || fromRaw === ""
+        ? undefined
+        : Number(fromRaw);
+    const toAccountId =
+      toRaw === undefined || toRaw === null || toRaw === "" ? undefined : Number(toRaw);
+
+    await setSavingAndSyncEmergencyVault(session.userId, month, year, amount, {
+      fromAccountId:
+        fromAccountId !== undefined && Number.isFinite(fromAccountId) && fromAccountId > 0
+          ? fromAccountId
+          : null,
+      toAccountId:
+        toAccountId !== undefined && Number.isFinite(toAccountId) && toAccountId > 0
+          ? toAccountId
+          : null,
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[API ERROR]", err);
@@ -81,6 +99,15 @@ export async function PUT(req: NextRequest) {
     }
     if (msg === "TRANSFER_SAME_ACCOUNT") {
       return NextResponse.json({ error: "Transfert impossible entre le même compte." }, { status: 400 });
+    }
+    if (msg === "INSUFFICIENT_BALANCE_FOR_SAVING") {
+      return NextResponse.json(
+        { error: "Solde insuffisant sur le compte à débiter pour ce mouvement d’épargne." },
+        { status: 400 },
+      );
+    }
+    if (msg === "ACCOUNT_NOT_FOUND") {
+      return NextResponse.json({ error: "Compte source ou destination introuvable." }, { status: 400 });
     }
     return NextResponse.json(apiErrorResponse(err), { status: 500 });
   }

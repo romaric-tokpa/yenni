@@ -19,6 +19,7 @@ import {
 import AnimatedProgressBar from "./ui/AnimatedProgressBar";
 import SmartGoalsSection from "./SmartGoalsSection";
 import { useConfetti } from "@/hooks/useConfetti";
+import { useBudgetContext } from "@/contexts/BudgetContext";
 import Link from "next/link";
 import { useMemo, useRef, useCallback, useEffect, useState } from "react";
 
@@ -39,7 +40,14 @@ interface BudgetData {
   resteAVivre: number;
   monthSaving: number;
   totalIncome: number;
-  updateSaving: (month: number, amount: number) => Promise<void>;
+  updateSaving: (
+    month: number,
+    amount: number,
+    transferFrom?: number | null,
+    transferTo?: number | null,
+  ) => Promise<{ ok: boolean; error?: string }>;
+  savingsFromAccountIds: (number | null)[];
+  savingsToAccountIds: (number | null)[];
   accountsWithBalance: AccountWithBalance[];
 }
 
@@ -59,8 +67,11 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
     monthSaving,
     totalIncome,
     updateSaving,
+    savingsFromAccountIds,
+    savingsToAccountIds,
     accountsWithBalance,
   } = budget;
+  const { showToast } = useBudgetContext();
   const fireConfetti = useConfetti();
   const [monthlySavingsEditing, setMonthlySavingsEditing] = useState(false);
   const monthlySavingsSectionRef = useRef<HTMLDivElement>(null);
@@ -80,15 +91,45 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
   const savingsRate =
     totalIncome > 0 ? ((monthSaving + totalProjectSaved) / totalIncome) * 100 : 0;
 
+  const accountOptions = useMemo(
+    () =>
+      accountsWithBalance.filter((a) => !a.is_archived).sort((a, b) => a.sort_order - b.sort_order),
+    [accountsWithBalance],
+  );
+
+  const defaultSavingsPair = useMemo(() => {
+    const active = accountOptions;
+    const from = active[0]?.id ?? 0;
+    let to = config.emergency_fund_account_id;
+    const nTo = to != null ? Number(to) : NaN;
+    if (!Number.isFinite(nTo) || !active.some((a) => a.id === nTo) || nTo === from) {
+      to = active.find((a) => a.id !== from)?.id ?? from;
+    } else {
+      to = nTo;
+    }
+    return { from, to: Number(to) };
+  }, [accountOptions, config.emergency_fund_account_id]);
+
   const savingDebounceRef = useRef<Record<number, ReturnType<typeof setTimeout> | undefined>>(
     {},
+  );
+
+  const accountLabel = useCallback(
+    (id: number) => accountOptions.find((a) => a.id === id)?.name ?? `#${id}`,
+    [accountOptions],
   );
 
   const commitSavingMonth = useCallback(
     async (month: number, amount: number) => {
       const prevTotal = totalSaved;
       const newTotal = prevTotal - (savings[month] ?? 0) + amount;
-      await updateSaving(month, amount);
+      const from = savingsFromAccountIds[month] ?? defaultSavingsPair.from;
+      const to = savingsToAccountIds[month] ?? defaultSavingsPair.to;
+      const res = await updateSaving(month, amount, from, to);
+      if (!res.ok) {
+        showToast(res.error ?? "Erreur", "error");
+        return;
+      }
       if (
         emergencyVaultBalance == null &&
         config.savingsGoal > 0 &&
@@ -101,11 +142,25 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
     [
       totalSaved,
       savings,
+      savingsFromAccountIds,
+      savingsToAccountIds,
+      defaultSavingsPair.from,
+      defaultSavingsPair.to,
       updateSaving,
+      showToast,
       emergencyVaultBalance,
       config.savingsGoal,
       fireConfetti,
     ],
+  );
+
+  const onSavingAccountsChange = useCallback(
+    async (month: number, fromId: number, toId: number) => {
+      const amt = savings[month] ?? 0;
+      const res = await updateSaving(month, amt, fromId, toId);
+      if (!res.ok) showToast(res.error ?? "Erreur", "error");
+    },
+    [savings, updateSaving, showToast],
   );
 
   const scheduleSavingInputUpdate = useCallback(
@@ -400,9 +455,14 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
         </div>
         <p className="text-[10px] lg:text-xs text-slate-500 mb-3">
           {monthlySavingsEditing
-            ? `Saisis le montant épargné pour chaque mois de ${selectedYear}, puis Terminer.`
-            : `Montants épargnés en ${selectedYear}. Clique sur Modifier pour les changer.`}
+            ? `Pour chaque mois : montant, compte débité (source) et compte crédité (destination du transfert). Puis Terminer.`
+            : `Montants épargnés en ${selectedYear}. Source et destination affichées pour rappel. Clique sur Modifier pour les changer.`}
         </p>
+        {monthlySavingsEditing && accountOptions.length < 2 && (
+          <p className="text-[10px] text-amber-400/90 mb-3">
+            Il faut au moins deux comptes actifs pour enregistrer une épargne avec transfert.
+          </p>
+        )}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2 lg:gap-3">
           {MONTHS_SHORT.map((m, i) => {
             const actual = savings[i];
@@ -410,6 +470,8 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
             const isCurrent =
               selectedMonth === i &&
               new Date().getFullYear() === selectedYear;
+            const fromId = savingsFromAccountIds[i] ?? defaultSavingsPair.from;
+            const toId = savingsToAccountIds[i] ?? defaultSavingsPair.to;
             return (
               <div
                 key={i}
@@ -442,22 +504,68 @@ export default function SavingsTracker({ budget }: { budget: BudgetData }) {
                   )}
                 </div>
                 {monthlySavingsEditing ? (
-                  <input
-                    type="number"
-                    className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 w-full min-w-0"
-                    placeholder="0"
-                    defaultValue={savings[i] || ""}
-                    key={`sav-${selectedYear}-${i}-edit`}
-                    onChange={(e) => scheduleSavingInputUpdate(i, e.target.value)}
-                    onBlur={(e) => flushSavingInputOnBlur(i, e.target.value)}
-                  />
+                  <>
+                    <input
+                      type="number"
+                      className="input-field font-mono text-xs lg:text-[13px] py-1.5 px-2 w-full min-w-0"
+                      placeholder="0"
+                      defaultValue={savings[i] || ""}
+                      key={`sav-${selectedYear}-${i}-edit`}
+                      onChange={(e) => scheduleSavingInputUpdate(i, e.target.value)}
+                      onBlur={(e) => flushSavingInputOnBlur(i, e.target.value)}
+                    />
+                    <div className="space-y-1 pt-0.5 border-t border-white/[0.06]">
+                      <label className="text-[9px] text-slate-500 block">Débit (source)</label>
+                      <select
+                        className="input-field text-[10px] py-1 px-1.5 w-full min-w-0"
+                        value={String(fromId)}
+                        onChange={(e) => {
+                          const fid = Number(e.target.value);
+                          void onSavingAccountsChange(i, fid, toId);
+                        }}
+                      >
+                        {accountOptions.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="text-[9px] text-slate-500 block">Crédit (épargne)</label>
+                      <select
+                        className="input-field text-[10px] py-1 px-1.5 w-full min-w-0"
+                        value={String(toId)}
+                        onChange={(e) => {
+                          const tid = Number(e.target.value);
+                          void onSavingAccountsChange(i, fromId, tid);
+                        }}
+                      >
+                        {accountOptions.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
                 ) : (
-                  <div
-                    className="font-mono text-xs lg:text-[13px] py-1.5 px-2 w-full min-w-0 rounded-lg border border-white/[0.06] bg-black/20 text-slate-200 tabular-nums"
-                    aria-label={`Épargne ${m} ${selectedYear}`}
-                  >
-                    {formatCFA(actual ?? 0)} <span className="text-[10px] text-slate-500 font-normal">F</span>
-                  </div>
+                  <>
+                    <div
+                      className="font-mono text-xs lg:text-[13px] py-1.5 px-2 w-full min-w-0 rounded-lg border border-white/[0.06] bg-black/20 text-slate-200 tabular-nums"
+                      aria-label={`Épargne ${m} ${selectedYear}`}
+                    >
+                      {formatCFA(actual ?? 0)}{" "}
+                      <span className="text-[10px] text-slate-500 font-normal">F</span>
+                    </div>
+                    <p
+                      className="text-[9px] text-slate-500 leading-tight line-clamp-2"
+                      title={`${accountLabel(fromId)} → ${accountLabel(toId)}`}
+                    >
+                      <span className="text-slate-600">Flux</span>{" "}
+                      <span className="text-slate-400">{accountLabel(fromId)}</span>
+                      <span className="text-slate-600"> → </span>
+                      <span className="text-slate-400">{accountLabel(toId)}</span>
+                    </p>
+                  </>
                 )}
               </div>
             );

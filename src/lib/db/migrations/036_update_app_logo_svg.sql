@@ -1,0 +1,3 @@
+-- Migration 036: nouveau logo (cibles concentriques + marqueur) en app_settings
+
+UPDATE app_settings SET value = '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 200 200"><circle cx="100" cy="100" r="86" fill="#10b981"/><circle cx="100" cy="100" r="64" fill="#059669"/><circle cx="100" cy="100" r="42" fill="#047857"/><circle cx="100" cy="100" r="22" fill="#fff"/><path d="M92 88 L100 80 L108 88" stroke="#047857" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/><line x1="100" y1="82" x2="100" y2="116" stroke="#047857" stroke-width="4" stroke-linecap="round"/></svg>' WHERE key = 'logo_svg';

@@ -38,6 +38,12 @@ export function useBudget() {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [fixedPayments, setFixedPayments] = useState<FixedChargePayment[]>([]);
   const [savings, setSavings] = useState<number[]>(Array(12).fill(0));
+  const [savingsFromAccountIds, setSavingsFromAccountIds] = useState<(number | null)[]>(() =>
+    Array(12).fill(null),
+  );
+  const [savingsToAccountIds, setSavingsToAccountIds] = useState<(number | null)[]>(() =>
+    Array(12).fill(null),
+  );
   const [totalSavedManualCumulative, setTotalSavedManualCumulative] = useState(0);
   const [savedInPeriod, setSavedInPeriod] = useState<number | null>(null);
   const [salaries, setSalaries] = useState<number[]>(Array(12).fill(0));
@@ -112,7 +118,25 @@ export function useBudget() {
         fetch(`/api/savings?year=${selectedYear}`),
         fetch(`/api/savings?cumulative=true`),
       ]);
-      if (rYear.ok) setSavings(await rYear.json());
+      if (rYear.ok) {
+        const data = await rYear.json();
+        if (data && Array.isArray(data.amounts)) {
+          setSavings(data.amounts);
+          const normRow = (arr: unknown): (number | null)[] => {
+            if (!Array.isArray(arr)) return Array(12).fill(null);
+            return Array.from({ length: 12 }, (_, i) => {
+              const x = arr[i];
+              return x != null && Number(x) > 0 ? Number(x) : null;
+            });
+          };
+          setSavingsFromAccountIds(normRow(data.fromAccountIds));
+          setSavingsToAccountIds(normRow(data.toAccountIds));
+        } else if (Array.isArray(data)) {
+          setSavings(data);
+          setSavingsFromAccountIds(Array(12).fill(null));
+          setSavingsToAccountIds(Array(12).fill(null));
+        }
+      }
       if (rCumul.ok) setTotalSavedManualCumulative(await rCumul.json());
     } catch { /* ignore */ }
   }, [selectedYear]);
@@ -744,7 +768,12 @@ export function useBudget() {
   );
 
   const updateSaving = useCallback(
-    async (month: number, amount: number) => {
+    async (
+      month: number,
+      amount: number,
+      transferFrom?: number | null,
+      transferTo?: number | null,
+    ): Promise<{ ok: boolean; error?: string }> => {
       let previous = 0;
       setSavings((prev) => {
         previous = prev[month] ?? 0;
@@ -752,10 +781,13 @@ export function useBudget() {
         ns[month] = amount;
         return ns;
       });
+      const body: Record<string, unknown> = { month, year: selectedYear, amount };
+      if (transferFrom != null && transferFrom > 0) body.from_account_id = transferFrom;
+      if (transferTo != null && transferTo > 0) body.to_account_id = transferTo;
       const r = await fetch("/api/savings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month, year: selectedYear, amount }),
+        body: JSON.stringify(body),
       });
       if (!r.ok) {
         setSavings((prev) => {
@@ -763,10 +795,12 @@ export function useBudget() {
           ns[month] = previous;
           return ns;
         });
-        return;
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        return { ok: false, error: j.error || "Enregistrement impossible" };
       }
       await Promise.all([fetchSavings(), fetchSavedInPeriod(), fetchAccounts()]);
       invalidateHistoryCache();
+      return { ok: true };
     },
     [selectedYear, fetchSavings, fetchSavedInPeriod, fetchAccounts]
   );
@@ -968,6 +1002,8 @@ export function useBudget() {
     loans,
     loanPayments,
     savings,
+    savingsFromAccountIds,
+    savingsToAccountIds,
     salaries,
     salaryAccountIds,
     projects,

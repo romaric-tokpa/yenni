@@ -32,7 +32,7 @@ function rowsToObjs<T>(rows: Row[], columns: string[]): T[] {
 
 // ── Migrations ──
 
-const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35] as const;
+const MIGRATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37] as const;
 
 async function runMigrations(): Promise<void> {
   const db = getDbClient();
@@ -147,7 +147,7 @@ async function ensureMigrations(): Promise<void> {
 
 // ── App settings (logo lié à Turso) ──
 
-const DEFAULT_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><circle cx="50" cy="50" r="45" fill="none" stroke="#008080" stroke-width="6"/><ellipse cx="58" cy="62" rx="18" ry="8" fill="#FFA500"/><ellipse cx="50" cy="52" rx="18" ry="8" fill="#FFA500"/><ellipse cx="42" cy="42" rx="18" ry="8" fill="#FFA500"/></svg>`;
+const DEFAULT_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 200 200"><circle cx="100" cy="100" r="86" fill="#10b981"/><circle cx="100" cy="100" r="64" fill="#059669"/><circle cx="100" cy="100" r="42" fill="#047857"/><circle cx="100" cy="100" r="22" fill="#fff"/><path d="M92 88 L100 80 L108 88" stroke="#047857" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/><line x1="100" y1="82" x2="100" y2="116" stroke="#047857" stroke-width="4" stroke-linecap="round"/></svg>`;
 
 export async function getLogoSvg(): Promise<string> {
   await ensureMigrations();
@@ -890,18 +890,40 @@ export async function saveConfig(config: BudgetConfig): Promise<void> {
 
 // ── Savings ──
 
-export async function getSavings(year: number): Promise<number[]> {
+export type SavingsYearDetail = {
+  amounts: number[];
+  fromAccountIds: (number | null)[];
+  toAccountIds: (number | null)[];
+};
+
+export async function getSavingsDetail(year: number): Promise<SavingsYearDetail> {
   await ensureMigrations();
   const rs = await getDbClient().execute({
-    sql: "SELECT month, amount FROM savings WHERE year = ? ORDER BY month",
+    sql: "SELECT month, amount, from_account_id, to_account_id FROM savings WHERE year = ? ORDER BY month",
     args: [year],
   });
-  const rows = rowsToObjs<MonthlySaving>(rs.rows as Row[], rs.columns);
-  const result = Array(12).fill(0);
+  const rows = rowsToObjs<{
+    month: number;
+    amount: number;
+    from_account_id?: number | null;
+    to_account_id?: number | null;
+  }>(rs.rows as Row[], rs.columns);
+  const amounts = Array(12).fill(0) as number[];
+  const fromAccountIds: (number | null)[] = Array(12).fill(null);
+  const toAccountIds: (number | null)[] = Array(12).fill(null);
   rows.forEach((r) => {
-    result[r.month] = r.amount;
+    amounts[r.month] = r.amount;
+    const f = r.from_account_id;
+    const t = r.to_account_id;
+    fromAccountIds[r.month] = f != null && Number(f) > 0 ? Number(f) : null;
+    toAccountIds[r.month] = t != null && Number(t) > 0 ? Number(t) : null;
   });
-  return result;
+  return { amounts, fromAccountIds, toAccountIds };
+}
+
+export async function getSavings(year: number): Promise<number[]> {
+  const d = await getSavingsDetail(year);
+  return d.amounts;
 }
 
 export async function getTotalSavingsCumulative(): Promise<number> {
@@ -925,14 +947,6 @@ export async function getSavingsInPeriod(startDate: string, endDate: string): Pr
   return Number((rs.rows[0] as Row)?.total ?? 0);
 }
 
-export async function setSaving(month: number, year: number, amount: number): Promise<void> {
-  await ensureMigrations();
-  await getDbClient().execute({
-    sql: "INSERT INTO savings (month, year, amount) VALUES (?, ?, ?) ON CONFLICT(month, year) DO UPDATE SET amount = excluded.amount",
-    args: [month, year, amount],
-  });
-}
-
 /** Montant déjà enregistré pour ce mois (0 si aucune ligne). `month` : 0–11 comme dans l’UI. */
 export async function getSavingRowAmount(month: number, year: number): Promise<number> {
   await ensureMigrations();
@@ -944,70 +958,111 @@ export async function getSavingRowAmount(month: number, year: number): Promise<n
   return Number((rs.rows[0] as Row).amount ?? 0);
 }
 
-/** Compte à débiter pour alimenter le coffre (≠ coffre, débit autorisé). Essaie d’abord le compte par défaut s’il n’est pas le coffre. */
-async function resolveOutgoingAccountForVaultTopUp(userId: number, vaultId: number): Promise<number> {
-  const defaultId = await getDefaultAccountId(userId);
-  const accounts = await getAccounts(userId);
-  const tryIds: number[] = [];
-  if (defaultId !== vaultId) tryIds.push(defaultId);
-  for (const a of accounts) {
-    if (!a.is_archived && a.id !== vaultId && !tryIds.includes(a.id)) tryIds.push(a.id);
-  }
-  for (const id of tryIds) {
-    try {
-      await assertAccountAllowsDebit(userId, id);
-      return id;
-    } catch {
-      continue;
-    }
-  }
-  throw new Error("NO_DEBIT_ACCOUNT_FOR_SAVINGS");
+async function getSavingRowAccounts(
+  month: number,
+  year: number,
+): Promise<{ from: number | null; to: number | null }> {
+  await ensureMigrations();
+  const rs = await getDbClient().execute({
+    sql: "SELECT from_account_id, to_account_id FROM savings WHERE month = ? AND year = ?",
+    args: [month, year],
+  });
+  if (rs.rows.length === 0) return { from: null, to: null };
+  const row = rs.rows[0] as Row;
+  const f = row.from_account_id;
+  const t = row.to_account_id;
+  return {
+    from: f != null && Number(f) > 0 ? Number(f) : null,
+    to: t != null && Number(t) > 0 ? Number(t) : null,
+  };
 }
 
-/** Compte qui reçoit l’argent sorti du coffre (≠ coffre). */
-async function resolveIncomingAccountForVaultWithdrawal(userId: number, vaultId: number): Promise<number> {
-  const defaultId = await getDefaultAccountId(userId);
-  if (defaultId !== vaultId) return defaultId;
-  const accounts = await getAccounts(userId);
-  const other = accounts.find((a) => !a.is_archived && a.id !== vaultId);
-  if (!other) throw new Error("NO_ACCOUNT_FOR_SAVINGS_RETURN");
-  return other.id;
+async function resolveSavingsTransferPair(
+  userId: number,
+  preferFrom: number | null | undefined,
+  preferTo: number | null | undefined,
+  existingFrom: number | null,
+  existingTo: number | null,
+): Promise<{ fromId: number; toId: number }> {
+  let fromId =
+    preferFrom != null && Number(preferFrom) > 0 ? Number(preferFrom) : existingFrom;
+  let toId = preferTo != null && Number(preferTo) > 0 ? Number(preferTo) : existingTo;
+
+  const config = await getConfig();
+  const defaultFrom = await getDefaultAccountId(userId);
+  let defaultTo: number | null = null;
+  const emergency = config.emergency_fund_account_id;
+  if (emergency != null && !Number.isNaN(Number(emergency)) && Number(emergency) > 0) {
+    const acc = await getAccountById(Number(emergency), userId);
+    if (acc && !acc.is_archived) defaultTo = Number(emergency);
+  }
+  if (defaultTo == null || defaultTo === defaultFrom) {
+    const accounts = await getAccounts(userId);
+    const active = accounts.filter((a) => !a.is_archived).sort((a, b) => a.sort_order - b.sort_order);
+    defaultTo = active.find((a) => a.id !== defaultFrom)?.id ?? null;
+  }
+
+  if (fromId == null || fromId <= 0) fromId = defaultFrom;
+  if (toId == null || toId <= 0) toId = defaultTo ?? defaultFrom;
+
+  if (fromId === toId) throw new Error("TRANSFER_SAME_ACCOUNT");
+
+  const fromAcc = await getAccountById(fromId, userId);
+  const toAcc = await getAccountById(toId, userId);
+  if (!fromAcc || !toAcc || fromAcc.is_archived || toAcc.is_archived) {
+    throw new Error("ACCOUNT_NOT_FOUND");
+  }
+
+  return { fromId, toId };
 }
 
 /**
- * Enregistre l’épargne mensuelle et, si un coffre fonds d’urgence est configuré (`emergency_fund_account_id`),
- * crée un transfert pour refléter le delta (compte par défaut ↔ coffre).
+ * Enregistre l’épargne mensuelle et crée un transfert pour le delta (compte débité → compte crédité),
+ * selon la paire choisie ou les valeurs déjà en base / défauts (compte par défaut + fonds d’urgence si défini).
  */
 export async function setSavingAndSyncEmergencyVault(
   userId: number,
   month: number,
   year: number,
   amount: number,
+  options?: { fromAccountId?: number | null; toAccountId?: number | null },
 ): Promise<void> {
   await ensureMigrations();
   const newAmount = Math.max(0, Math.round(Number(amount)));
   const prev = await getSavingRowAmount(month, year);
   const delta = newAmount - prev;
+  const existing = await getSavingRowAccounts(month, year);
 
-  const config = await getConfig();
-  const vaultIdRaw = config.emergency_fund_account_id;
-  const vaultId =
-    vaultIdRaw != null && !Number.isNaN(Number(vaultIdRaw)) ? Number(vaultIdRaw) : null;
+  const { fromId, toId } = await resolveSavingsTransferPair(
+    userId,
+    options?.fromAccountId,
+    options?.toAccountId,
+    existing.from,
+    existing.to,
+  );
 
   if (delta === 0) {
-    await setSaving(month, year, newAmount);
+    await getDbClient().execute({
+      sql: `INSERT INTO savings (month, year, amount, from_account_id, to_account_id)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(month, year) DO UPDATE SET
+              amount = excluded.amount,
+              from_account_id = excluded.from_account_id,
+              to_account_id = excluded.to_account_id`,
+      args: [month, year, newAmount, fromId, toId],
+    });
     return;
   }
 
-  if (vaultId == null) {
-    await setSaving(month, year, newAmount);
-    return;
-  }
-
-  const vault = await getAccountById(vaultId, userId);
-  if (!vault || vault.kind !== "bank_blocked_savings") {
-    await setSaving(month, year, newAmount);
-    return;
+  if (delta > 0) {
+    await assertAccountAllowsDebit(userId, fromId);
+    const chk = await checkSufficientBalance(userId, fromId, delta);
+    if (!chk.ok) throw new Error("INSUFFICIENT_BALANCE_FOR_SAVING");
+  } else {
+    const out = -delta;
+    await assertAccountAllowsDebit(userId, toId);
+    const chk = await checkSufficientBalance(userId, toId, out);
+    if (!chk.ok) throw new Error("INSUFFICIENT_BALANCE_FOR_SAVING");
   }
 
   const now = new Date();
@@ -1020,23 +1075,25 @@ export async function setSavingAndSyncEmergencyVault(
   const tx = await db.transaction("write");
   try {
     if (delta > 0) {
-      const fromId = await resolveOutgoingAccountForVaultTopUp(userId, vaultId);
       await tx.execute({
         sql: `INSERT INTO account_transfers (user_id, from_account_id, to_account_id, amount, fee, date, time, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [userId, fromId, vaultId, delta, 0, date, time, notes],
+        args: [userId, fromId, toId, delta, 0, date, time, notes],
       });
     } else {
       const out = -delta;
-      await assertAccountAllowsDebit(userId, vaultId);
-      const toId = await resolveIncomingAccountForVaultWithdrawal(userId, vaultId);
       await tx.execute({
         sql: `INSERT INTO account_transfers (user_id, from_account_id, to_account_id, amount, fee, date, time, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [userId, vaultId, toId, out, 0, date, time, `${notes} (ajustement)`],
+        args: [userId, toId, fromId, out, 0, date, time, `${notes} (ajustement)`],
       });
     }
     await tx.execute({
-      sql: "INSERT INTO savings (month, year, amount) VALUES (?, ?, ?) ON CONFLICT(month, year) DO UPDATE SET amount = excluded.amount",
-      args: [month, year, newAmount],
+      sql: `INSERT INTO savings (month, year, amount, from_account_id, to_account_id)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(month, year) DO UPDATE SET
+              amount = excluded.amount,
+              from_account_id = excluded.from_account_id,
+              to_account_id = excluded.to_account_id`,
+      args: [month, year, newAmount, fromId, toId],
     });
     await tx.commit();
   } finally {
@@ -2948,7 +3005,17 @@ export async function importBackup(backup: BackupData, userId: number): Promise<
       });
     }
     for (const s of data.savings || []) {
-      batch.push({ sql: "INSERT INTO savings (month, year, amount) VALUES (?, ?, ?)", args: [s.month, s.year, s.amount ?? 0] });
+      const row = s as MonthlySaving;
+      batch.push({
+        sql: `INSERT INTO savings (month, year, amount, from_account_id, to_account_id) VALUES (?, ?, ?, ?, ?)`,
+        args: [
+          row.month,
+          row.year,
+          row.amount ?? 0,
+          row.from_account_id != null && Number(row.from_account_id) > 0 ? Number(row.from_account_id) : null,
+          row.to_account_id != null && Number(row.to_account_id) > 0 ? Number(row.to_account_id) : null,
+        ],
+      });
     }
     for (const s of data.salaries || []) {
       batch.push({

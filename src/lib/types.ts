@@ -174,6 +174,8 @@ export interface MonthlySaving {
   month: number;
   year: number;
   amount: number;
+  from_account_id?: number | null;
+  to_account_id?: number | null;
 }
 
 export interface MonthlyStats {
