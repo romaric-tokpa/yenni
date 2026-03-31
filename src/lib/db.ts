@@ -1005,7 +1005,11 @@ async function resolveSavingsTransferPair(
   if (fromId == null || fromId <= 0) fromId = defaultFrom;
   if (toId == null || toId <= 0) toId = defaultTo ?? defaultFrom;
 
-  if (fromId === toId) throw new Error("TRANSFER_SAME_ACCOUNT");
+  if (fromId === toId) {
+    const acc = await getAccountById(fromId, userId);
+    if (!acc || acc.is_archived) throw new Error("ACCOUNT_NOT_FOUND");
+    return { fromId, toId };
+  }
 
   const fromAcc = await getAccountById(fromId, userId);
   const toAcc = await getAccountById(toId, userId);
@@ -1040,6 +1044,10 @@ export async function setSavingAndSyncEmergencyVault(
     existing.from,
     existing.to,
   );
+
+  if (delta !== 0 && fromId === toId) {
+    throw new Error("TRANSFER_SAME_ACCOUNT");
+  }
 
   if (delta === 0) {
     await getDbClient().execute({
